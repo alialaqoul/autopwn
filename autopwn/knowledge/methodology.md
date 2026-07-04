@@ -29,6 +29,15 @@ open port on the target.
 - An exit code / "bad arguments" => the tool needs more inputs; supply them or
   choose a different technique. Do not repeat the same failing call.
 
+## Assess the whole environment, then find the weak link
+A single hardened host (e.g. a DC that denies null enumeration) is rarely the way
+in. Enumerate the WHOLE authorized range first — the foothold is usually the
+weakest host: an exposed web application, a default/old service, or a member
+server with SMB signing disabled. Typical chain: web app or service => initial
+credential/foothold => then Active Directory attacks (Kerberoast, BloodHound,
+relay, secretsdump) using that credential. Note domains with MULTIPLE domain
+controllers (primary + secondary) — enumerate and attack all of them.
+
 ## Finishing
 When you have enumerated the exposed services and identified attack paths, set
 action to finish and summarise: host role, concrete findings actually observed,

@@ -58,6 +58,8 @@ DEFAULT_HARVEST: list[HarvestRule] = [
     HarvestRule("domain", r"domain[:=]\s*\(?([A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,})"),
     HarvestRule("hostname", r"\bname:\s*([A-Za-z0-9\-]{1,32})", scope="host"),
     HarvestRule("os", r"(Windows[^()\[\]\n]{0,40})", scope="host"),
+    # NetExec SMB banner: "(signing:False)" — signing not required = relay target.
+    HarvestRule("smb_signing", r"\(signing:(True|False)\)", scope="host"),
     # NetExec/CME success line: "[+] cyberlab.local\\admin:Passw0rd (Pwn3d!)"
     HarvestRule("username", r"\[\+\]\s*[^\\\s]+\\([^:\s]+):", scope="global"),
     HarvestRule("password", r"\[\+\]\s*[^\\\s]+\\[^:\s]+:([^\s(]+)", scope="global"),

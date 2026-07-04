@@ -60,6 +60,13 @@ def assess_host(host: str, entry: dict) -> dict:
     if 445 in pset:
         obs.append("SMB (445) exposed — check signing, null/guest sessions, and "
                    "share permissions (netexec_smb, smbclient, enum4linux).")
+        if entry.get("facts", {}).get("smb_signing") == "False":
+            obs.append("SMB signing is NOT required — NTLM/SMB relay attack "
+                       "surface: capture auth (Responder) and relay it to this "
+                       "host (ntlmrelayx) for code execution or hash dumping.")
+            paths.append("Poison name resolution (Responder) to capture NTLM "
+                         "auth, then relay it to this host's SMB (signing off) "
+                         "with ntlmrelayx → command execution or SAM dump.")
     if 389 in pset or 636 in pset:
         obs.append("LDAP exposed — test anonymous bind and enumerate the "
                    "directory (ldapsearch_anon, netexec_ldap).")

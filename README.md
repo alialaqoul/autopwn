@@ -99,7 +99,11 @@ Most are already present on Kali. To be sure:
 sudo apt update
 sudo apt install -y nmap masscan dnsrecon whatweb nikto ffuf gobuster \
   wpscan sqlmap netexec smbmap smbclient ldap-utils enum4linux-ng hydra \
-  exploitdb nuclei
+  exploitdb nuclei seclists subfinder httpx-toolkit feroxbuster testssl.sh \
+  arjun bloodhound.py
+
+# seclists provides the username/password wordlists that kerbrute / AS-REP /
+# hydra default to (/usr/share/seclists/...). Install it, or pass your own.
 
 # kerbrute is not in apt — install the prebuilt binary:
 sudo curl -fsSL -o /usr/local/bin/kerbrute \

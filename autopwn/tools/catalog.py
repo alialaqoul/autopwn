@@ -293,6 +293,17 @@ CATALOG: list[CommandSpec] = [
         install_hint="pipx install impacket.",
     ),
     CommandSpec(
+        name="bloodhound_python",
+        description="Collect Active Directory data (users, groups, ACLs, "
+                    "sessions, trusts) for BloodHound analysis. Needs valid "
+                    "domain credentials; the DC IP is the name server.",
+        binary="bloodhound-python", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH}, ["target", "domain", "username", "password"]),
+        flags={"domain": "-d", "username": "-u", "password": "-p", "target": "-ns"},
+        fixed=["-c", "all", "--zip"], timeout=1200,
+        aliases=["bloodhound.py"], install_hint="pipx install bloodhound.",
+    ),
+    CommandSpec(
         name="secretsdump",
         description="Dump password hashes (SAM/NTDS/LSA) from a host using valid "
                     "credentials. Highly intrusive — post-exploitation.",
@@ -464,7 +475,8 @@ _CATEGORIES = {
             "sqlmap"],
     "ad-smb": ["netexec_smb", "netexec_winrm", "netexec_ldap", "enum4linux",
                "smbmap", "smbclient_shares", "ldapsearch_anon",
-               "kerbrute_userenum", "asrep_roast", "kerberoast", "secretsdump"],
+               "kerbrute_userenum", "asrep_roast", "kerberoast",
+               "bloodhound_python", "secretsdump"],
     "credentials": ["hydra"],
     "exploit": ["searchsploit"],
 }

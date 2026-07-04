@@ -7,17 +7,46 @@ name (it appears in nmap LDAP banners and NetExec output, e.g. cyberlab.local).
 
 ## Step 1 — unauthenticated SMB/LDAP enumeration (no creds needed)
 - `netexec_smb` with just target: reveals OS, hostname, domain, SMB signing, and
-  whether null authentication is allowed. Look for "(domain:...)" and
-  "Null Auth: True".
+  whether null authentication is allowed. Look for "(domain:...)",
+  "(signing:True/False)" and "Null Auth: True".
 - `smbclient_shares` and `smbmap`: list shares reachable anonymously.
 - `enum4linux`: broad users/groups/shares/policy enumeration.
 - `ldapsearch_anon` with base_dn derived from the domain
-  (cyberlab.local => DC=cyberlab,DC=local): test anonymous LDAP bind and dump
-  directory objects. `netexec_ldap` does the same with more structure.
+  (cyberlab.local => DC=cyberlab,DC=local): test anonymous LDAP bind. `netexec_ldap`
+  does the same with more structure.
+
+## The reality of a hardened DC (tested)
+On a modern, hardened Domain Controller, unauthenticated enumeration is usually
+locked down even though a null session is "accepted":
+- `netexec_smb -u '' -p '' --users` / `--shares` => STATUS_ACCESS_DENIED (no data).
+- RID cycling `netexec_smb -u guest -p '' --rid-brute` => usually blocked/empty
+  (guest disabled).
+- Anonymous LDAP (`ldapsearch -x -s base`) reads only the ROOT DSE
+  (defaultNamingContext, dnsHostName) — object/user queries return
+  "Operations error" without a bind.
+So do NOT assume "Null Auth: True" yields users or shares. When it doesn't, the
+remaining no-credential paths are: Kerberos user enumeration, AS-REP roasting of
+KNOWN usernames, and abusing weak SMB signing on member servers. Realistically
+you often need an initial foothold/credential from elsewhere (a web app, a
+service, phishing) before AD attacks become productive.
 
 ## Step 2 — username enumeration (no creds needed)
 - `kerbrute_userenum` with the domain and a usernames wordlist validates which
-  accounts exist via Kerberos pre-auth, without causing lockouts.
+  accounts exist via Kerberos pre-auth, without causing lockouts. It is fast
+  (10k names in ~1s). A hardened lab may use non-default usernames, so common
+  lists (top-usernames, first-names) can return 0 valid — try larger/targeted
+  lists and names derived from context (org name, host naming scheme, service
+  accounts like svc_sql, backup, ldap). Needs seclists installed
+  (/usr/share/seclists/Usernames/...).
+
+## SMB signing and NTLM relay (member servers)
+Check `signing` on EVERY host from the netexec_smb banner. Domain Controllers
+require signing (signing:True). Member servers frequently have
+`signing:False` — these are NTLM/SMB relay targets: capture a victim's NTLM
+authentication (e.g. Responder poisoning LLMNR/NBT-NS/mDNS) and relay it with
+impacket ntlmrelayx to the signing-disabled host for command execution or a
+SAM/secrets dump. Enumerate relay targets with
+`netexec smb <range> --gen-relay-list targets.txt`.
 
 ## Step 3 — AS-REP roasting (no creds needed)
 - `asrep_roast` (impacket GetNPUsers) requests tickets for accounts that have
