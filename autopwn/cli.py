@@ -62,7 +62,7 @@ def _reporter(kind: str, text: str) -> None:
 def _confirm(name: str, args: dict) -> bool:
     console.print(f"[yellow]Active tool requested:[/] {name} {args}")
     try:
-        ans = console.input("Run it? [y/N] ").strip().lower()
+        ans = console.input(r"Run it? \[y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         return False  # no terminal to answer — skip rather than crash
     return ans in ("y", "yes")
@@ -486,7 +486,7 @@ def _clear_all(ns) -> None:
                   f"job file(s).[/]")
     if running:
         console.print(f"[dim]({len(running)} running job(s) will be kept.)[/]")
-    if _ask("proceed with full reset? [y/N] ").lower() not in ("y", "yes"):
+    if not _yn("Proceed with full reset?"):
         console.print("[dim]cancelled.[/]"); _pause(); return
 
     store.clear()
@@ -519,7 +519,7 @@ def _vars_menu(ns, cfg_path) -> None:
             if name and val:
                 cmd_vars(ns(set=[f"{name}={val}"], clear=False)); _pause()
         elif c == "3":
-            if _ask("clear all variables? [y/N] ").lower() in ("y", "yes"):
+            if _yn("Clear all variables?"):
                 cmd_vars(ns(set=None, clear=True)); _pause()
         elif c == "b":
             return
@@ -527,6 +527,19 @@ def _vars_menu(ns, cfg_path) -> None:
 
 def _ask(prompt: str) -> str:
     return console.input(prompt).strip()
+
+
+def _yn(question: str, default: bool = False) -> bool:
+    """Yes/no prompt with a consistent, always-visible hint.
+
+    The brackets are escaped so Rich renders them literally (it would otherwise
+    treat "[y/N]" as markup and drop it). Pressing Enter accepts the default.
+    """
+    hint = r"\[Y/n]" if default else r"\[y/N]"
+    ans = _ask(f"{question} {hint} ").lower()
+    if not ans:
+        return default
+    return ans in ("y", "yes")
 
 
 def _pause() -> None:
@@ -621,7 +634,7 @@ def _results_menu(ns, cfg_path) -> None:
             fmt = _ask("formats [html,docx,md]: ") or "html,docx,md"
             cmd_report(ns(transcript=None, format=fmt)); _pause()
         elif c == "4":
-            if _ask("really clear all results? [y/N] ").lower() in ("y", "yes"):
+            if _yn("Really clear all results?"):
                 cmd_services(ns(hosts=False, clear=True)); _pause()
         elif c == "b":
             return
@@ -673,7 +686,7 @@ def _agent_menu(ns, cfg_path) -> None:
     rc = cmd_agent(ns(target=target, objective=objective, background=True,
                       engagement=engagement, client=client, assessor=assessor,
                       authorized_by=authorized_by, report_format="html,docx,md"))
-    if rc == 0 and _ask("watch it now? [Y/n] ").lower() in ("", "y", "yes"):
+    if rc == 0 and _yn("Watch it now?", default=True):
         js = jobs.list_jobs(cfg.log_dir)
         if js:
             cmd_watch(ns(job_id=js[0]["id"]))
