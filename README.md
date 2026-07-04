@@ -41,17 +41,27 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   OpenAI-compatible endpoint. Local models run fully offline.
 - **Authorization gate** — every tool call is checked against your scope
   (allow/deny CIDRs, hostnames, and an expiry date) before any packet is sent.
-- **Full tool coverage** — 40 tools across recon, web, SMB/Active Directory
-  (incl. AD CS, BloodHound, Kerberos roasting), and credential testing, run
-  through a safe, auditable wrapper.
+- **Full tool coverage** — 47+ tools across recon, web, SMB/Active Directory
+  (incl. AD CS, BloodHound, Kerberos roasting, RID-cycling, pass-the-hash, and
+  RBCD → Domain Admin), and credential testing, run through a safe, auditable wrapper.
 - **Autopilot** — give it just a target and it fingerprints the host, then
   adapts its methodology to whatever it is (DC, IIS/nginx/Apache, database, mail,
   remote-access host, …).
-- **RAG-guided decisions** — a knowledge base of pentest playbooks is retrieved
-  each step and injected into the agent, so it follows real methodology (what
-  technique next, which tool, how to read the output) instead of guessing.
+- **Authenticated / assumed-breach engagements** — supply starting credentials
+  (`--username/--password/--domain/--hash`, or the menu prompt) and they flow into
+  every credentialed tool and the agent from step one.
+- **Deterministic attack-chain engine** — known multi-step paths (e.g. the full
+  no-creds → Domain Admin AD chain) run as one macro-action (`ad_kill_chain`) that
+  branches on real tool output and passes artifacts (user lists, hashes, loot)
+  between steps — reliable even with a weak local model.
+- **Adaptive, self-improving RAG** — a knowledge base of pentest playbooks is
+  retrieved each step, **conditioned on the real state** (open ports + discovered
+  facts) so retrieval tracks results; successful runs are distilled back into the
+  corpus automatically.
+- **Anti-flailing guardrails** — the agent never guesses passwords one-by-one, and
+  an "already tried" ledger pushes it toward new branches instead of loops.
 - **Grounded reporting** — deterministic role/exposure/attack-path analysis plus
-  an LLM summary, exported as PDF/DOCX/HTML/Markdown with engagement details.
+  an LLM summary, exported as HTML/DOCX/Markdown with engagement details.
 - **Extensible** — add a tool (a few lines of declarative config) or teach it new
   tradecraft (drop a `.md` playbook into `autopwn/knowledge/`).
 - **Full transcripts** — every agent session is logged to JSON for reporting.
@@ -63,9 +73,11 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
 ```
 CLI (autopwn)
   └── Agent  ── reason → act → observe loop
-        ├── LLM provider   (OpenAI / Ollama / AnythingLLM / any OpenAI-compatible)
-        ├── Tool registry  (auto-loads only tools installed on the host)
-        └── Authorization  (scope gate — enforced on every tool)
+        ├── LLM provider     (OpenAI / Ollama / AnythingLLM / any OpenAI-compatible)
+        ├── Tool registry    (auto-loads only tools installed on the host)
+        ├── Attack-chain engine (deterministic multi-step paths, e.g. ad_kill_chain)
+        ├── State-conditioned RAG (playbooks retrieved by real ports + facts)
+        └── Authorization    (scope gate — enforced on every tool)
 ```
 
 ---
@@ -323,10 +335,45 @@ python -m autopwn agent --objective "Enumerate SMB shares and find AS-REP roasta
 
 Every session writes a full JSON transcript to `logs/`.
 
+### Authenticated / assumed-breach engagements
+
+Real engagements often start **with** a credential. Supply it up front and it
+seeds the shared store, so every credentialed tool and the agent use it from the
+first step (no waiting to "discover" it):
+
+```bash
+# password auth
+autopwn agent --target 10.49.128.71 \
+  --username j.smith --password 'JSmith@IT2024' --domain ctf.local
+
+# pass-the-hash
+autopwn agent --target 10.49.128.71 \
+  --username Administrator --hash aad3b...:2dfe... --domain ctf.local
+```
+
+The interactive **AI-agent** menu also prompts for optional starting credentials
+(username / password / NTLM hash / domain) before launch. From there the agent
+runs authenticated enumeration (BloodHound, Kerberoast, LDAP, share/SYSVOL
+looting) and can chain all the way to Domain Admin — e.g. via the built-in RBCD
+path (`add_computer` → `rbcd` → `get_st` S4U2Proxy → DCSync).
+
+### Full AD kill chain in one action
+
+Against a domain controller you can run the whole no-credential → Domain Admin
+path as a single macro-action that branches on real output:
+
+```bash
+autopwn run --tool ad_kill_chain --set target=10.0.0.10 --set domain=corp.local
+```
+
+It performs: guest/null session → RID-cycle users → spray `username==password`
+→ Kerberoast → crack → loot readable shares → pass-the-hash → read the goal, and
+returns the credentials, admin access, findings, and any flags it captured.
+
 ### Reports & engagement details
 
 Every agent run captures **engagement metadata** and auto-exports a professional
-report in **PDF, DOCX, HTML, and Markdown** alongside its transcript in `logs/`:
+report in **HTML, DOCX, and Markdown** alongside its transcript in `logs/`:
 
 ```bash
 autopwn agent --target 10.0.0.10 \
@@ -338,7 +385,7 @@ In the interactive menu, the AI-agent flow prompts for these details (with
 sensible defaults) before launching. Re-export any saved session on demand:
 
 ```bash
-autopwn report --format pdf,docx,html,md      # latest session
+autopwn report --format html,docx,md          # latest session
 autopwn report --transcript logs/session-YYYYMMDD-HHMMSS.json --format docx
 ```
 
@@ -349,8 +396,9 @@ Command / Evidence – Output / Impact / Recommendation**), prioritised
 recommendations, and a command-log appendix. Findings are derived generically
 from the discovered data (SMB signing, null auth, WSUS-over-HTTP, exposed
 consoles/RDP, missing headers, …) — nothing is tied to a specific environment.
-PDF needs `xhtml2pdf`, DOCX needs `python-docx` (both in `requirements.txt`);
-Markdown and HTML work with no extra dependencies.
+DOCX needs `python-docx` (in `requirements.txt`); Markdown and HTML work with no
+extra dependencies. Loopback/localhost is filtered out and the executive summary
+is cleaned of tool noise so reports stay client-ready.
 
 ### Interactive menu
 
@@ -363,18 +411,20 @@ before you continue.
 python -m autopwn            # or: autopwn menu
 ```
 
-Top-level options:
+The menu is grouped into **Manual**, **AI-Assisted**, **Configuration**, and
+**Maintenance** categories, each colour-accented, with sequential numbering:
 
-| # | Option | What it does |
-|---|--------|--------------|
-| **1** | Scan | Sweep a host/range/CIDR (auto-adds it to scope) → service matrix |
-| **2** | Results | Service→hosts matrix, or a numbered host list you drill into for port/service detail |
-| **3** | AI agent | Autopilot on a target, or a custom objective — launched as a background job |
-| **4** | Jobs | List / watch (live output) / stop background agent runs |
-| **5** | Run a single tool | Pick a tool **by number** (grouped by category) → run against **all applicable hosts** or one target |
-| **6** | List tools | The full catalog with install status, grouped by category |
-| **7** | Scope | View and add/remove allow & deny entries; check a target |
-| **8** | Variables | Discovered domain / credentials / …, and which tools use each |
+| Group | # | Option | What it does |
+|---|---|--------|--------------|
+| 🛠 **Manual** | **1** | Scan | Sweep a host/range/CIDR (auto-adds it to scope) → service matrix |
+| | **2** | Results | Service→hosts matrix, or a numbered host list you drill into for port/service detail |
+| | **3** | Run a single tool | Pick a tool **by number** (grouped by category) → run against **all applicable hosts** or one target |
+| | **4** | List tools | The full catalog with install status, grouped by category |
+| 🤖 **AI-Assisted** | **5** | AI agent | Autopilot on a target, or a custom objective (with optional starting credentials) — launched as a background job |
+| | **6** | Jobs | List / watch (live output) / stop background agent runs |
+| ⚙ **Configuration** | **7** | Scope | View and add/remove allow & deny entries; check a target |
+| | **8** | Variables | Discovered domain / credentials / …, and which tools use each |
+| 🧹 **Maintenance** | **9** | Clear ALL | Reset results + variables and delete saved reports & finished jobs (running jobs kept) |
 
 **Pick a tool by number, then fire it at every applicable host** — and **drill
 into a single host** for its ports and services:
@@ -388,25 +438,32 @@ into a single host** for its ports and services:
 
 ## Tool catalog
 
-40 tools across five categories (run `autopwn tools` for the live list with
+47+ tools across five categories (run `autopwn tools` for the live list with
 install status):
 
 | Category | Tools |
 |---|---|
 | **recon** (9) | `nmap_scan`, `native_port_scan`, `masscan`, `dns_recon`, `subfinder`, `amass`, `theharvester`, `httpx`, `gau` |
 | **web** (13) | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `feroxbuster`, `katana`, `wpscan`, `sqlmap`, `arjun`, `testssl`, `subzy` |
-| **ad-smb** (13) | `netexec_smb`, `netexec_winrm`, `netexec_ldap`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `certipy_find`, `bloodhound_python`, `secretsdump` |
+| **ad-smb** (20) | `ad_kill_chain` (macro), `netexec_smb`, `netexec_rid_brute`, `netexec_spray`, `netexec_winrm`, `netexec_ldap`, `smb_get`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `add_computer`, `rbcd`, `get_st`, `certipy_find`, `bloodhound_python`, `secretsdump` |
 | **credentials** (4) | `hydra`, `john`, `hashcat`, `hashid` |
 | **exploit** (1) | `searchsploit` |
 
-These chain across steps automatically: `subfinder`/`amass` discover subdomains
-(recorded as hosts) → `httpx` finds the live web ones → web tools run against
-them; and the AD roasting tools produce hashes that `john`/`hashcat` crack.
-`autopwn tools` shows which are installed on your host.
+The AD tooling covers the modern kill chain: **RID-cycling** user enumeration
+(`netexec_rid_brute`), **batch password spraying** incl. `username==password`
+(`netexec_spray`, no lockout), **pass-the-hash** (`-H` on the NetExec tools),
+**share looting** (`smb_get`), **Kerberos roasting**, **AD CS** (`certipy_find`),
+and **RBCD → Domain Admin** (`add_computer` → `rbcd` → `get_st`).
 
-Credentialed tools (Kerberoast, secretsdump, netexec with `-u/-p`, hydra) require
-valid credentials and are skipped until you have them. `autopwn tools` shows the
-whole catalog grouped by category with install status:
+Tools chain across steps automatically: `subfinder`/`amass` discover subdomains
+(recorded as hosts) → `httpx` finds the live web ones → web tools run against
+them; the AD roasting tools produce hashes that `john`/`hashcat` crack; and
+`ad_kill_chain` sequences the whole AD path in one action.
+
+Credentialed tools (Kerberoast, secretsdump, netexec with `-u/-p`, RBCD, hydra)
+require valid credentials and are skipped until you have them (or supply them up
+front for an authenticated engagement). `autopwn tools` shows the whole catalog
+grouped by category with install status:
 
 <p align="center"><img src="assets/tools.png" alt="Tool catalog by category" width="70%"></p>
 
@@ -419,9 +476,13 @@ Autopwn works in terms of **canonical variables** — `target`, `url`, `domain`,
 CLI flags (e.g. `username → -u` for NetExec), so a value **learned once flows to
 every tool that uses it**:
 
+- **Seeding** — for an authenticated engagement, pass `--username/--password/
+  --domain/--hash` (or the menu prompt) to set them before the first step.
 - **Harvesting** — regex rules run over each tool's output and store what they
-  find. Out of the box: the AD `domain`, host `name`/`os`, and **credentials**
-  from a NetExec `[+] domain\user:pass` success line.
+  find. Out of the box: the AD `domain`, host `name`/`os`, **credentials** from a
+  NetExec `[+] domain\user:pass` success line, plus **branch signals** that drive
+  path selection (`smb_guest`, `pwned`/`Pwn3d!`, `has_users`, `kerberoastable`,
+  `asreproastable`).
 - **Auto-fill** — stored variables populate any tool's matching parameters
   automatically (and `base_dn` is derived from `domain`). So after NetExec
   reveals the domain and valid creds, `kerberoast`, `secretsdump`, `ldapsearch`,
@@ -466,32 +527,47 @@ on `PATH`, and the agent sees it immediately. No new classes required.
 
 The agent's decisions are grounded in a knowledge base of pentest playbooks in
 `autopwn/knowledge/` (methodology, Active Directory, web, credentials, and
-enterprise services like WSUS / AD CS / ePO). At each step, the relevant
-playbook for the current situation is retrieved (embedded via `nomic-embed-text`,
-cached to disk) and injected into the model — so it knows the technique sequence,
-the exact tool, and how to interpret the output, instead of guessing.
+enterprise services like WSUS / AD CS / ePO). At each step the relevant playbook
+is retrieved (embedded via `nomic-embed-text`, cached to disk) and injected into
+the model — so it knows the technique sequence, the exact tool, and how to read
+the output, instead of guessing.
+
+Retrieval is **state-conditioned**: playbook sections carry `<!-- when: port:88,
+fact:smb_guest -->` preconditions, and sections whose conditions match the *real*
+situation (open ports + discovered facts) are boosted — so retrieval tracks what
+the tools actually found, not just text similarity. Successful runs are also
+**distilled back into the corpus** automatically (`learned.md`), so Autopwn
+remembers new winning paths.
 
 **This is how you make it smarter — no model retraining.** Drop a new `.md` file
-into `autopwn/knowledge/` (write it in terms of Autopwn's tools: when to use it,
-which tool, how to read the result), and it's automatically chunked, embedded,
-and retrieved on the next run. After editing, delete
+into `autopwn/knowledge/` (write it in terms of Autopwn's tools, optionally with
+a `when:` precondition tag), and it's automatically chunked, embedded, and
+retrieved on the next run. After editing, delete
 `autopwn/knowledge/.emb_cache.json` to force a re-embed.
 
 Controlled by `agent.use_kb` / `agent.kb_top_k` in `config.yaml`.
 
 ## How the agent works
 
-Each step layers three retrieval mechanisms so the model acts like it knows the
-playbook:
+Each step layers several mechanisms so the model acts like it knows the playbook:
 1. **Applicability** — only tools that fit the target's real open ports/banners
    are offered (no `wpscan` on a DC's WinRM port).
 2. **Semantic tool retrieval** — of those, the top-k most relevant to the moment.
-3. **Knowledge-base RAG** — the matching methodology is injected into the prompt.
+3. **State-conditioned RAG** — the matching methodology is injected into the
+   prompt, boosted by the ports/facts discovered so far.
+4. **Tried-ledger** — an "already tried" summary is injected so the model avoids
+   repeating actions and explores a new branch instead of looping.
 
 Then: the model requests a tool call (forced JSON, with a text fallback); the
 tool is authorized against scope and run as a safe argument list (never a shell
-string); its real output is fed back and harvested for variables (domain, creds,
-SMB signing); and the loop repeats until it produces a grounded findings report.
+string); its real output is fed back and **harvested for structured signals**
+(domain, creds, SMB signing, `guest` enabled, `Pwn3d!` admin, Kerberoastable,
+user counts). Two guardrails keep it grounded: it **never guesses passwords
+one-by-one** (bulk testing is a deliberate `netexec_spray`), and repeated failed
+logins abort the guess loop. For well-trodden paths, the **attack-chain engine**
+(`chains.py` / `ad_kill_chain`) runs the sequence deterministically and passes
+files (user lists, hashes, loot) between steps — the thing scalar variables
+can't do. The loop repeats until it produces a grounded findings report.
 
 ---
 
