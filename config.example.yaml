@@ -20,12 +20,25 @@ llm:
 
   temperature: 0.2
   max_tokens: 2048
+  # Embedding model for semantic tool retrieval (see agent.tool_top_k).
+  #   ollama pull nomic-embed-text
+  embed_model: nomic-embed-text
 
 agent:
   # Hard cap on reason/act iterations per objective.
   max_steps: 25
-  # Require human confirmation before each tool that changes remote state.
+  # Require human confirmation before each tool that changes remote state
+  # (only applies on an interactive terminal; background runs never prompt).
   confirm_active_actions: true
+
+  # --- accuracy / speed tuning (recommended defaults for local models) ---
+  # Force the model to emit a single JSON action instead of prose/tutorials.
+  structured: true
+  # Auto-run recon as step 0 so the model reacts to real data, not a blank slate.
+  prime_recon: true
+  # Pass only the top-k most relevant tools per step (needs llm.embed_model).
+  # 0 = pass all tools. 6-8 improves selection and speeds inference.
+  tool_top_k: 8
 
 tools:
   # Absolute paths only needed if the binary is not on PATH.

@@ -165,6 +165,32 @@ export AUTOPWN_LLM_BASE_URL=...          # override base URL
 export AUTOPWN_LLM_MODEL=...             # override model
 ```
 
+#### Tuning the agent for local models (accuracy + speed)
+
+Small local models tend to narrate instead of acting and are slow on CPU. Three
+`agent:` options (on by default) make them reliable and faster:
+
+```yaml
+agent:
+  structured: true       # force ONE JSON action per turn — no prose/tutorials
+  prime_recon: true      # inject recon (from the store or a quick nmap) as step 0
+  tool_top_k: 8          # pass only the 8 most relevant tools per step (needs embed_model)
+llm:
+  embed_model: nomic-embed-text   # ollama pull nomic-embed-text
+```
+
+- **`structured`** uses the model's JSON mode so it *cannot* return a tutorial —
+  it must emit `{"action": "...", "parameters": {...}}` or `finish`.
+- **`prime_recon`** gives the model real ports/services up front; small models
+  react to data far better than they plan from nothing.
+- **`tool_top_k`** semantically retrieves the most relevant tools each step
+  (SMB query → SMB tools, web query → web tools), which improves selection and
+  shrinks the prompt for faster inference. Set `0` to pass all tools.
+
+For the best results overall, use a stronger tool-calling model — `qwen2.5:7b`
+locally, or point the `openai` provider at a cloud model while all tools still
+run locally.
+
 ### `scope.yaml` — what you're allowed to test
 
 ```yaml
