@@ -676,6 +676,14 @@ def _agent_menu(ns, cfg_path) -> None:
         default_eng = Scope.load(cfg.scope_file).engagement
     except Exception:
         default_eng = "Security assessment"
+    # Assumed-breach / authenticated engagement: optional starting credentials.
+    console.print("\n[bold]Starting credentials[/] "
+                  "[dim](assumed-breach; press Enter to skip for unauthenticated)[/]")
+    username = _ask("username (optional): ") or None
+    password = _ask("password (optional): ") or None if username else None
+    nt_hash = (_ask("NTLM hash (optional, for pass-the-hash): ") or None) if username and not password else None
+    ad_domain = _ask("domain (optional, e.g. corp.local): ") or None if username else None
+
     console.print("\n[bold]Engagement details[/] "
                   "[dim](press Enter to skip / accept default)[/]")
     engagement = _ask(f"engagement name [{default_eng}]: ") or default_eng
@@ -685,7 +693,9 @@ def _agent_menu(ns, cfg_path) -> None:
 
     rc = cmd_agent(ns(target=target, objective=objective, background=True,
                       engagement=engagement, client=client, assessor=assessor,
-                      authorized_by=authorized_by, report_format="html,docx,md"))
+                      authorized_by=authorized_by, report_format="html,docx,md",
+                      username=username, password=password, domain=ad_domain,
+                      nt_hash=nt_hash))
     if rc == 0 and _yn("Watch it now?", default=True):
         js = jobs.list_jobs(cfg.log_dir)
         if js:
@@ -896,8 +906,25 @@ def cmd_menu(args) -> int:
             console.print("\n[dim](back to main menu)[/]")
 
 
+def _seed_creds(args) -> None:
+    """Seed starting credentials into the results store for an authenticated /
+    assumed-breach engagement, so every credentialed tool and the agent use them
+    from the first step (they flow via the normal fact autofill)."""
+    from . import store
+    seeded = []
+    for attr, key in (("username", "username"), ("password", "password"),
+                      ("domain", "domain"), ("nt_hash", "hash")):
+        val = getattr(args, attr, None)
+        if val:
+            store.set_fact(key, val); seeded.append(key)
+    if seeded:
+        console.print("[green]Authenticated engagement:[/] seeded "
+                      + ", ".join(seeded) + " — credentialed tools enabled.")
+
+
 def cmd_agent(args) -> int:
     cfg, scope = _load(args)
+    _seed_creds(args)
 
     # Autopilot: with only --target and no --objective, generate a full
     # adaptive-assessment objective that fingerprints first, then branches.
@@ -1071,6 +1098,12 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--objective", help="Custom goal. Optional if --target given.")
     a.add_argument("--background", action="store_true",
                    help="Run detached; watch with 'autopwn watch <id>'.")
+    # Authenticated / assumed-breach engagement: seed starting credentials so
+    # every credentialed tool and the agent use them from step one.
+    a.add_argument("--username", help="Starting username (assumed-breach creds).")
+    a.add_argument("--password", help="Starting password.")
+    a.add_argument("--domain", help="AD domain (e.g. corp.local).")
+    a.add_argument("--hash", dest="nt_hash", help="Starting NTLM hash (pass-the-hash).")
     # Engagement metadata — printed and included in the exported report.
     a.add_argument("--engagement", help="Engagement / assessment name.")
     a.add_argument("--client", help="Client / organization.")

