@@ -378,13 +378,16 @@ into a single host** for its ports and services:
 
 ## Tool catalog
 
+39 tools across five categories (run `autopwn tools` for the live list with
+install status):
+
 | Category | Tools |
 |---|---|
-| **recon** | `nmap_scan`, `native_port_scan`, `masscan`, `dns_recon`, `subfinder`, `amass`, `theharvester`, `httpx` |
-| **web** | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `feroxbuster`, `katana`, `wpscan`, `sqlmap`, `arjun`, `testssl`, `subzy` |
-| **ad-smb** | `netexec_smb`, `netexec_winrm`, `netexec_ldap`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `secretsdump` |
-| **credentials** | `hydra`, `john`, `hashcat`, `hashid` |
-| **exploit** | `searchsploit` |
+| **recon** (9) | `nmap_scan`, `native_port_scan`, `masscan`, `dns_recon`, `subfinder`, `amass`, `theharvester`, `httpx`, `gau` |
+| **web** (13) | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `feroxbuster`, `katana`, `wpscan`, `sqlmap`, `arjun`, `testssl`, `subzy` |
+| **ad-smb** (12) | `netexec_smb`, `netexec_winrm`, `netexec_ldap`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `bloodhound_python`, `secretsdump` |
+| **credentials** (4) | `hydra`, `john`, `hashcat`, `hashid` |
+| **exploit** (1) | `searchsploit` |
 
 These chain across steps automatically: `subfinder`/`amass` discover subdomains
 (recorded as hosts) → `httpx` finds the live web ones → web tools run against
