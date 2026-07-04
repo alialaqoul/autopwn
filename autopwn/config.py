@@ -39,6 +39,10 @@ class AgentConfig(BaseModel):
     scope_tools: bool = True
     # Synthesize an executive summary from the evidence at the end of a run.
     synthesize: bool = True
+    # RAG: retrieve pentest-methodology guidance from the knowledge base each
+    # step and inject it into the decision (needs llm.embed_model).
+    use_kb: bool = True
+    kb_top_k: int = 3
 
 
 class ToolsConfig(BaseModel):

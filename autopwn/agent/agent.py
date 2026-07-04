@@ -103,22 +103,40 @@ class Agent:
             from ..retrieval import ToolRetriever
             retriever = ToolRetriever(self.provider, base_tools)
 
+        # RAG knowledge base: retrieve pentest methodology to guide decisions.
+        kb = None
+        if getattr(self.config.agent, "use_kb", True):
+            from ..kb import KnowledgeBase
+            kb = KnowledgeBase(self.provider)
+            if kb.load():
+                self.report("thought",
+                            f"knowledge base: {len(kb.chunks)} playbook chunks loaded")
+            else:
+                kb = None
+
         final = "Agent stopped without producing findings."
         stalls = 0
         for step in range(1, self.config.agent.max_steps + 1):
             self.report("step", f"— step {step}/{self.config.agent.max_steps}")
 
+            last = messages[-1].content if messages else ""
+            query = f"{objective}\n{last}"[:1500]
+
             # Choose which tools to expose this step.
-            if retriever:
-                last = messages[-1].content if messages else ""
-                active = retriever.top_k(f"{objective}\n{last}"[:1500], top_k)
-            else:
-                active = base_tools
+            active = retriever.top_k(query, top_k) if retriever else base_tools
             tool_specs = [t.spec() for t in active]
-            if self._structured:
-                messages[0] = Message(role="system",
-                                      content=STRUCTURED_SYSTEM.replace(
-                                          "{tools}", tool_signatures(active)))
+
+            # Retrieve methodology guidance for the current situation (RAG).
+            kb_text = ""
+            if kb:
+                guidance = kb.retrieve(query, self.config.agent.kb_top_k)
+                if guidance:
+                    kb_text = ("\n\nRELEVANT METHODOLOGY (retrieved knowledge — "
+                               "follow it):\n" + "\n\n".join(guidance))
+
+            base_sys = (STRUCTURED_SYSTEM.replace("{tools}", tool_signatures(active))
+                        if self._structured else SYSTEM_PROMPT)
+            messages[0] = Message(role="system", content=base_sys + kb_text)
 
             calls, finish_text, raw, native = self._decide(messages, tool_specs)
 
