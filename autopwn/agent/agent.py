@@ -312,26 +312,54 @@ class Agent:
         return None
 
     def _prime(self, ctx: ToolContext, target: str) -> str:
-        """Return an initial recon observation — from the store if we already
-        scanned this host, else a quick nmap scan."""
-        try:
-            from .. import store
-            entry = store.all_hosts().get(target)
-            if entry and any(p.get("state") == "open"
-                             for p in entry.get("ports", {}).values()):
-                lines = [(f"{p['port']}/{p.get('proto', 'tcp')} "
-                          f"{p.get('service', '')} {p.get('version', '')}").strip()
-                         for p in sorted(entry["ports"].values(),
-                                         key=lambda p: p["port"])
-                         if p.get("state") == "open"]
-                self.report("observation",
-                            f"prime: reusing known scan of {target}")
-                return "Open ports/services:\n" + "\n".join(lines)
-        except Exception:
-            pass
-        self.report("action", f"priming recon: nmap_scan({target})")
-        return self._execute(ctx, "nmap_scan",
-                             {"target": target, "profile": "quick"})
+        """Deterministic baseline: a broad nmap scan of the target, then a
+        NetExec SMB check on every discovered SMB host to capture signing /
+        null-auth / domain. This guarantees the store holds the facts that
+        findings are built from, regardless of what the model chooses to do."""
+        from .. import store
+
+        def _is_range(t):
+            return "/" in t or "-" in t
+
+        # Scan: reuse a prior scan of a single host, else run the broad default.
+        entry = store.all_hosts().get(target)
+        if entry and not _is_range(target) and any(
+                p.get("state") == "open" for p in entry.get("ports", {}).values()):
+            self.report("observation", f"prime: reusing known scan of {target}")
+        else:
+            self.report("action", f"priming recon: nmap_scan({target})")
+            self._execute(ctx, "nmap_scan", {"target": target, "profile": "default"})
+
+        # SMB enrichment: run netexec_smb on each host with 445 open that has no
+        # signing fact yet, so signing/null-auth/domain findings are reliable.
+        smb_hosts = [h for h, e in store.all_hosts().items()
+                     if any(p.get("port") == 445 and p.get("state") == "open"
+                            for p in e.get("ports", {}).values())
+                     and not e.get("facts", {}).get("smb_signing")]
+        if smb_hosts and self.registry.get("netexec_smb"):
+            self.report("action", f"priming: netexec_smb on {len(smb_hosts)} "
+                        "SMB host(s) to capture signing/null-auth/domain")
+            for h in smb_hosts[:32]:
+                try:
+                    self._execute(ctx, "netexec_smb", {"target": h})
+                except Exception:
+                    pass
+
+        # Build the observation from whatever is now in the store for the target.
+        e2 = store.all_hosts().get(target)
+        if e2 and any(p.get("state") == "open" for p in e2.get("ports", {}).values()):
+            lines = [(f"{p['port']}/{p.get('proto', 'tcp')} {p.get('service', '')} "
+                      f"{p.get('version', '')}").strip()
+                     for p in sorted(e2["ports"].values(), key=lambda p: p["port"])
+                     if p.get("state") == "open"]
+            return "Open ports/services on the target:\n" + "\n".join(lines)
+        # For a range, summarise discovered hosts.
+        hs = store.host_summary()
+        if hs:
+            return ("Discovered hosts:\n" + "\n".join(
+                f"{h['host']} {h['hostname']}: {', '.join(map(str, h['open_ports'][:12]))}"
+                for h in hs[:40]))
+        return ""
 
     def _execute(self, ctx: ToolContext, name: str, args: dict) -> str:
         tool = self.registry.get(name)

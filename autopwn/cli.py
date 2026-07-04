@@ -299,7 +299,8 @@ def cmd_sweep(args) -> int:
         return 1
     if not _ensure_in_scope(scope, args.target):
         return 2
-    ports = ["-p", args.ports] if args.ports else ["--top-ports", "1000"]
+    from .tools.nmap_tool import _DEFAULT_PORTS
+    ports = ["-p", args.ports or _DEFAULT_PORTS]
     excludes = scope.excludes_within(args.target)
     exclude_args = ["--exclude", ",".join(excludes)] if excludes else []
     if excludes:
