@@ -448,12 +448,12 @@ _MENU_GROUPS = [
     ("Manual", "🛠", [
         ("1", "Scan (sweep host/range) → service matrix"),
         ("2", "Results (service matrix / hosts / clear)"),
-        ("5", "Run a single tool"),
-        ("6", "List tools (by category)"),
+        ("3", "Run a single tool"),
+        ("4", "List tools (by category)"),
     ]),
     ("AI-Assisted", "🤖", [
-        ("3", "AI agent (autopilot / custom objective)"),
-        ("4", "Jobs (list / watch / stop)"),
+        ("5", "AI agent (autopilot / custom objective)"),
+        ("6", "Jobs (list / watch / stop)"),
     ]),
     ("Configuration", "⚙", [
         ("7", "Scope (view / add / remove allow & deny)"),
@@ -842,10 +842,10 @@ def cmd_menu(args) -> int:
     dispatch = {
         "1": lambda: _scan_menu(ns, cfg_path),
         "2": lambda: _results_menu(ns, cfg_path),
-        "3": lambda: _agent_menu(ns, cfg_path),
-        "4": lambda: _jobs_menu(ns, cfg_path),
-        "5": lambda: _run_menu(ns, cfg_path),
-        "6": lambda: (cmd_tools(ns()), _pause()),  # direct action → self-pause
+        "3": lambda: _run_menu(ns, cfg_path),
+        "4": lambda: (cmd_tools(ns()), _pause()),  # direct action → self-pause
+        "5": lambda: _agent_menu(ns, cfg_path),
+        "6": lambda: _jobs_menu(ns, cfg_path),
         "7": lambda: _scope_menu(ns, cfg_path),
         "8": lambda: _vars_menu(ns, cfg_path),
         "9": lambda: _clear_all(ns),
