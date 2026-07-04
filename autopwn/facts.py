@@ -33,17 +33,24 @@ CANONICAL: dict[str, str] = {
     "nthash":   "NTLM hash (pass-the-hash)",
     "userlist": "Path to a usernames wordlist",
     "passlist": "Path to a passwords wordlist",
+    "wordlist": "Path to a wordlist (fuzzing / cracking)",
+    "hashfile": "Path to a file of hashes to crack",
 }
 
 
 @dataclass
 class HarvestRule:
-    """Extract a canonical variable from tool output via regex."""
+    """Extract a canonical variable from tool output via regex.
+
+    With ``multi=True`` every match is captured (findall), not just the first —
+    used e.g. to record a list of discovered subdomains as hosts.
+    """
     var: str
     regex: str
     scope: str = "global"   # "global" | "host"
     group: int = 1
     flags: int = re.IGNORECASE
+    multi: bool = False
 
 
 # Applied to every tool's output regardless of which tool ran.
@@ -65,6 +72,22 @@ def apply_harvest(text: str, rules: list[HarvestRule], host: str | None = None) 
     if not text:
         return found
     for rule in rules:
+        if rule.multi:
+            # Record every match. For var=="host", each becomes a store host so
+            # discovered subdomains show up alongside scanned ones.
+            seen = []
+            for m in re.finditer(rule.regex, text, rule.flags):
+                val = (m.group(rule.group) or "").strip(".,) ").strip()
+                if not val or val in seen:
+                    continue
+                seen.append(val)
+                if rule.var == "host":
+                    store.record_ports(val, [])
+                else:
+                    store.set_fact(rule.var, val)
+            if seen:
+                found[rule.var] = f"{len(seen)} found"
+            continue
         m = re.search(rule.regex, text, rule.flags)
         if not m:
             continue

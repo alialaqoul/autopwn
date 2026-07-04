@@ -324,12 +324,18 @@ into a single host** for its ports and services:
 
 ## Tool catalog
 
-| Domain | Tools |
+| Category | Tools |
 |---|---|
-| **Network** | `nmap_scan`, `masscan`, `dns_recon`, `native_port_scan` |
-| **Web** | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `wpscan`, `sqlmap` |
-| **SMB / Active Directory** | `netexec_smb`, `netexec_ldap`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `secretsdump` |
-| **Credentials** | `hydra`, `searchsploit` |
+| **recon** | `nmap_scan`, `native_port_scan`, `masscan`, `dns_recon`, `subfinder`, `amass`, `theharvester`, `httpx` |
+| **web** | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `feroxbuster`, `katana`, `wpscan`, `sqlmap`, `arjun`, `testssl`, `subzy` |
+| **ad-smb** | `netexec_smb`, `netexec_winrm`, `netexec_ldap`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `secretsdump` |
+| **credentials** | `hydra`, `john`, `hashcat`, `hashid` |
+| **exploit** | `searchsploit` |
+
+These chain across steps automatically: `subfinder`/`amass` discover subdomains
+(recorded as hosts) → `httpx` finds the live web ones → web tools run against
+them; and the AD roasting tools produce hashes that `john`/`hashcat` crack.
+`autopwn tools` shows which are installed on your host.
 
 Credentialed tools (Kerberoast, secretsdump, netexec with `-u/-p`, hydra) require
 valid credentials and are skipped until you have them. `autopwn tools` shows the

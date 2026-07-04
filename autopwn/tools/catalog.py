@@ -10,13 +10,19 @@ Wordlist defaults point at paths present on a default Kali install.
 """
 from __future__ import annotations
 
+import re as _re
 from typing import Any
 
-from .command import (CommandSpec, host_from_target, host_from_url)
+from ..facts import HarvestRule
+from .command import (CommandSpec, host_from_domain, host_from_target,
+                      host_from_url)
 
 # Common wordlists shipped with Kali.
 WL_DIR = "/usr/share/wordlists/dirb/common.txt"
 WL_USERS = "/usr/share/seclists/Usernames/top-usernames-shortlist.txt"
+WL_ROCKYOU = "/usr/share/wordlists/rockyou.txt"
+# Matches a bare subdomain/host on its own line (subfinder/amass -silent output).
+_SUBDOMAIN_RE = r"^([a-z0-9][a-z0-9._\-]*\.[a-z]{2,})$"
 
 
 def _s(v: Any) -> str:
@@ -43,7 +49,9 @@ _AUTH = {
     "username": {"type": "string", "description": "Username (optional)."},
     "password": {"type": "string", "description": "Password (optional)."},
 }
-_DOMAIN = {"domain": {"type": "string", "description": "AD domain, e.g. cyberlab.local."}}
+_DOMAIN = {"domain": {"type": "string", "description": "Domain, e.g. cyberlab.local or example.com."}}
+_WORDLIST = {"wordlist": {"type": "string", "description": "Wordlist path (optional)."}}
+_HASHFILE = {"hashfile": {"type": "string", "description": "Path to a file of hashes to crack."}}
 
 
 def _params(props: dict, required: list[str]) -> dict:
@@ -321,6 +329,132 @@ CATALOG: list[CommandSpec] = [
         requires_host=False, active=False,
         install_hint="apt install exploitdb.",
     ),
+
+    # ==== Extended coverage (from the pentest cheat sheet) ================
+    # ---- Recon: subdomain / OSINT / crawl (feed the host + web pipeline) --
+    CommandSpec(
+        name="subfinder",
+        description="Passively enumerate subdomains of a domain. Discovered "
+                    "subdomains are recorded as hosts for follow-up scanning.",
+        binary="subfinder", category="recon", host_resolver=host_from_domain,
+        parameters=_params(_DOMAIN, ["domain"]),
+        flags={"domain": "-d"}, fixed=["-silent"],
+        harvest=[HarvestRule("host", _SUBDOMAIN_RE, multi=True,
+                             flags=_re.MULTILINE)],
+        install_hint="apt install subfinder.",
+    ),
+    CommandSpec(
+        name="amass",
+        description="Enumerate subdomains (passive) with OWASP Amass. Results "
+                    "are recorded as hosts.",
+        binary="amass", category="recon", host_resolver=host_from_domain,
+        parameters=_params(_DOMAIN, ["domain"]),
+        subcommand=["enum", "-passive"], flags={"domain": "-d"},
+        harvest=[HarvestRule("host", _SUBDOMAIN_RE, multi=True,
+                             flags=_re.MULTILINE)],
+        timeout=1200, install_hint="apt install amass.",
+    ),
+    CommandSpec(
+        name="theharvester",
+        description="OSINT gathering of subdomains and emails for a domain "
+                    "from public sources.",
+        binary="theHarvester", category="recon", host_resolver=host_from_domain,
+        parameters=_params(_DOMAIN, ["domain"]),
+        flags={"domain": "-d"}, fixed=["-b", "bing,duckduckgo,crtsh"],
+        aliases=["theharvester"], install_hint="apt install theharvester.",
+    ),
+    CommandSpec(
+        name="httpx",
+        description="Probe a URL/host for a live HTTP service: status, title, "
+                    "and detected technologies. Fast triage of web hosts.",
+        binary="httpx-toolkit", category="recon", host_resolver=host_from_url,
+        parameters=_params(_URL, ["url"]),
+        flags={"url": "-u"}, fixed=["-silent", "-title", "-tech-detect", "-status-code"],
+        aliases=["httpx"], install_hint="apt install httpx-toolkit.",
+    ),
+    CommandSpec(
+        name="katana",
+        description="Crawl a website and list discovered URLs/endpoints "
+                    "(feeds parameter and fuzzing tools).",
+        binary="katana", category="web", host_resolver=host_from_url,
+        parameters=_params(_URL, ["url"]),
+        flags={"url": "-u"}, fixed=["-silent", "-jc"],
+        timeout=900, install_hint="apt install katana.",
+    ),
+    CommandSpec(
+        name="gau",
+        description="Fetch known historical URLs for a domain from the Wayback "
+                    "Machine and other archives.",
+        binary="gau", category="recon", host_resolver=host_from_domain,
+        parameters=_params(_DOMAIN, ["domain"]),
+        positional=["domain"], fixed=["--threads", "5"],
+        install_hint="go install github.com/lc/gau/v2/cmd/gau@latest.",
+    ),
+
+    # ---- Web / vulnerability --------------------------------------------
+    CommandSpec(
+        name="feroxbuster",
+        description="Fast recursive content/directory discovery on a web app.",
+        binary="feroxbuster", category="web", host_resolver=host_from_url,
+        parameters=_params({**_URL, **_WORDLIST}, ["url"]),
+        flags={"url": "-u", "wordlist": "-w"}, fixed=["-q", "--no-state"],
+        timeout=1200, install_hint="apt install feroxbuster.",
+    ),
+    CommandSpec(
+        name="arjun",
+        description="Discover hidden HTTP request parameters on a URL "
+                    "(feeds SQLi/XSS testing).",
+        binary="arjun", category="web", host_resolver=host_from_url,
+        parameters=_params(_URL, ["url"]),
+        flags={"url": "-u"}, install_hint="pipx install arjun.",
+    ),
+    CommandSpec(
+        name="testssl",
+        description="Assess a host's SSL/TLS configuration and known TLS "
+                    "vulnerabilities (Heartbleed, weak ciphers, etc.).",
+        binary="testssl", category="web", host_resolver=host_from_url,
+        parameters=_params(_URL, ["url"]),
+        fixed=["--quiet", "--color", "0"], positional=["url"],
+        aliases=["testssl.sh"], timeout=1200, install_hint="apt install testssl.sh.",
+    ),
+    CommandSpec(
+        name="subzy",
+        description="Check a URL/subdomain for subdomain-takeover conditions.",
+        binary="subzy", category="web", host_resolver=host_from_url,
+        parameters=_params(_URL, ["url"]),
+        subcommand=["run"], flags={"url": "--target"},
+        install_hint="go install github.com/PentestPad/subzy@latest.",
+    ),
+
+    # ---- Credentials: hash cracking (closes the AD roasting loop) --------
+    CommandSpec(
+        name="john",
+        description="Crack a file of hashes with John the Ripper using a "
+                    "wordlist (auto-detects many formats, incl. Kerberos).",
+        binary="john", category="credentials", requires_host=False,
+        parameters=_params({**_HASHFILE, **_WORDLIST}, ["hashfile"]),
+        positional=["hashfile"],
+        flags={"wordlist": "--wordlist"},
+        install_hint="apt install john.",
+    ),
+    CommandSpec(
+        name="hashcat",
+        description="GPU/CPU hash cracking. Provide the hashcat mode (-m), the "
+                    "hash file, and a wordlist.",
+        binary="hashcat", category="credentials", requires_host=False,
+        parameters=_params({**_HASHFILE, **_WORDLIST,
+            "mode": {"type": "string", "description": "hashcat -m mode, e.g. 13100 (TGS), 18200 (AS-REP), 1000 (NTLM)."}},
+            ["hashfile", "mode"]),
+        flags={"mode": "-m"}, positional=["hashfile", "wordlist"],
+        fixed=["--quiet"], install_hint="apt install hashcat.",
+    ),
+    CommandSpec(
+        name="hashid",
+        description="Identify the likely type/algorithm of hashes in a file.",
+        binary="hashid", category="credentials", requires_host=False,
+        parameters=_params(_HASHFILE, ["hashfile"]),
+        positional=["hashfile"], active=False, install_hint="apt install hashid.",
+    ),
 ]
 
 # Classify each catalogued tool into a category (used for grouped listings).
@@ -336,7 +470,9 @@ _CATEGORIES = {
 }
 _NAME_TO_CATEGORY = {n: c for c, names in _CATEGORIES.items() for n in names}
 for _spec in CATALOG:
-    _spec.category = _NAME_TO_CATEGORY.get(_spec.name, "misc")
+    # Respect a category set explicitly on the spec; otherwise use the map.
+    if _spec.category == "misc":
+        _spec.category = _NAME_TO_CATEGORY.get(_spec.name, "misc")
 
 # Display order for grouped output.
 CATEGORY_ORDER = ["recon", "web", "ad-smb", "credentials", "exploit", "misc"]

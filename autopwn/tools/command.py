@@ -41,6 +41,11 @@ def host_from_url(kwargs: dict) -> Optional[str]:
         return None
 
 
+def host_from_domain(kwargs: dict) -> Optional[str]:
+    """For domain-scoped tools: authorize on the domain (or target)."""
+    return kwargs.get("domain") or kwargs.get("target")
+
+
 @dataclass
 class CommandSpec:
     name: str

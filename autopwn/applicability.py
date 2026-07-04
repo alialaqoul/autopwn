@@ -41,6 +41,13 @@ TOOL_SERVICES: dict[str, dict] = {
     "sqlmap":   {"web": True, "ports": [80, 443, 8080, 8443, 8000, 8081], "services": ["http"]},
     "ffuf":     {"web": True, "ports": [80, 443, 8080, 8443, 8000, 8081], "services": ["http"],
                  "url_suffix": "FUZZ"},
+    # Extended web tools (cheat-sheet additions) — same web surface.
+    "httpx":       {"web": True, "ports": [80, 443, 8080, 8443, 8000, 8081, 5985], "services": ["http"]},
+    "katana":      {"web": True, "ports": [80, 443, 8080, 8443, 8000, 8081], "services": ["http"]},
+    "feroxbuster": {"web": True, "ports": [80, 443, 8080, 8443, 8000, 8081], "services": ["http"]},
+    "arjun":       {"web": True, "ports": [80, 443, 8080, 8443, 8000, 8081], "services": ["http"]},
+    "testssl":     {"web": True, "ports": [443, 8443, 993, 995, 465], "services": ["ssl", "https"]},
+    "subzy":       {"web": True, "ports": [80, 443, 8080, 8443], "services": ["http"]},
 }
 
 
