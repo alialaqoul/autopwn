@@ -21,6 +21,45 @@ def autopilot_objective(target: str) -> str:
     )
 
 
+def tool_signatures(tools) -> str:
+    """Compact `name(param*, param) — description` lines for the prompt."""
+    lines = []
+    for t in tools:
+        props = t.parameters.get("properties", {})
+        req = set(t.parameters.get("required", []))
+        params = ", ".join((p + "*") if p in req else p for p in props)
+        desc = (t.description or "").split(".")[0][:90]
+        lines.append(f"- {t.name}({params}) — {desc}")
+    return "\n".join(lines)
+
+
+# Structured (forced-JSON) mode: the model MUST return one JSON action object.
+STRUCTURED_SYSTEM = """\
+You are Autopwn, an autonomous AI penetration-testing operator working ONLY on \
+authorized, in-scope targets. You act by choosing ONE tool per turn.
+
+Respond with a SINGLE JSON object and nothing else — no prose, no code, no \
+markdown. Shape:
+{"reasoning": "<one short sentence>", "action": "<tool name or 'finish'>", \
+"parameters": {<arguments for that tool>}, "findings": "<report, only when action is 'finish'>"}
+
+Rules:
+- Choose exactly ONE action per turn from the tool list. Use exact tool and \
+parameter names; pass numbers/lists as JSON.
+- Methodology: recon first (discover ports/services), then enumerate each \
+service with the matching tool, then analyse. React to the ACTUAL tool output \
+you are given — do not assume.
+- Credentialed tools need real credentials; skip them until you have some.
+- Do not repeat an action that already failed with the same parameters.
+- When the objective is met or nothing productive remains, set action to \
+"finish" and put a concise findings report (concrete results + likely attack \
+paths) in "findings".
+
+Available tools (a * marks a required parameter):
+{tools}
+"""
+
+
 SYSTEM_PROMPT = """\
 You are an autonomous AI penetration-testing operator. You test the security of \
 systems that are IN SCOPE and authorized, by planning and invoking the tools \

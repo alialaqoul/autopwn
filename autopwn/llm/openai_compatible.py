@@ -19,13 +19,15 @@ from .base import Completion, LLMProvider, Message, ToolCall
 class OpenAICompatibleProvider(LLMProvider):
     def __init__(self, model: str, base_url: str, api_key: Optional[str],
                  temperature: float = 0.2, max_tokens: int = 2048,
-                 name: str = "openai_compatible", timeout: float = 600.0):
+                 name: str = "openai_compatible", timeout: float = 600.0,
+                 embed_model: Optional[str] = None):
         self.name = name
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.embed_model = embed_model
         # Short connect timeout (fail fast if the server is down) but a long
         # read timeout, since CPU-only local inference can take minutes.
         self._client = httpx.Client(
@@ -33,7 +35,8 @@ class OpenAICompatibleProvider(LLMProvider):
         )
 
     def chat(self, messages: list[Message],
-             tools: Optional[list[dict]] = None) -> Completion:
+             tools: Optional[list[dict]] = None,
+             response_format: Optional[dict] = None) -> Completion:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -47,6 +50,10 @@ class OpenAICompatibleProvider(LLMProvider):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if response_format:
+            # Force valid JSON output (Ollama/OpenAI "JSON mode") so weak models
+            # can't emit prose/tutorials instead of an action.
+            payload["response_format"] = response_format
 
         try:
             resp = self._client.post(
@@ -81,3 +88,16 @@ class OpenAICompatibleProvider(LLMProvider):
             )
         return Completion(content=choice.get("content") or "",
                           tool_calls=tool_calls)
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Return embedding vectors for texts (OpenAI-compatible /embeddings)."""
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        resp = self._client.post(
+            f"{self.base_url}/embeddings",
+            headers=headers,
+            json={"model": self.embed_model or self.model, "input": texts},
+        )
+        resp.raise_for_status()
+        return [d["embedding"] for d in resp.json()["data"]]

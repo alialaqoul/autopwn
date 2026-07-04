@@ -17,6 +17,9 @@ class LLMConfig(BaseModel):
     api_key: Optional[str] = None
     temperature: float = 0.2
     max_tokens: int = 2048
+    # Embedding model for semantic tool retrieval (Ollama name). Pull it with
+    # `ollama pull nomic-embed-text`.
+    embed_model: str = "nomic-embed-text"
     # Read timeout (seconds) for a single completion. CPU-only local models can
     # take minutes per step, so this defaults high.
     request_timeout: float = 600.0
@@ -25,6 +28,13 @@ class LLMConfig(BaseModel):
 class AgentConfig(BaseModel):
     max_steps: int = 25
     confirm_active_actions: bool = True
+    # Force the model to emit a JSON action (not prose). Best for local models.
+    structured: bool = True
+    # Auto-run recon as step 0 so the model reacts to real data, not a blank slate.
+    prime_recon: bool = True
+    # Semantic tool retrieval: pass only the top-k most relevant tools per step
+    # (0 = pass all tools). Needs an embedding model (see llm.embed_model).
+    tool_top_k: int = 0
 
 
 class ToolsConfig(BaseModel):

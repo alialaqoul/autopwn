@@ -829,7 +829,7 @@ def cmd_agent(args) -> int:
     console.print(Panel(f"[bold]{objective}[/]\n\n{scope.summary()}",
                         title="Autopwn agent", border_style="cyan"))
     try:
-        final = agent.run(objective)
+        final = agent.run(objective, seed_target=args.target)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/]")
         final = "(interrupted)"

@@ -32,4 +32,5 @@ def build_provider(cfg: LLMConfig) -> LLMProvider:
         max_tokens=cfg.max_tokens,
         name=provider,
         timeout=cfg.request_timeout,
+        embed_model=cfg.embed_model,
     )

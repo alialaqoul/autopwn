@@ -56,6 +56,7 @@ class LLMProvider(Protocol):
         self,
         messages: list[Message],
         tools: Optional[list[dict]] = None,
+        response_format: Optional[dict] = None,
     ) -> Completion:
         ...
 
