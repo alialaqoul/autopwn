@@ -367,23 +367,30 @@ def cmd_vars(args) -> int:
     return 0
 
 
-def cmd_jobs(args) -> int:
-    cfg, _ = _load(args)
+def _render_jobs(js: list) -> None:
+    """Print the jobs as a numbered table."""
     from rich.table import Table
-    js = jobs.list_jobs(cfg.log_dir)
-    if not js:
-        console.print("[yellow]No jobs.[/]"); return 0
     table = Table(title="Background jobs")
+    table.add_column("#", justify="right")
     for c in ("id", "label", "pid", "status"):
         table.add_column(c)
-    for j in js:
+    for i, j in enumerate(js, 1):
         status = j.get("status", "?")
         color = {"running": "green", "finished": "dim",
                  "stopped": "red"}.get(status, "")
-        table.add_row(j["id"], j.get("label", ""), str(j.get("pid", "")),
+        table.add_row(str(i), j["id"], j.get("label", ""), str(j.get("pid", "")),
                       f"[{color}]{status}[/]" if color else status)
     console.print(table)
-    console.print("[dim]Watch a job: autopwn watch <id>   Stop: autopwn stop <id>[/]")
+
+
+def cmd_jobs(args) -> int:
+    cfg, _ = _load(args)
+    js = jobs.list_jobs(cfg.log_dir)
+    if not js:
+        console.print("[yellow]No jobs.[/]"); return 0
+    _render_jobs(js)
+    console.print("[dim]In the menu, pick a job by its number. From the CLI: "
+                  "autopwn watch <id> / autopwn stop <id>.[/]")
     return 0
 
 
@@ -578,20 +585,28 @@ def _agent_menu(ns, cfg_path) -> None:
     _pause()
 
 
-def _jobs_menu(ns) -> None:
+def _jobs_menu(ns, cfg_path) -> None:
+    cfg = Config.load(cfg_path)
     while True:
+        js = jobs.list_jobs(cfg.log_dir)
+
+        def render():
+            if js:
+                _render_jobs(js)
+            else:
+                console.print("[yellow]No background jobs yet.[/]")
+
         c = _submenu("Jobs", [
-            ("w", "Watch a job"), ("s", "Stop a job"),
-            ("r", "Refresh"), ("b", "Back")],
-            render=lambda: cmd_jobs(ns()))
-        if c == "w":
-            jid = _ask("job id: ")
-            if jid:
-                cmd_watch(ns(job_id=jid)); _pause()
-        elif c == "s":
-            jid = _ask("job id: ")
-            if jid:
-                cmd_stop(ns(job_id=jid)); _pause()
+            ("w", "Watch a job (by number)"), ("s", "Stop a job (by number)"),
+            ("r", "Refresh"), ("b", "Back")], render=render)
+        if c in ("w", "s"):
+            if not js:
+                continue
+            sel = _ask("job number: ")
+            if not sel.isdigit() or not (1 <= int(sel) <= len(js)):
+                continue
+            jid = js[int(sel) - 1]["id"]
+            (cmd_watch if c == "w" else cmd_stop)(ns(job_id=jid)); _pause()
         elif c == "b":
             return
 
@@ -733,7 +748,7 @@ def cmd_menu(args) -> int:
         "1": lambda: _scan_menu(ns, cfg_path),
         "2": lambda: _results_menu(ns, cfg_path),
         "3": lambda: _agent_menu(ns, cfg_path),
-        "4": lambda: _jobs_menu(ns),
+        "4": lambda: _jobs_menu(ns, cfg_path),
         "5": lambda: _run_menu(ns, cfg_path),
         "6": lambda: (cmd_tools(ns()), _pause()),  # direct action → self-pause
         "7": lambda: _scope_menu(ns, cfg_path),
