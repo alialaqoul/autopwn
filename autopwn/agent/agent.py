@@ -25,6 +25,19 @@ Reporter = Callable[[str, str], None]  # (event_type, text)
 
 
 class Agent:
+    #: how many consecutive narrate-instead-of-act turns to tolerate
+    MAX_STALLS = 3
+    #: corrective sent when the model writes prose instead of calling a tool
+    NUDGE = (
+        "You did NOT call a tool. Do not explain, plan, summarize, or write "
+        "code. Respond with EXACTLY ONE tool call as a single JSON object and "
+        "nothing else, for example:\n"
+        '{"name": "nmap_scan", "parameters": {"target": "TARGET"}}\n'
+        "Choose the next concrete action toward the objective and emit only "
+        "that JSON now. When you are truly finished, reply with a line starting "
+        "'FINDINGS:' instead."
+    )
+
     def __init__(self, config: Config, provider: LLMProvider,
                  registry: ToolRegistry, scope: Scope,
                  reporter: Optional[Reporter] = None):
@@ -58,6 +71,7 @@ class Agent:
         tool_specs = self.registry.specs()
 
         final = "Agent stopped without producing findings."
+        stalls = 0  # consecutive turns where the model narrated instead of acting
         for step in range(1, self.config.agent.max_steps + 1):
             self.report("step", f"— step {step}/{self.config.agent.max_steps}")
             completion = self.provider.chat(messages, tools=tool_specs)
@@ -73,11 +87,27 @@ class Agent:
                 calls = parse_tool_calls(completion.content,
                                          {t.name for t in self.registry.all()})
 
-            # No tool call at all => the model is answering / done.
+            content = (completion.content or "").strip()
             if not calls:
-                final = completion.content or final
-                self._log("final", {"content": final})
-                break
+                # An explicit FINDINGS report is a real finish.
+                if content.upper().startswith("FINDINGS:"):
+                    final = content
+                    self._log("final", {"content": final})
+                    break
+                # Otherwise the model narrated / wrote a tutorial instead of
+                # acting. Do NOT accept prose as the answer — nudge and retry.
+                stalls += 1
+                if stalls > self.MAX_STALLS:
+                    self.report("warn", "Model kept narrating; giving up.")
+                    final = content or final
+                    self._log("final", {"content": final})
+                    break
+                self.report("warn", "No tool call — nudging the model to act.")
+                self._log("stall", {"content": content[:400]})
+                messages.append(Message(role="assistant", content=content))
+                messages.append(Message(role="user", content=self.NUDGE))
+                continue
+            stalls = 0  # a real action resets the stall counter
 
             # Record the assistant turn. Only attach structured tool_calls when
             # the model actually produced them (so tool-role replies match).
