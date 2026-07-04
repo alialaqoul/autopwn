@@ -314,6 +314,30 @@ python -m autopwn agent --objective "Enumerate SMB shares and find AS-REP roasta
 
 Every session writes a full JSON transcript to `logs/`.
 
+### Reports & engagement details
+
+Every agent run captures **engagement metadata** and auto-exports a report in
+**Markdown, HTML, and PDF** alongside its transcript in `logs/`:
+
+```bash
+autopwn agent --target 192.168.130.10 \
+  --engagement "CyberLab DC assessment" --client "Acme Corp" \
+  --assessor "Ali Alaqoul" --authorized-by "J. Smith"
+```
+
+In the interactive menu, the AI-agent flow prompts for these details (with
+sensible defaults) before launching. Re-export any saved session on demand:
+
+```bash
+autopwn report --format pdf,html,md          # latest session
+autopwn report --transcript logs/session-YYYYMMDD-HHMMSS.json --format pdf
+```
+
+The report includes the engagement header, the executive summary/findings,
+discovered hosts & services (with banners), discovered variables (domain, creds),
+and every action performed. PDF export needs `xhtml2pdf` (`pip install xhtml2pdf`);
+Markdown and HTML work without it.
+
 ### Interactive menu
 
 Prefer menus to flags? Run with no arguments (or `autopwn menu`) for a

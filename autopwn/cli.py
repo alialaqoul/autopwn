@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 from rich.console import Console
@@ -559,13 +560,17 @@ def _results_menu(ns, cfg_path) -> None:
         c = _submenu("Results", [
             ("1", "Service → hosts matrix"),
             ("2", "Hosts — pick one for its port/service detail"),
-            ("3", "Clear stored results"),
+            ("3", "Export report of the last AI job (PDF/HTML/MD)"),
+            ("4", "Clear stored results"),
             ("b", "Back")])
         if c == "1":
             cmd_services(ns(hosts=False, clear=False)); _pause()
         elif c == "2":
             _hosts_menu(ns, cfg_path)
         elif c == "3":
+            fmt = _ask("formats [pdf,html,md]: ") or "pdf,html,md"
+            cmd_report(ns(transcript=None, format=fmt)); _pause()
+        elif c == "4":
             if _ask("really clear all results? [y/N] ").lower() in ("y", "yes"):
                 cmd_services(ns(hosts=False, clear=True)); _pause()
         elif c == "b":
@@ -581,15 +586,45 @@ def _agent_menu(ns, cfg_path) -> None:
         return
     target = objective = None
     if c == "1":
+        console.print(
+            "\n[bold]Enter a target.[/] Accepted forms:\n"
+            "  • single IP        e.g. [cyan]192.168.130.10[/]\n"
+            "  • hostname         e.g. [cyan]dc01.cyberlab.local[/]\n"
+            "  • CIDR range       e.g. [cyan]192.168.130.0/24[/] (assesses each live host)\n"
+            "[dim]If it isn't in scope yet, it is added to the allow list "
+            "automatically.[/]")
         target = _ask("target: ")
+        if not target:
+            return
     elif c == "2":
+        console.print("\n[dim]Optional target, then describe the goal in plain "
+                      "English,\ne.g. 'enumerate SMB shares and find AS-REP "
+                      "roastable users'.[/]")
         target = _ask("target (optional): ") or None
         objective = _ask("objective: ")
+        if not objective:
+            return
     else:
         return
-    rc = cmd_agent(ns(target=target, objective=objective, background=True))
+
+    # Engagement details — printed in the panel and the exported report.
+    cfg = Config.load(cfg_path)
+    try:
+        default_eng = Scope.load(cfg.scope_file).engagement
+    except Exception:
+        default_eng = "Security assessment"
+    console.print("\n[bold]Engagement details[/] "
+                  "[dim](press Enter to skip / accept default)[/]")
+    engagement = _ask(f"engagement name [{default_eng}]: ") or default_eng
+    client = _ask("client / organization: ")
+    assessor = _ask("assessor (your name): ")
+    authorized_by = _ask("authorized by: ")
+
+    rc = cmd_agent(ns(target=target, objective=objective, background=True,
+                      engagement=engagement, client=client, assessor=assessor,
+                      authorized_by=authorized_by, report_format="md,html,pdf"))
     if rc == 0 and _ask("watch it now? [Y/n] ").lower() in ("", "y", "yes"):
-        js = jobs.list_jobs(Config.load(cfg_path).log_dir)
+        js = jobs.list_jobs(cfg.log_dir)
         if js:
             cmd_watch(ns(job_id=js[0]["id"]))
     _pause()
@@ -805,6 +840,15 @@ def cmd_agent(args) -> int:
         if not _ensure_in_scope(scope, args.target):
             return 2
 
+    # Engagement metadata (for the panel + exported report). Fall back to scope.
+    from .report import Engagement
+    meta = Engagement(
+        engagement=getattr(args, "engagement", None) or scope.engagement or "Security assessment",
+        client=getattr(args, "client", None) or "",
+        assessor=getattr(args, "assessor", None) or "",
+        authorized_by=getattr(args, "authorized_by", None) or scope.authorized_by or "",
+        target=args.target or "", objective=objective)
+
     # Background: relaunch this same run detached so the terminal stays free.
     if getattr(args, "background", False):
         relaunch = ["agent"]
@@ -812,6 +856,11 @@ def cmd_agent(args) -> int:
             relaunch += ["--target", args.target]
         if args.objective:
             relaunch += ["--objective", args.objective]
+        for flag, val in (("--engagement", meta.engagement), ("--client", meta.client),
+                          ("--assessor", meta.assessor),
+                          ("--authorized-by", meta.authorized_by)):
+            if val:
+                relaunch += [flag, val]
         job_id = jobs.start(relaunch, label=f"agent {args.target or 'custom'}",
                             log_dir=cfg.log_dir)
         console.print(f"[green]Started background agent job {job_id}.[/]\n"
@@ -833,7 +882,9 @@ def cmd_agent(args) -> int:
     if cfg.agent.confirm_active_actions and sys.stdin.isatty():
         agent.confirm_hook = _confirm
 
-    console.print(Panel(f"[bold]{objective}[/]\n\n{scope.summary()}",
+    meta_line = " | ".join(f"{k}: {v}" for k, v in meta.rows() if v and k not in
+                           ("Objective", "Target"))
+    console.print(Panel(f"[bold]{objective}[/]\n\n{meta_line}",
                         title="Autopwn agent", border_style="cyan"))
     try:
         final = agent.run(objective, seed_target=args.target)
@@ -843,7 +894,51 @@ def cmd_agent(args) -> int:
     path = agent.save_transcript(cfg.log_dir)
     console.print(Panel(final, title="Result", border_style="white"))
     console.print(f"[dim]Transcript: {path}[/]")
+
+    # Auto-export the report alongside the transcript.
+    from . import report, store as _store
+    _store.configure(f"{cfg.log_dir}/results.json")
+    model = report.build_model(meta, agent.transcript, _store.all_hosts(),
+                               _store.facts(), final)
+    formats = [f.strip() for f in (args.report_format or "md,html").split(",")]
+    written = report.export(model, path.with_suffix(""), formats)
+    if written:
+        console.print("[green]Report:[/] " + ", ".join(str(w) for w in written))
+    if "pdf" in formats and not any(str(w).endswith(".pdf") for w in written):
+        console.print("[dim](PDF skipped — pip install xhtml2pdf to enable)[/]")
     console.print("[bold green]══ agent run complete ══[/]")
+    return 0
+
+
+def cmd_report(args) -> int:
+    import json as _json
+    from . import report, store as _store
+    cfg = Config.load(args.config)
+    _store.configure(f"{cfg.log_dir}/results.json")
+    # Pick the transcript (given or latest session-*.json).
+    if args.transcript:
+        tpath = Path(args.transcript)
+    else:
+        sessions = sorted(Path(cfg.log_dir).glob("session-*.json"))
+        if not sessions:
+            console.print("[red]No session transcript found. Run an agent first.[/]")
+            return 1
+        tpath = sessions[-1]
+    try:
+        transcript = _json.loads(tpath.read_text(encoding="utf-8"))
+    except Exception as e:
+        console.print(f"[red]Could not read {tpath}: {e}[/]"); return 1
+    final = next((e.get("content", "") for e in reversed(transcript)
+                  if e.get("kind") == "final"), "")
+    meta = report.Engagement(engagement="Security assessment")
+    model = report.build_model(meta, transcript, _store.all_hosts(),
+                               _store.facts(), final)
+    formats = [f.strip() for f in args.format.split(",")]
+    written = report.export(model, tpath.with_suffix(""), formats)
+    if written:
+        console.print("[green]Exported:[/] " + ", ".join(str(w) for w in written))
+    else:
+        console.print("[yellow]Nothing written (for PDF: pip install xhtml2pdf).[/]")
     return 0
 
 
@@ -902,7 +997,20 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--objective", help="Custom goal. Optional if --target given.")
     a.add_argument("--background", action="store_true",
                    help="Run detached; watch with 'autopwn watch <id>'.")
+    # Engagement metadata — printed and included in the exported report.
+    a.add_argument("--engagement", help="Engagement / assessment name.")
+    a.add_argument("--client", help="Client / organization.")
+    a.add_argument("--assessor", help="Who is running the assessment.")
+    a.add_argument("--authorized-by", dest="authorized_by",
+                   help="Who authorized the test.")
+    a.add_argument("--report-format", default="md,html,pdf",
+                   help="Auto-export formats on completion (md,html,pdf).")
     a.set_defaults(func=cmd_agent)
+
+    rp = sub.add_parser("report", help="Export a saved session transcript as a report.")
+    rp.add_argument("--transcript", help="Path to logs/session-*.json (default: latest).")
+    rp.add_argument("--format", default="pdf,html,md", help="pdf,html,md")
+    rp.set_defaults(func=cmd_report)
 
     j = sub.add_parser("jobs", help="List background agent jobs.")
     j.set_defaults(func=cmd_jobs)

@@ -205,7 +205,8 @@ class Agent:
             action = obj.get("action") or obj.get("tool") or obj.get("name")
             params = obj.get("parameters") or obj.get("arguments") or {}
             if isinstance(action, str) and action.lower() == "finish":
-                return [], (obj.get("findings") or raw), raw, False
+                fin = obj.get("findings") or obj.get("summary")
+                return [], (fin or "Assessment complete — see evidence below."), raw, False
             if action in valid:
                 return ([ToolCall(id=f"s-{uuid.uuid4().hex[:8]}", name=action,
                                   arguments=params if isinstance(params, dict) else {})],
