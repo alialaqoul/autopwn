@@ -64,6 +64,17 @@ DEFAULT_HARVEST: list[HarvestRule] = [
     # NetExec/CME success line: "[+] corp.local\\admin:Passw0rd (Pwn3d!)"
     HarvestRule("username", r"\[\+\]\s*[^\\\s]+\\([^:\s]+):", scope="global"),
     HarvestRule("password", r"\[\+\]\s*[^\\\s]+\\[^:\s]+:([^\s(]+)", scope="global"),
+    # ---- structured branch signals (drive adaptive path selection) -------
+    # Guest/null session accepted -> RID enumeration is available.
+    HarvestRule("smb_guest", r"\[\+\]\s*[^\\\s]+\\(guest):", scope="host", group=1),
+    # "(Pwn3d!)" -> the authenticating account is a local admin on this host.
+    HarvestRule("pwned", r"(Pwn3d!)", scope="host"),
+    # RID-brute yielded users -> we have a real user list.
+    HarvestRule("has_users", r"([0-9]+)\s+\(SidTypeUser\)", scope="host"),
+    # Kerberoastable SPN present in GetUserSPNs output.
+    HarvestRule("kerberoastable", r"(\$krb5tgs\$)", scope="host"),
+    # AS-REP roastable account hash present.
+    HarvestRule("asreproastable", r"(\$krb5asrep\$)", scope="host"),
 ]
 
 _BAD_DOMAINS = ("home.arpa", "in-addr.arpa")

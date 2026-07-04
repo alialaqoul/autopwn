@@ -45,6 +45,10 @@ service, phishing) before AD attacks become productive.
   try `guest`/null first (`netexec_smb -u guest -p ''`).
 
 ## Step 2b — password spraying (batch, never one-by-one)
+<!-- when: port:445, fact:has_users -->
+The single fastest way to root an AD lab: call `ad_kill_chain` with the DC target
+to run guest -> RID -> spray -> Kerberoast -> crack -> loot -> pass-the-hash end
+to end. Use the individual tools below when you need finer control.
 - With a real user list, `netexec_spray` tests many accounts in ONE server-side
   batch with `--no-bruteforce` (one attempt per user → no lockout). Do NOT guess
   passwords one at a time in the agent loop.
@@ -79,6 +83,8 @@ SAM/secrets dump. Enumerate relay targets with
 - `netexec_winrm` with creds: confirm remote command execution (WinRM 5985).
 
 ## Step 4b — loot readable shares for credentials
+<!-- when: port:445, fact:username -->
+
 - With any credential, re-check shares (`netexec_smb enumerate=shares`). Beyond
   the defaults (SYSVOL/NETLOGON), a custom READ share (backup, IT, transfer) is a
   classic credential leak. Pull interesting files with `smb_get` (share + path).
@@ -98,6 +104,9 @@ SAM/secrets dump. Enumerate relay targets with
   movement and persistence.
 
 ## Worked chain (no creds → Domain Admin) — reference
+<!-- when: port:88, port:445 -->
+Shortcut: `ad_kill_chain target=<DC>` performs all of the following automatically
+and returns the credentials, admin access, and any flags it captured.
 1. `netexec_smb -u guest -p ''` → guest enabled.
 2. `netexec_rid_brute` (guest) → full user list (save to users.txt).
 3. `netexec_spray userfile=users.txt userpass=true` → foothold user==password.

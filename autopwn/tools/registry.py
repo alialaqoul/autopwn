@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..config import ToolsConfig
+from .ad_chain import AdChainTool
 from .base import Tool
 from .catalog import CATALOG
 from .command import GenericCommandTool
@@ -58,6 +59,7 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     reg.register(PortScanTool())
     reg.register(NmapTool(nmap_path=cfg.nmap_path))
     reg.register(HttpProbeTool())
+    reg.register(AdChainTool())  # macro-action: full AD kill chain
 
     # Catalogued external tools.
     for spec in CATALOG:

@@ -12,15 +12,35 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 
 _KB_DIR = Path(__file__).parent / "knowledge"
+
+# A chunk may declare preconditions so retrieval reflects the ACTUAL situation,
+# not just text similarity:  <!-- when: port:88, port:445, fact:smb_guest -->
+_WHEN_RE = re.compile(r"<!--\s*when:\s*(.*?)\s*-->", re.IGNORECASE | re.DOTALL)
 
 
 def _cosine(a, b) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a)); nb = math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na and nb else 0.0
+
+
+def _parse_conds(text: str) -> dict:
+    """Extract {ports:set[int], facts:set[str]} from a chunk's `when:` tag."""
+    ports: set[int] = set()
+    facts: set[str] = set()
+    m = _WHEN_RE.search(text)
+    if m:
+        for tok in re.split(r"[,\s]+", m.group(1)):
+            tok = tok.strip().lower()
+            if tok.startswith("port:") and tok[5:].isdigit():
+                ports.add(int(tok[5:]))
+            elif tok.startswith("fact:") and tok[5:]:
+                facts.add(tok[5:])
+    return {"ports": ports, "facts": facts}
 
 
 def _chunk(text: str, source: str) -> list[str]:
@@ -49,6 +69,7 @@ class KnowledgeBase:
         self.dir = Path(kb_dir or _KB_DIR)
         self.chunks: list[str] = []
         self.vecs: list[list[float]] = []
+        self.conds: list[dict] = []
         self.ok = hasattr(provider, "embed")
 
     def _cache_path(self) -> Path:
@@ -82,15 +103,50 @@ class KnowledgeBase:
             except Exception:
                 pass
         self.vecs = [cache[hashlib.sha1(c.encode()).hexdigest()] for c in self.chunks]
+        self.conds = [_parse_conds(c) for c in self.chunks]
         return True
 
-    def retrieve(self, query: str, k: int = 3) -> list[str]:
+    def retrieve(self, query: str, k: int = 3, state: dict | None = None) -> list[str]:
+        """Return the top-k chunks. When `state` (open ports + present facts) is
+        given, chunks whose declared preconditions match the real situation are
+        boosted, so retrieval tracks tool results — not just text similarity."""
         if not self.ok or not self.vecs:
             return []
         try:
             qv = self.provider.embed([query])[0]
         except Exception:
             return []
-        ranked = sorted(zip(self.vecs, self.chunks),
-                        key=lambda p: -_cosine(qv, p[0]))
-        return [c for _, c in ranked[:k]]
+        st_ports = set(state.get("ports", ())) if state else set()
+        st_facts = set(state.get("facts", ())) if state else set()
+
+        def score(i: int) -> float:
+            s = _cosine(qv, self.vecs[i])
+            if state is not None:
+                c = self.conds[i]
+                need_p, need_f = c["ports"], c["facts"]
+                if need_p or need_f:
+                    total = len(need_p) + len(need_f)
+                    hit = len(need_p & st_ports) + len(need_f & st_facts)
+                    if hit:
+                        s += 0.20 * (hit / total)           # boost matched context
+                    # a chunk gated on a fact we lack is probably premature
+                    if need_f and not (need_f & st_facts):
+                        s -= 0.05
+            return s
+
+        order = sorted(range(len(self.chunks)), key=score, reverse=True)
+        return [self.chunks[i] for i in order[:k]]
+
+    def learn(self, title: str, body: str) -> None:
+        """Append a distilled, genericised playbook learned from a successful run
+        to the knowledge corpus so future retrievals can use it."""
+        path = self.dir / "learned.md"
+        try:
+            new = not path.exists()
+            with open(path, "a", encoding="utf-8") as f:
+                if new:
+                    f.write("# Learned playbooks\n\n"
+                            "Auto-distilled from successful engagements.\n")
+                f.write(f"\n## {title}\n{body.strip()}\n")
+        except Exception:
+            pass

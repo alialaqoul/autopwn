@@ -136,17 +136,21 @@ class Agent:
             active = retriever.top_k(query, top_k) if retriever else base_tools
             tool_specs = [t.spec() for t in active]
 
-            # Retrieve methodology guidance for the current situation (RAG).
+            # Retrieve methodology guidance for the current situation (RAG),
+            # conditioned on the REAL state (open ports + discovered facts) so
+            # retrieval tracks tool results, not just text similarity.
             kb_text = ""
             if kb:
-                guidance = kb.retrieve(query, self.config.agent.kb_top_k)
+                guidance = kb.retrieve(query, self.config.agent.kb_top_k,
+                                       state=self._state())
                 if guidance:
                     kb_text = ("\n\nRELEVANT METHODOLOGY (retrieved knowledge — "
                                "follow it):\n" + "\n\n".join(guidance))
 
             base_sys = (STRUCTURED_SYSTEM.replace("{tools}", tool_signatures(active))
                         if self._structured else SYSTEM_PROMPT)
-            messages[0] = Message(role="system", content=base_sys + kb_text)
+            messages[0] = Message(role="system",
+                                  content=base_sys + kb_text + self._ledger_text())
 
             calls, finish_text, raw, native = self._decide(messages, tool_specs)
 
@@ -200,6 +204,11 @@ class Agent:
                     final = syn
                     self.report("final", syn)
 
+        # Self-learning: if this run reached real compromise, distill the winning
+        # tool order into a generic playbook the KB can retrieve next time.
+        if kb is not None:
+            self._maybe_learn(kb)
+
         # Append the deterministic evidence block so the report is grounded in
         # real scan data regardless of what the model wrote.
         evidence = self._evidence(seed_target)
@@ -207,10 +216,75 @@ class Agent:
             final = f"{final}\n\n{evidence}"
         return final
 
+    def _maybe_learn(self, kb) -> None:
+        """Append a genericised playbook to the KB when a run reached compromise."""
+        ok_tools = [e.get("name") for e in self.transcript
+                    if e.get("kind") == "tool_result" and e.get("ok")]
+        facts = self._state()["facts"]
+        reached = ("pwned" in facts or "admin_hash" in facts
+                   or any(e.get("name") == "ad_kill_chain" and e.get("ok")
+                          for e in self.transcript))
+        seq, seen = [], set()
+        for n in ok_tools:
+            if n and n not in seen:
+                seen.add(n); seq.append(n)
+        if not reached or len(seq) < 3:
+            return
+        title = "Compromise path: " + " -> ".join(seq[:8])
+        body = ("A run reached host/domain compromise using these tools, in order:\n"
+                + " -> ".join(seq) + "\nReplay this ordering on similar targets and "
+                "adapt hosts/credentials to the environment (generic — nothing here "
+                "is tied to one lab).")
+        try:
+            kb.learn(title, body)
+            self.report("step", "learned a new playbook from this run")
+        except Exception:
+            pass
+
     @staticmethod
     def _needs_creds(tool) -> bool:
         req = set(tool.parameters.get("required", []))
         return "username" in req and "password" in req
+
+    @staticmethod
+    def _state() -> dict:
+        """Current engagement state for state-conditioned RAG: the set of open
+        ports and the set of discovered fact keys (guest, pwned, username, …)."""
+        from .. import store
+        ports: set[int] = set()
+        facts: set[str] = set()
+        try:
+            for _, entry in store.all_hosts().items():
+                for p in entry.get("ports", {}).values():
+                    if p.get("state") == "open":
+                        ports.add(p["port"])
+                for kk, vv in (entry.get("facts") or {}).items():
+                    if vv:
+                        facts.add(str(kk).lower())
+            for kk, vv in (store.facts() or {}).items():
+                if vv:
+                    facts.add(str(kk).lower())
+        except Exception:
+            pass
+        return {"ports": ports, "facts": facts}
+
+    def _ledger_text(self) -> str:
+        """Compact 'already tried' ledger injected each step so the model does
+        not repeat actions and instead explores an untried branch."""
+        seen, lines = set(), []
+        for e in self.transcript:
+            if e.get("kind") != "tool_result":
+                continue
+            key = (e.get("name"), str(e.get("args"))[:50])
+            if key in seen:
+                continue
+            seen.add(key)
+            outcome = "ok" if e.get("ok") else "no result"
+            lines.append(f"- {e.get('name')} -> {outcome}: {(e.get('summary') or '')[:70]}")
+        if not lines:
+            return ""
+        return ("\n\nACTIONS ALREADY TRIED (do not repeat these; choose a NEW "
+                "branch or finish):\n" + "\n".join(lines[-10:]))
 
     @staticmethod
     def _is_real_findings(text: str) -> bool:
