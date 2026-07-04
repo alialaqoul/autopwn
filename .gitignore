@@ -12,11 +12,23 @@ scope.yaml
 logs/
 *.log
 
+# VPN profiles & credentials — never commit these
+*.ovpn
+*.openvpn
+
 # Tool output / loot
 *.pot
 spns.txt
 *.hashcat
 loot/
+loot_*
+users.txt
+*.kerb
+asrep*.txt
+kerb*.txt
+# Exported reports at repo root (real reports go to logs/, already ignored)
+/session-*.html
+/session-*.md
 
 # OS / editor
 .DS_Store

