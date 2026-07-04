@@ -49,7 +49,7 @@ _AUTH = {
     "username": {"type": "string", "description": "Username (optional)."},
     "password": {"type": "string", "description": "Password (optional)."},
 }
-_DOMAIN = {"domain": {"type": "string", "description": "Domain, e.g. cyberlab.local or example.com."}}
+_DOMAIN = {"domain": {"type": "string", "description": "Domain, e.g. corp.local or example.com."}}
 _WORDLIST = {"wordlist": {"type": "string", "description": "Wordlist path (optional)."}}
 _HASHFILE = {"hashfile": {"type": "string", "description": "Path to a file of hashes to crack."}}
 
@@ -250,7 +250,7 @@ CATALOG: list[CommandSpec] = [
                     "directory entries if anonymous bind is allowed.",
         binary="ldapsearch",
         parameters=_params({**_TARGET,
-            "base_dn": {"type": "string", "description": "e.g. DC=cyberlab,DC=local"},
+            "base_dn": {"type": "string", "description": "e.g. DC=corp,DC=local"},
             "filter": {"type": "string", "description": "LDAP filter. Default (objectclass=*)."}},
             ["target", "base_dn"]),
         build_args=lambda k: ["-x", "-H", f"ldap://{_s(k['target'])}", "-b",

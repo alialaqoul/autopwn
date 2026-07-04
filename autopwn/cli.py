@@ -568,7 +568,7 @@ def _results_menu(ns, cfg_path) -> None:
         elif c == "2":
             _hosts_menu(ns, cfg_path)
         elif c == "3":
-            fmt = _ask("formats [pdf,html,md]: ") or "pdf,html,md"
+            fmt = _ask("formats [pdf,docx,html,md]: ") or "pdf,docx,html,md"
             cmd_report(ns(transcript=None, format=fmt)); _pause()
         elif c == "4":
             if _ask("really clear all results? [y/N] ").lower() in ("y", "yes"):
@@ -588,9 +588,9 @@ def _agent_menu(ns, cfg_path) -> None:
     if c == "1":
         console.print(
             "\n[bold]Enter a target.[/] Accepted forms:\n"
-            "  • single IP        e.g. [cyan]192.168.130.10[/]\n"
-            "  • hostname         e.g. [cyan]dc01.cyberlab.local[/]\n"
-            "  • CIDR range       e.g. [cyan]192.168.130.0/24[/] (assesses each live host)\n"
+            "  • single IP        e.g. [cyan]10.0.0.10[/]\n"
+            "  • hostname         e.g. [cyan]dc01.corp.local[/]\n"
+            "  • CIDR range       e.g. [cyan]10.0.0.0/24[/] (assesses each live host)\n"
             "[dim]If it isn't in scope yet, it is added to the allow list "
             "automatically.[/]")
         target = _ask("target: ")
@@ -622,7 +622,7 @@ def _agent_menu(ns, cfg_path) -> None:
 
     rc = cmd_agent(ns(target=target, objective=objective, background=True,
                       engagement=engagement, client=client, assessor=assessor,
-                      authorized_by=authorized_by, report_format="md,html,pdf"))
+                      authorized_by=authorized_by, report_format="pdf,docx,html,md"))
     if rc == 0 and _ask("watch it now? [Y/n] ").lower() in ("", "y", "yes"):
         js = jobs.list_jobs(cfg.log_dir)
         if js:
@@ -829,7 +829,7 @@ def cmd_agent(args) -> int:
     if not objective:
         if not args.target:
             console.print("[red]Provide --objective, or --target for "
-                          "autopilot (e.g. agent --target 192.168.130.10).[/]")
+                          "autopilot (e.g. agent --target 10.0.0.10).[/]")
             return 1
         objective = autopilot_objective(args.target)
         console.print("[cyan]Autopilot:[/] no objective given — running a full "
@@ -1003,13 +1003,13 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--assessor", help="Who is running the assessment.")
     a.add_argument("--authorized-by", dest="authorized_by",
                    help="Who authorized the test.")
-    a.add_argument("--report-format", default="md,html,pdf",
-                   help="Auto-export formats on completion (md,html,pdf).")
+    a.add_argument("--report-format", default="pdf,docx,html,md",
+                   help="Auto-export formats on completion (pdf,docx,html,md).")
     a.set_defaults(func=cmd_agent)
 
     rp = sub.add_parser("report", help="Export a saved session transcript as a report.")
     rp.add_argument("--transcript", help="Path to logs/session-*.json (default: latest).")
-    rp.add_argument("--format", default="pdf,html,md", help="pdf,html,md")
+    rp.add_argument("--format", default="pdf,docx,html,md", help="pdf,docx,html,md")
     rp.set_defaults(func=cmd_report)
 
     j = sub.add_parser("jobs", help="List background agent jobs.")

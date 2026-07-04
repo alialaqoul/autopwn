@@ -100,6 +100,118 @@ def assess_host(host: str, entry: dict) -> dict:
             "open_count": len(pset)}
 
 
+def _evidence(transcript, *tool_names):
+    """Find the command + output of the first successful matching tool run."""
+    for e in transcript or []:
+        if e.get("kind") == "tool_result" and e.get("name") in tool_names:
+            cmd = e.get("command") or f"{e.get('name')} {e.get('args', {})}"
+            out = (e.get("output") or e.get("summary") or "").strip()
+            return cmd, out[:1500]
+    return "", ""
+
+
+# Generic finding rules. Each: predicate over a host's open ports + facts =>
+# a finding dict. Severity/impact/recommendation are standard and NOT tied to
+# any specific environment.
+def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
+    findings: list[dict] = []
+
+    def host_facts(entry):
+        return entry.get("facts", {})
+
+    # Collect hosts matching each condition.
+    def hosts_where(pred):
+        out = []
+        for h, entry in sorted(hosts.items()):
+            ports = {p["port"] for p in entry.get("ports", {}).values()
+                     if p.get("state") == "open"}
+            if pred(h, entry, ports):
+                out.append(h)
+        return out
+
+    rules = [
+        dict(title="SMB Signing Not Enforced", severity="High", cvss="6.5",
+             pred=lambda h, e, p: host_facts(e).get("smb_signing") == "False" and 445 in p,
+             desc="One or more hosts do not require SMB signing. Unsigned SMB "
+                  "allows an attacker who can capture or coerce NTLM "
+                  "authentication to relay it to these hosts.",
+             impact="NTLM/SMB relay to the host can yield command execution or a "
+                    "credential/SAM dump, enabling lateral movement.",
+             rec="Enforce SMB signing (Require) via GPO on all servers and "
+                 "workstations; disable NTLM where possible.",
+             tools=("netexec_smb",)),
+        dict(title="SMB Null / Anonymous Authentication Permitted", severity="Medium",
+             cvss="5.3",
+             pred=lambda h, e, p: host_facts(e).get("smb_nullauth") == "True" and 445 in p,
+             desc="The host accepts an anonymous (null) SMB session.",
+             impact="Depending on configuration, anonymous users may enumerate "
+                    "shares, users, or policy — useful reconnaissance for an "
+                    "unauthenticated attacker.",
+             rec="Restrict anonymous access (RestrictNullSessAccess=1, "
+                 "RestrictAnonymous=1); review share and RID enumeration exposure.",
+             tools=("netexec_smb", "smbclient_shares")),
+        dict(title="WSUS Served Over HTTP", severity="High", cvss="8.1",
+             pred=lambda h, e, p: 8530 in p,
+             desc="A WSUS update service is reachable over cleartext HTTP (8530).",
+             impact="If clients are not forced to use WSUS over SSL, an on-path "
+                    "attacker can spoof updates and execute code as SYSTEM on "
+                    "managed endpoints.",
+             rec="Require WSUS over HTTPS (8531) and set the "
+                 "'Do not store passwords'/SSL enforcement GPO for clients.",
+             tools=("nmap_scan",)),
+        dict(title="Administration Console Exposed", severity="Low", cvss="4.0",
+             pred=lambda h, e, p: bool({8443, 8444} & p),
+             desc="A management console / agent handler (e.g. endpoint-management "
+                  "platform) is network-reachable.",
+             impact="If protected only by default or weak credentials, console "
+                    "access can push tasks/software to every managed endpoint.",
+             rec="Restrict the console to management networks, enforce strong "
+                 "unique admin credentials and MFA, and patch to current.",
+             tools=("nmap_scan",)),
+        dict(title="Remote Desktop (RDP) Exposed", severity="Low", cvss="4.0",
+             pred=lambda h, e, p: 3389 in p,
+             desc="RDP (3389) is reachable on the network.",
+             impact="Credential brute-force / password-spray surface; legacy "
+                    "hosts may be vulnerable to pre-auth RCE (e.g. BlueKeep).",
+             rec="Restrict RDP to jump hosts/VPN, require NLA, enforce account "
+                 "lockout, and keep hosts patched.",
+             tools=("nmap_scan",)),
+        dict(title="Missing HTTP Security Headers", severity="Low", cvss="3.1",
+             pred=lambda h, e, p: bool({80, 8080, 8000} & p) and _has_missing_headers(transcript, h),
+             desc="Web responses omit recommended security headers "
+                  "(e.g. Content-Security-Policy, X-Frame-Options, HSTS).",
+             impact="Increases exposure to clickjacking, MIME sniffing, and "
+                    "transport downgrade attacks.",
+             rec="Add CSP, X-Frame-Options/frame-ancestors, "
+                 "X-Content-Type-Options, and Strict-Transport-Security.",
+             tools=("http_probe",)),
+    ]
+
+    fid = 1
+    for r in rules:
+        matched = hosts_where(r["pred"])
+        if not matched:
+            continue
+        cmd, out = _evidence(transcript, *r["tools"])
+        findings.append({
+            "id": f"F-{fid:02d}", "title": r["title"], "severity": r["severity"],
+            "cvss": r["cvss"], "hosts": matched, "description": r["desc"],
+            "impact": r["impact"], "recommendation": r["rec"],
+            "evidence_cmd": cmd, "evidence_out": out,
+        })
+        fid += 1
+    return findings
+
+
+def _has_missing_headers(transcript, host: str) -> bool:
+    for e in transcript or []:
+        if e.get("kind") == "tool_result" and e.get("name") == "http_probe":
+            if host in str(e.get("args", {})) and "missing security headers" in \
+                    (e.get("output", "") + e.get("summary", "")):
+                return True
+    return False
+
+
 def assess(hosts: dict, facts: dict) -> dict:
     """Return {'hosts': [per-host assessment], 'domain': ..., 'creds': ...}."""
     out = {"hosts": [], "domain": facts.get("domain"),

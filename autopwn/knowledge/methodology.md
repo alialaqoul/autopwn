@@ -25,7 +25,7 @@ open port on the target.
 - "Null Auth: True" / "Anonymous login successful" on SMB => null sessions are
   allowed; enumerate shares and users without credentials.
 - "signing:False" on SMB => SMB signing not required (NTLM relay candidate).
-- A discovered domain (e.g. cyberlab.local) => set it for Kerberos tools.
+- A discovered domain (e.g. corp.local) => set it for Kerberos tools.
 - An exit code / "bad arguments" => the tool needs more inputs; supply them or
   choose a different technique. Do not repeat the same failing call.
 

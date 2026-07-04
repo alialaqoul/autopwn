@@ -25,7 +25,7 @@ from . import store
 CANONICAL: dict[str, str] = {
     "target":   "Host or IP to act on",
     "url":      "Full URL (scheme://host:port/)",
-    "domain":   "AD / DNS domain, e.g. cyberlab.local",
+    "domain":   "AD / DNS domain, e.g. corp.local",
     "base_dn":  "LDAP base DN (auto-derived from domain)",
     "dc_ip":    "Domain controller IP",
     "username": "Username / login",
@@ -60,7 +60,8 @@ DEFAULT_HARVEST: list[HarvestRule] = [
     HarvestRule("os", r"(Windows[^()\[\]\n]{0,40})", scope="host"),
     # NetExec SMB banner: "(signing:False)" — signing not required = relay target.
     HarvestRule("smb_signing", r"\(signing:(True|False)\)", scope="host"),
-    # NetExec/CME success line: "[+] cyberlab.local\\admin:Passw0rd (Pwn3d!)"
+    HarvestRule("smb_nullauth", r"Null Auth:\s*(True|False)", scope="host"),
+    # NetExec/CME success line: "[+] corp.local\\admin:Passw0rd (Pwn3d!)"
     HarvestRule("username", r"\[\+\]\s*[^\\\s]+\\([^:\s]+):", scope="global"),
     HarvestRule("password", r"\[\+\]\s*[^\\\s]+\\[^:\s]+:([^\s(]+)", scope="global"),
 ]
@@ -113,7 +114,7 @@ def record_from_text(text: str, host: str | None = None,
 
 
 def base_dn_from_domain(domain: str) -> str:
-    """cyberlab.local -> DC=cyberlab,DC=local"""
+    """corp.local -> DC=corp,DC=local"""
     return "DC=" + ",DC=".join(p for p in domain.split(".") if p)
 
 

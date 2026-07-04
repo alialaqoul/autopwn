@@ -3,7 +3,7 @@
 ## When to use
 Apply this when the target exposes Kerberos (88), LDAP (389/636), Global Catalog
 (3268/3269), and SMB (445) — i.e. a Domain Controller. First learn the domain
-name (it appears in nmap LDAP banners and NetExec output, e.g. cyberlab.local).
+name (it appears in nmap LDAP banners and NetExec output, e.g. corp.local).
 
 ## Step 1 — unauthenticated SMB/LDAP enumeration (no creds needed)
 - `netexec_smb` with just target: reveals OS, hostname, domain, SMB signing, and
@@ -12,7 +12,7 @@ name (it appears in nmap LDAP banners and NetExec output, e.g. cyberlab.local).
 - `smbclient_shares` and `smbmap`: list shares reachable anonymously.
 - `enum4linux`: broad users/groups/shares/policy enumeration.
 - `ldapsearch_anon` with base_dn derived from the domain
-  (cyberlab.local => DC=cyberlab,DC=local): test anonymous LDAP bind. `netexec_ldap`
+  (corp.local => DC=corp,DC=local): test anonymous LDAP bind. `netexec_ldap`
   does the same with more structure.
 
 ## The reality of a hardened DC (tested)

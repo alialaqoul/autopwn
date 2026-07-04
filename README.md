@@ -51,7 +51,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   each step and injected into the agent, so it follows real methodology (what
   technique next, which tool, how to read the output) instead of guessing.
 - **Grounded reporting** — deterministic role/exposure/attack-path analysis plus
-  an LLM summary, exported as PDF/HTML/Markdown with engagement details.
+  an LLM summary, exported as PDF/DOCX/HTML/Markdown with engagement details.
 - **Extensible** — add a tool (a few lines of declarative config) or teach it new
   tradecraft (drop a `.md` playbook into `autopwn/knowledge/`).
 - **Full transcripts** — every agent session is logged to JSON for reporting.
@@ -325,27 +325,32 @@ Every session writes a full JSON transcript to `logs/`.
 
 ### Reports & engagement details
 
-Every agent run captures **engagement metadata** and auto-exports a report in
-**Markdown, HTML, and PDF** alongside its transcript in `logs/`:
+Every agent run captures **engagement metadata** and auto-exports a professional
+report in **PDF, DOCX, HTML, and Markdown** alongside its transcript in `logs/`:
 
 ```bash
-autopwn agent --target 192.168.130.10 \
-  --engagement "CyberLab DC assessment" --client "Acme Corp" \
-  --assessor "Ali Alaqoul" --authorized-by "J. Smith"
+autopwn agent --target 10.0.0.10 \
+  --engagement "Acme internal assessment" --client "Acme Corp" \
+  --assessor "Your Name" --authorized-by "J. Smith"
 ```
 
 In the interactive menu, the AI-agent flow prompts for these details (with
 sensible defaults) before launching. Re-export any saved session on demand:
 
 ```bash
-autopwn report --format pdf,html,md          # latest session
-autopwn report --transcript logs/session-YYYYMMDD-HHMMSS.json --format pdf
+autopwn report --format pdf,docx,html,md      # latest session
+autopwn report --transcript logs/session-YYYYMMDD-HHMMSS.json --format docx
 ```
 
-The report includes the engagement header, the executive summary/findings,
-discovered hosts & services (with banners), discovered variables (domain, creds),
-and every action performed. PDF export needs `xhtml2pdf` (`pip install xhtml2pdf`);
-Markdown and HTML work without it.
+The report follows a standard pentest structure — executive summary, finding
+summary (severity counts + findings table), scope overview, testing process
+(methodology + tools used), per-finding detail (**Description / Evidence –
+Command / Evidence – Output / Impact / Recommendation**), prioritised
+recommendations, and a command-log appendix. Findings are derived generically
+from the discovered data (SMB signing, null auth, WSUS-over-HTTP, exposed
+consoles/RDP, missing headers, …) — nothing is tied to a specific environment.
+PDF needs `xhtml2pdf`, DOCX needs `python-docx` (both in `requirements.txt`);
+Markdown and HTML work with no extra dependencies.
 
 ### Interactive menu
 

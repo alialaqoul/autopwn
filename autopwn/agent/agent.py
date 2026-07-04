@@ -361,6 +361,7 @@ class Agent:
 
         self._log("tool_result", {"name": name, "args": args,
                                   "ok": result.ok, "summary": result.summary,
+                                  "command": result.data.get("command", ""),
                                   "output": (result.raw_output or "")[:2000]})
         self.report("observation", result.summary)
         # Surface the actual command output (clipped) so `watch` shows results.
