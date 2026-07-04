@@ -103,5 +103,51 @@ def applicable_count(tool_name: str) -> int:
     return len(targets_for_tool(tool_name))
 
 
+# Banners that speak HTTP but are NOT browsable web apps — web content tools
+# (wpscan/nikto/ffuf/…) shouldn't be pointed at these.
+_NON_WEBAPP = ("httpapi", "winrm", "wsman", "wsdapi", "mcafee", "rpc over http")
+# Tools that only make sense against a real web application.
+_WEB_CONTENT = {"wpscan", "nikto", "ffuf", "gobuster_dir", "sqlmap",
+                "feroxbuster", "arjun", "katana", "subzy"}
+
+
+def _is_web_app(service: str, version: str) -> bool:
+    # Require the service to actually BE http/https (not e.g. ncacn_http = RPC
+    # over HTTP), then reject non-browsable banners (WinRM/HTTPAPI/McAfee).
+    s = (service or "").lower().replace("ssl/", "").replace("ssl|", "").rstrip("?")
+    if not s.startswith("http"):
+        return False
+    return not any(b in (version or "").lower() for b in _NON_WEBAPP)
+
+
+def tools_applicable_to(host: str, tools):
+    """Filter *tools* to those relevant to a single host's open ports.
+
+    Uses the nmap banner/version, not just the service name: web *content*
+    tools apply only to ports that are actual web apps (so wpscan/nikto don't
+    fire at a DC's WinRM/HTTPAPI ports). Unmapped tools (recon, OSINT, local
+    crackers) are always kept.
+    """
+    entry = store.all_hosts().get(host, {})
+    ports = [p for p in entry.get("ports", {}).values()
+             if p.get("state") == "open"]
+    if not ports:
+        return list(tools)  # nothing discovered yet — don't over-filter
+    open_ports = [(p["port"], p.get("service", "")) for p in ports]
+    has_web_app = any(_is_web_app(p.get("service", ""), p.get("version", ""))
+                      for p in ports)
+    out = []
+    for t in tools:
+        meta = TOOL_SERVICES.get(t.name)
+        if meta is None:
+            out.append(t)
+        elif t.name in _WEB_CONTENT:
+            if has_web_app:
+                out.append(t)
+        elif any(_matches(meta, port, svc) for port, svc in open_ports):
+            out.append(t)
+    return out
+
+
 def mapped_tools() -> set[str]:
     return set(TOOL_SERVICES)

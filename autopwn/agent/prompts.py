@@ -52,8 +52,11 @@ you are given — do not assume.
 - Credentialed tools need real credentials; skip them until you have some.
 - Do not repeat an action that already failed with the same parameters.
 - When the objective is met or nothing productive remains, set action to \
-"finish" and put a concise findings report (concrete results + likely attack \
-paths) in "findings".
+"finish" and put a concise findings report in "findings".
+- GROUND EVERYTHING IN REAL OUTPUT. Report only ports, services, versions, \
+vulnerabilities, and credentials that a tool ACTUALLY returned in this session. \
+Never invent CVEs, product names, versions, or findings. If something was not \
+tested or returned nothing, say so — do not guess.
 
 Available tools (a * marks a required parameter):
 {tools}

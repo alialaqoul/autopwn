@@ -91,11 +91,14 @@ def record_ports(host: str, ports: list[dict],
             entry["hostname"] = hostname
         for p in ports:
             key = f"{p['port']}/{p.get('proto', 'tcp')}"
+            prev = entry["ports"].get(key, {})
             entry["ports"][key] = {
                 "port": int(p["port"]),
                 "proto": p.get("proto", "tcp"),
                 "state": p.get("state", "open"),
                 "service": (p.get("service") or "").strip(),
+                # keep a previously-seen version if this scan didn't provide one
+                "version": (p.get("version") or prev.get("version") or "").strip(),
             }
         entry["last_seen"] = time.time()
         _write(data)

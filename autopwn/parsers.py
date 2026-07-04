@@ -40,8 +40,10 @@ def parse_grepable(text: str) -> list[Record]:
                 port = int(f[0])
             except ValueError:
                 continue
+            # greppable: port/state/proto/owner/service/rpc/version
+            version = f[6] if len(f) > 6 else ""
             ports.append({"port": port, "state": f[1], "proto": f[2],
-                          "service": f[4]})
+                          "service": f[4], "version": version.strip()})
         out.append((host, hostname, ports))
     return out
 
@@ -73,10 +75,12 @@ def parse_normal(text: str) -> list[Record]:
             continue
         pm = _N_PORTLINE.match(line.strip())
         if pm and host is not None:
+            rest = pm.group(4).strip()
+            parts = rest.split(None, 1)  # "service  version banner..."
             ports.append({"port": int(pm.group(1)), "proto": pm.group(2),
                           "state": pm.group(3),
-                          "service": pm.group(4).strip().split()[0]
-                          if pm.group(4).strip() else ""})
+                          "service": parts[0] if parts else "",
+                          "version": parts[1].strip() if len(parts) > 1 else ""})
     flush()
     return out
 

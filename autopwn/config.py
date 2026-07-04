@@ -35,6 +35,8 @@ class AgentConfig(BaseModel):
     # Semantic tool retrieval: pass only the top-k most relevant tools per step
     # (0 = pass all tools). Needs an embedding model (see llm.embed_model).
     tool_top_k: int = 0
+    # Restrict tools to those applicable to the target's discovered open ports.
+    scope_tools: bool = True
 
 
 class ToolsConfig(BaseModel):

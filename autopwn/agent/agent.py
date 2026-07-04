@@ -82,12 +82,21 @@ class Agent:
                     content=f"Initial reconnaissance of {seed_target}:\n{obs}\n\n"
                             "Use this real data to choose your next action."))
 
+        # Scope tools to those applicable to the target's discovered ports so
+        # the agent doesn't run e.g. wpscan/SMB tools on hosts that lack them.
+        base_tools = self.registry.all()
+        if seed_target and getattr(self.config.agent, "scope_tools", True):
+            from ..applicability import tools_applicable_to
+            base_tools = tools_applicable_to(seed_target, base_tools)
+            self.report("thought", f"applicable tools for {seed_target}: "
+                        + ", ".join(t.name for t in base_tools))
+
         # Optional semantic tool retrieval: rank tools per step, pass only top-k.
         top_k = self.config.agent.tool_top_k
         retriever = None
         if top_k and top_k > 0:
             from ..retrieval import ToolRetriever
-            retriever = ToolRetriever(self.provider, self.registry.all())
+            retriever = ToolRetriever(self.provider, base_tools)
 
         final = "Agent stopped without producing findings."
         stalls = 0
@@ -98,11 +107,8 @@ class Agent:
             if retriever:
                 last = messages[-1].content if messages else ""
                 active = retriever.top_k(f"{objective}\n{last}"[:1500], top_k)
-                if len(active) < len(self.registry.all()):
-                    self.report("thought",
-                                "tools in play: " + ", ".join(t.name for t in active))
             else:
-                active = self.registry.all()
+                active = base_tools
             tool_specs = [t.spec() for t in active]
             if self._structured:
                 messages[0] = Message(role="system",
@@ -145,7 +151,41 @@ class Agent:
                                 "Choose the next action (or finish)."))
         else:
             self.report("warn", "Reached max steps.")
+
+        # Append a deterministic evidence block from the store so the report is
+        # grounded in real scan data regardless of what the model wrote.
+        evidence = self._evidence(seed_target)
+        if evidence:
+            final = f"{final}\n\n{evidence}"
         return final
+
+    def _evidence(self, target: Optional[str]) -> str:
+        """Build a factual evidence block from the results store."""
+        try:
+            from .. import store
+        except Exception:
+            return ""
+        lines = ["--- EVIDENCE (from tool output, not the model) ---"]
+        facts = store.facts()
+        if facts:
+            lines.append("Discovered variables: " +
+                         ", ".join(f"{k}={v}" for k, v in facts.items()))
+        hosts = store.all_hosts()
+        targets = [target] if target and target in hosts else list(hosts)
+        for h in targets:
+            entry = hosts.get(h, {})
+            ports = [p for p in entry.get("ports", {}).values()
+                     if p.get("state") == "open"]
+            if not ports:
+                continue
+            name = entry.get("hostname", "")
+            lines.append(f"{h}{(' (' + name + ')') if name else ''} — open:")
+            for p in sorted(ports, key=lambda p: p["port"]):
+                svc = p.get("service", "")
+                ver = p.get("version", "")
+                lines.append(f"  {p['port']}/{p.get('proto','tcp')} {svc}"
+                             + (f"  [{ver}]" if ver else ""))
+        return "\n".join(lines) if len(lines) > 1 else ""
 
     def _decide(self, messages, tool_specs):
         """Get the next step. Returns (calls, finish_text, raw, native)."""
@@ -197,8 +237,8 @@ class Agent:
             entry = store.all_hosts().get(target)
             if entry and any(p.get("state") == "open"
                              for p in entry.get("ports", {}).values()):
-                lines = [f"{p['port']}/{p.get('proto', 'tcp')} "
-                         f"{p.get('service', '')}".strip()
+                lines = [(f"{p['port']}/{p.get('proto', 'tcp')} "
+                          f"{p.get('service', '')} {p.get('version', '')}").strip()
                          for p in sorted(entry["ports"].values(),
                                          key=lambda p: p["port"])
                          if p.get("state") == "open"]
@@ -238,8 +278,13 @@ class Agent:
             return f"[ERROR] Tool '{name}' failed: {e}"
 
         self._log("tool_result", {"name": name, "args": args,
-                                  "ok": result.ok, "summary": result.summary})
+                                  "ok": result.ok, "summary": result.summary,
+                                  "output": (result.raw_output or "")[:2000]})
         self.report("observation", result.summary)
+        # Surface the actual command output (clipped) so `watch` shows results.
+        if result.ok and result.raw_output and result.raw_output.strip():
+            snippet = "\n".join(result.raw_output.strip().splitlines()[:20])
+            self.report("output", snippet)
         return result.as_observation()
 
     def _log(self, kind: str, payload: dict) -> None:

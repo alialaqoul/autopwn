@@ -44,7 +44,13 @@ def _reporter(kind: str, text: str) -> None:
     styles = {
         "step": "dim", "thought": "cyan", "action": "yellow",
         "observation": "green", "warn": "bold red", "final": "bold white",
+        "output": "dim",
     }
+    if kind == "output":
+        # Indent the actual command output so it reads as a result block.
+        for line in text.splitlines():
+            console.print(f"    │ {line}", style="dim")
+        return
     prefix = {
         "step": "", "thought": "[think] ", "action": "[run] ",
         "observation": "[result] ", "warn": "[warn] ", "final": "",
@@ -417,7 +423,7 @@ def cmd_watch(args) -> int:
                     rest = f.read()
                     if rest:
                         console.out(rest)
-                    console.print(f"\n[dim]Job {args.job_id} finished.[/]")
+                    console.print(f"\n[bold green]══ job {args.job_id} finished ══[/]")
                     return 0
                 time.sleep(0.4)
     except KeyboardInterrupt:
@@ -511,9 +517,10 @@ def _show_host_detail(host: str) -> None:
     t = Table(title=f"{host}  {entry.get('hostname', '') or ''}")
     t.add_column("Port", justify="right"); t.add_column("Proto")
     t.add_column("State"); t.add_column("Service", style="cyan")
+    t.add_column("Version / banner", style="dim", max_width=48)
     for p in ports:
         t.add_row(str(p["port"]), p.get("proto", ""), p.get("state", ""),
-                  p.get("service") or "")
+                  p.get("service") or "", p.get("version") or "")
     console.print(t)
 
 
@@ -836,6 +843,7 @@ def cmd_agent(args) -> int:
     path = agent.save_transcript(cfg.log_dir)
     console.print(Panel(final, title="Result", border_style="white"))
     console.print(f"[dim]Transcript: {path}[/]")
+    console.print("[bold green]══ agent run complete ══[/]")
     return 0
 
 
