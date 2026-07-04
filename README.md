@@ -13,6 +13,15 @@ let it run on **autopilot**, or drive individual tools yourself.
 - **Author:** Ali Alaqoul — <alialaqoul@gmail.com>
 - **License:** MIT
 
+## Screenshots
+
+Interactive menu and the service→hosts matrix (real output against a lab range):
+
+<p align="center">
+  <img src="assets/menu.png" alt="Autopwn interactive menu" width="49%">
+  <img src="assets/matrix.png" alt="Service to hosts matrix" width="49%">
+</p>
+
 ---
 
 ## ⚠️ Legal and authorized use only
@@ -220,7 +229,10 @@ python -m autopwn services --hosts    # also show a per-host table
 ```
 
 All scans (sweep, recon, and the agent's own scans) feed one shared results
-store, so the matrix always reflects everything discovered so far.
+store, so the matrix always reflects everything discovered so far. In the menu,
+**Results** gives a numbered host list you drill into for each host's detail:
+
+<p align="center"><img src="assets/hosts.png" alt="Discovered hosts list" width="70%"></p>
 
 ### Run the agent in the background + watch it
 
@@ -278,12 +290,35 @@ Every session writes a full JSON transcript to `logs/`.
 
 ### Interactive menu
 
-Prefer a menu to typing commands? Run with no arguments (or `menu`) for a
-number/letter-driven interface to everything above:
+Prefer menus to flags? Run with no arguments (or `autopwn menu`) for a
+number/letter-driven interface to everything above. Each option opens its own
+sub-menu, the screen stays anchored at the top, and results pause for review
+before you continue.
 
 ```bash
 python -m autopwn            # or: autopwn menu
 ```
+
+Top-level options:
+
+| # | Option | What it does |
+|---|--------|--------------|
+| **1** | Scan | Sweep a host/range/CIDR (auto-adds it to scope) → service matrix |
+| **2** | Results | Service→hosts matrix, or a numbered host list you drill into for port/service detail |
+| **3** | AI agent | Autopilot on a target, or a custom objective — launched as a background job |
+| **4** | Jobs | List / watch (live output) / stop background agent runs |
+| **5** | Run a single tool | Pick a tool **by number** (grouped by category) → run against **all applicable hosts** or one target |
+| **6** | List tools | The full catalog with install status, grouped by category |
+| **7** | Scope | View and add/remove allow & deny entries; check a target |
+| **8** | Variables | Discovered domain / credentials / …, and which tools use each |
+
+**Pick a tool by number, then fire it at every applicable host** — and **drill
+into a single host** for its ports and services:
+
+<p align="center">
+  <img src="assets/run_tool.png" alt="Run a tool, by category" width="49%">
+  <img src="assets/host_detail.png" alt="Host detail drill-down" width="49%">
+</p>
 
 ---
 
@@ -297,7 +332,10 @@ python -m autopwn            # or: autopwn menu
 | **Credentials** | `hydra`, `searchsploit` |
 
 Credentialed tools (Kerberoast, secretsdump, netexec with `-u/-p`, hydra) require
-valid credentials and are skipped until you have them.
+valid credentials and are skipped until you have them. `autopwn tools` shows the
+whole catalog grouped by category with install status:
+
+<p align="center"><img src="assets/tools.png" alt="Tool catalog by category" width="70%"></p>
 
 ---
 
@@ -317,7 +355,9 @@ every tool that uses it**:
   etc. get them filled in without you re-typing.
 
 See and manage them with `autopwn vars` (or menu → **Variables**), which also
-shows which tool uses each variable and via which flag.
+shows which tool uses each variable and via which flag:
+
+<p align="center"><img src="assets/variables.png" alt="Discovered variables and tool flag mapping" width="70%"></p>
 
 ## Extending: add your own tool
 
