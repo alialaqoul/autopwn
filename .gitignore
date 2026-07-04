@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local operator config & engagement data — never commit these
+config.yaml
+scope.yaml
+logs/
+*.log
+
+# Tool output / loot
+*.pot
+spns.txt
+*.hashcat
+loot/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,36 @@
+# Autopwn configuration. Copy to config.yaml and edit.
+
+llm:
+  # provider: one of "openai", "ollama", "anythingllm", "openai_compatible"
+  provider: ollama
+
+  # Model name as the provider expects it.
+  model: llama3.1:8b
+
+  # Base URL of the API. Defaults per provider if omitted:
+  #   openai            -> https://api.openai.com/v1
+  #   ollama            -> http://localhost:11434/v1
+  #   anythingllm       -> http://localhost:3001/api/v1
+  #   lm studio         -> http://localhost:1234/v1  (use provider: openai_compatible)
+  base_url: http://localhost:11434/v1
+
+  # API key. For local providers this is often ignored; set it via env instead:
+  #   export AUTOPWN_LLM_API_KEY=sk-...
+  # api_key: sk-...
+
+  temperature: 0.2
+  max_tokens: 2048
+
+agent:
+  # Hard cap on reason/act iterations per objective.
+  max_steps: 25
+  # Require human confirmation before each tool that changes remote state.
+  confirm_active_actions: true
+
+tools:
+  # Absolute paths only needed if the binary is not on PATH.
+  nmap_path: nmap
+  nuclei_path: nuclei
+
+scope_file: scope.yaml
+log_dir: logs

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autopwn"
+version = "0.1.0"
+description = "AI agent that orchestrates security tools for authorized penetration testing."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Ali Alaqoul", email = "alialaqoul@gmail.com" }]
+keywords = ["security", "pentest", "ai", "agent", "llm", "active-directory"]
+dependencies = [
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "rich>=13.7",
+    "pydantic>=2.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/autopwn"
+
+[project.scripts]
+autopwn = "autopwn.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["autopwn*"]

@@ -1,0 +1,17 @@
+# Authorization scope. Autopwn refuses to touch any target not listed here.
+# Copy to scope.yaml and edit before running against anything.
+
+engagement: "Home lab assessment"
+authorized_by: "your-name"
+# ISO date after which this scope is invalid.
+expires: "2026-12-31"
+
+# Targets you are permitted to test. CIDR ranges, single IPs, or hostnames.
+allow:
+  - 192.168.56.0/24
+  - 10.0.0.5
+  - testphp.vulnweb.com
+
+# Explicitly forbidden even if inside an allowed range.
+deny:
+  - 192.168.56.1        # e.g. the gateway
