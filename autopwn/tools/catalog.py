@@ -293,6 +293,18 @@ CATALOG: list[CommandSpec] = [
         install_hint="pipx install impacket.",
     ),
     CommandSpec(
+        name="certipy_find",
+        description="Enumerate Active Directory Certificate Services (AD CS): "
+                    "CAs and certificate templates, flagging vulnerable ones "
+                    "(ESC1-ESC8). Needs valid domain credentials.",
+        binary="certipy-ad", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH}, ["target", "domain", "username", "password"]),
+        build_args=lambda k: ["find", "-u", f"{_s(k['username'])}@{_s(k['domain'])}",
+                              "-p", _s(k["password"]), "-dc-ip", _s(k["target"]),
+                              "-stdout", "-vulnerable"],
+        aliases=["certipy"], timeout=600, install_hint="pipx install certipy-ad.",
+    ),
+    CommandSpec(
         name="bloodhound_python",
         description="Collect Active Directory data (users, groups, ACLs, "
                     "sessions, trusts) for BloodHound analysis. Needs valid "
@@ -476,7 +488,7 @@ _CATEGORIES = {
     "ad-smb": ["netexec_smb", "netexec_winrm", "netexec_ldap", "enum4linux",
                "smbmap", "smbclient_shares", "ldapsearch_anon",
                "kerbrute_userenum", "asrep_roast", "kerberoast",
-               "bloodhound_python", "secretsdump"],
+               "certipy_find", "bloodhound_python", "secretsdump"],
     "credentials": ["hydra"],
     "exploit": ["searchsploit"],
 }

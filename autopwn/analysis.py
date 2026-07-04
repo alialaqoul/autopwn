@@ -80,6 +80,16 @@ def assess_host(host: str, entry: dict) -> dict:
     if web:
         obs.append(f"Web service(s) on {', '.join(map(str, sorted(web)))} — "
                    "fingerprint and test (whatweb, nuclei, nikto, ffuf).")
+    if 8530 in pset or 8531 in pset:
+        obs.append("WSUS (8530/8531) — update server. If clients use HTTP (8530) "
+                   "without SSL enforced, it is a spoofing/lateral-movement "
+                   "target (PyWSUS/SharpWSUS with a MITM position).")
+        paths.append("If WSUS runs over HTTP and clients aren't forced to SSL: "
+                     "MITM update traffic to push a signed binary as SYSTEM.")
+    if 8443 in pset or 8444 in pset:
+        obs.append("Management console (8443) / agent handler (8444) — likely "
+                   "Trellix/McAfee ePO. Test the console for default admin creds; "
+                   "ePO admin => code execution across all managed endpoints.")
     if 21 in pset:
         obs.append("FTP (21) — test anonymous login and known CVEs.")
     if 22 in pset:

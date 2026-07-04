@@ -26,6 +26,7 @@ TOOL_SERVICES: dict[str, dict] = {
     "netexec_ldap":     {"ports": [389, 636, 3268, 3269], "services": ["ldap"]},
     "ldapsearch_anon":  {"ports": [389, 636, 3268, 3269], "services": ["ldap"]},
     "bloodhound_python": {"ports": [389, 636, 3268], "services": ["ldap"]},
+    "certipy_find":      {"ports": [389, 636], "services": ["ldap"]},
     # Kerberos / AD auth
     "kerbrute_userenum": {"ports": [88], "services": ["kerberos"]},
     "asrep_roast":       {"ports": [88], "services": ["kerberos"]},
