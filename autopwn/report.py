@@ -50,9 +50,12 @@ def build_model(meta: Engagement, transcript: list[dict],
                   "service": p.get("service", ""), "version": p.get("version", "")}
                  for p in ports), key=lambda p: p["port"]),
         })
+    from .analysis import assess
+    analysis = assess(hosts, facts or {})
     return {
         "meta": meta,
         "findings": final or "",
+        "analysis": analysis,
         "hosts": host_rows,
         "facts": facts or {},
         "actions": [{"tool": a.get("name", ""), "args": a.get("args", {}),
@@ -70,17 +73,32 @@ def to_markdown(m: dict) -> str:
     for k, v in meta.rows():
         if v:
             out.append(f"- **{k}:** {v}")
-    out += ["", "## Executive summary / findings", "", m["findings"] or "_None._", ""]
+    a = m["analysis"]
+    summary = m["findings"] if _real(m["findings"]) else a["summary"]
+    out += ["", "## Executive summary", "", summary or "_None._", ""]
+
+    if a["hosts"]:
+        out += ["## Security observations & attack paths", ""]
+        for h in a["hosts"]:
+            title = h["host"] + (f" ({h['hostname']})" if h["hostname"] else "")
+            out += [f"### {title} — {h['role']}", ""]
+            for o in h["observations"]:
+                out.append(f"- {o}")
+            if h["attack_paths"]:
+                out += ["", "**Likely attack paths:**"]
+                for i, ap in enumerate(h["attack_paths"], 1):
+                    out.append(f"{i}. {ap}")
+            out.append("")
 
     out += ["## Discovered hosts & services", ""]
     if m["hosts"]:
         for h in m["hosts"]:
             title = h["host"] + (f" ({h['hostname']})" if h["hostname"] else "")
-            out += [f"### {title}", "", "| Port | Proto | Service | Version / banner |",
-                    "|---|---|---|---|"]
+            out += [f"### {title}", "", "| Port | Proto | Service / version |",
+                    "|---|---|---|"]
             for p in h["ports"]:
-                out.append(f"| {p['port']} | {p['proto']} | {p['service']} | "
-                           f"{p['version']} |")
+                svc = p['service'] + (f" — {p['version']}" if p['version'] else "")
+                out.append(f"| {p['port']} | {p['proto']} | {svc} |")
             out.append("")
     else:
         out += ["_No hosts recorded._", ""]
@@ -129,6 +147,18 @@ def _esc(s) -> str:
     return _html.escape(str(s or ""))
 
 
+def _real(text: str) -> bool:
+    """True if the model's findings text is real prose, not JSON/filler."""
+    t = (text or "").strip()
+    if not t or len(t) < 15:
+        return False
+    if t.startswith("{") and "action" in t[:40]:
+        return False
+    if t.startswith("Assessment complete"):
+        return False
+    return True
+
+
 def to_html(m: dict) -> str:
     meta: Engagement = m["meta"]
     p = [f"<html><head><meta charset='utf-8'><style>{_CSS}</style></head><body>"]
@@ -139,17 +169,40 @@ def to_html(m: dict) -> str:
             p.append(f"<tr><th>{_esc(k)}</th><td>{_esc(v)}</td></tr>")
     p.append("</table>")
 
-    p.append("<h2>Executive summary / findings</h2>")
-    p.append(f"<div class='findings'>{_esc(m['findings']) or 'None.'}</div>")
+    a = m["analysis"]
+    p.append("<h2>Executive summary</h2>")
+    summary = m["findings"] if _real(m["findings"]) else a["summary"]
+    p.append(f"<div class='findings'>{_esc(summary)}</div>")
+
+    # Security observations & attack paths (deterministic, grounded in scan data).
+    if a["hosts"]:
+        p.append("<h2>Security observations &amp; attack paths</h2>")
+        for h in a["hosts"]:
+            title = h["host"] + (f" ({h['hostname']})" if h["hostname"] else "")
+            p.append(f"<h3>{_esc(title)} — <span style='color:#b00'>"
+                     f"{_esc(h['role'])}</span></h3>")
+            if h["observations"]:
+                p.append("<b>Observations</b><ul>")
+                for o in h["observations"]:
+                    p.append(f"<li>{_esc(o)}</li>")
+                p.append("</ul>")
+            if h["attack_paths"]:
+                p.append("<b>Likely attack paths</b><ol>")
+                for ap in h["attack_paths"]:
+                    p.append(f"<li>{_esc(ap)}</li>")
+                p.append("</ol>")
 
     p.append("<h2>Discovered hosts &amp; services</h2>")
     for h in m["hosts"]:
         title = h["host"] + (f" ({h['hostname']})" if h["hostname"] else "")
-        p.append(f"<h3>{_esc(title)}</h3><table class='ports'>"
-                 "<tr><th>Port</th><th>Proto</th><th>Service</th><th>Version / banner</th></tr>")
+        p.append(f"<h3>{_esc(title)}</h3>"
+                 "<table><colgroup><col width='12%'><col width='12%'>"
+                 "<col width='76%'></colgroup>"
+                 "<tr><th>Port</th><th>Proto</th><th>Service / version</th></tr>")
         for pt in h["ports"]:
+            svc = pt["service"] + (f" — {pt['version']}" if pt["version"] else "")
             p.append(f"<tr><td>{pt['port']}</td><td>{_esc(pt['proto'])}</td>"
-                     f"<td>{_esc(pt['service'])}</td><td>{_esc(pt['version'])}</td></tr>")
+                     f"<td>{_esc(svc[:120])}</td></tr>")
         p.append("</table>")
     if not m["hosts"]:
         p.append("<p><i>No hosts recorded.</i></p>")
@@ -161,7 +214,9 @@ def to_html(m: dict) -> str:
             p.append(f"<tr><td>{_esc(k)}</td><td>{_esc(v)}</td></tr>")
         p.append("</table>")
 
-    p.append("<h2>Actions performed</h2><table class='acts'>"
+    p.append("<h2>Actions performed</h2>"
+             "<table><colgroup><col width='20%'><col width='28%'>"
+             "<col width='52%'></colgroup>"
              "<tr><th>Tool</th><th>Target</th><th>Result</th></tr>")
     for a in m["actions"]:
         tgt = a["args"].get("target") or a["args"].get("url") or ""

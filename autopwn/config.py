@@ -37,6 +37,8 @@ class AgentConfig(BaseModel):
     tool_top_k: int = 0
     # Restrict tools to those applicable to the target's discovered open ports.
     scope_tools: bool = True
+    # Synthesize an executive summary from the evidence at the end of a run.
+    synthesize: bool = True
 
 
 class ToolsConfig(BaseModel):

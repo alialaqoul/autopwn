@@ -88,8 +88,13 @@ class Agent:
         if seed_target and getattr(self.config.agent, "scope_tools", True):
             from ..applicability import tools_applicable_to
             base_tools = tools_applicable_to(seed_target, base_tools)
-            self.report("thought", f"applicable tools for {seed_target}: "
-                        + ", ".join(t.name for t in base_tools))
+        # Drop tools that REQUIRE credentials until we actually have some, so the
+        # agent doesn't waste steps on kerberoast/secretsdump with no creds.
+        from .. import store as _st
+        if not (_st.facts().get("username") and _st.facts().get("password")):
+            base_tools = [t for t in base_tools if not self._needs_creds(t)]
+        self.report("thought", f"applicable tools for {seed_target or 'objective'}: "
+                    + ", ".join(t.name for t in base_tools))
 
         # Optional semantic tool retrieval: rank tools per step, pass only top-k.
         top_k = self.config.agent.tool_top_k
@@ -152,12 +157,70 @@ class Agent:
         else:
             self.report("warn", "Reached max steps.")
 
-        # Append a deterministic evidence block from the store so the report is
-        # grounded in real scan data regardless of what the model wrote.
+        # Synthesise a grounded executive summary if the model didn't produce a
+        # real one — this is the AI's interpretation of the collected evidence.
+        if getattr(self.config.agent, "synthesize", True):
+            if not self._is_real_findings(final):
+                self.report("step", "— synthesising findings")
+                syn = self._synthesize()
+                if syn:
+                    final = syn
+                    self.report("final", syn)
+
+        # Append the deterministic evidence block so the report is grounded in
+        # real scan data regardless of what the model wrote.
         evidence = self._evidence(seed_target)
         if evidence:
             final = f"{final}\n\n{evidence}"
         return final
+
+    @staticmethod
+    def _needs_creds(tool) -> bool:
+        req = set(tool.parameters.get("required", []))
+        return "username" in req and "password" in req
+
+    @staticmethod
+    def _is_real_findings(text: str) -> bool:
+        t = (text or "").strip()
+        if not t or len(t) < 20:
+            return False
+        if t.startswith("{") and "action" in t[:40]:
+            return False
+        return not t.startswith("Assessment complete")
+
+    def _synthesize(self) -> str:
+        """Ask the model to write an executive summary from the real evidence."""
+        try:
+            from .. import store
+            from ..analysis import assess
+        except Exception:
+            return ""
+        a = assess(store.all_hosts(), store.facts())
+        ev = [a["summary"]]
+        for h in a["hosts"]:
+            ev.append(f"\nHost {h['host']} — role: {h['role']}")
+            ev += [f"  - {o}" for o in h["observations"]]
+        acts = [e for e in self.transcript if e.get("kind") == "tool_result"]
+        if acts:
+            ev.append("\nTool results:")
+            ev += [f"  - {e.get('name')}: {'OK' if e.get('ok') else 'failed'} — "
+                   f"{e.get('summary', '')[:100]}" for e in acts[:25]]
+        prompt = [
+            Message(role="system", content=(
+                "You are a penetration tester writing the executive summary of "
+                "an assessment report. Use ONLY the evidence provided below. Be "
+                "concrete and concise: state each host's role, the key exposures/"
+                "misconfigurations actually observed, and the most likely attack "
+                "paths. Do NOT invent CVEs, versions, or findings.")),
+            Message(role="user", content="EVIDENCE:\n" + "\n".join(ev) +
+                    "\n\nWrite the executive summary (a short paragraph plus a "
+                    "short bulleted list of attack paths)."),
+        ]
+        try:
+            c = self.provider.chat(prompt)
+            return (c.content or "").strip()
+        except Exception:
+            return ""
 
     def _evidence(self, target: Optional[str]) -> str:
         """Build a factual evidence block from the results store."""
