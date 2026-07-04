@@ -54,7 +54,10 @@ def _reporter(kind: str, text: str) -> None:
 
 def _confirm(name: str, args: dict) -> bool:
     console.print(f"[yellow]Active tool requested:[/] {name} {args}")
-    ans = console.input("Run it? [y/N] ").strip().lower()
+    try:
+        ans = console.input("Run it? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False  # no terminal to answer — skip rather than crash
     return ans in ("y", "yes")
 
 
@@ -817,7 +820,10 @@ def cmd_agent(args) -> int:
         return 1
     registry = default_registry(cfg.tools)
     agent = Agent(cfg, provider, registry, scope, reporter=_reporter)
-    if cfg.agent.confirm_active_actions:
+    # Only prompt for intrusive tools when attached to a real terminal. A
+    # detached/background run has no stdin, so prompting would crash on EOF —
+    # there the operator already authorized the target by launching it.
+    if cfg.agent.confirm_active_actions and sys.stdin.isatty():
         agent.confirm_hook = _confirm
 
     console.print(Panel(f"[bold]{objective}[/]\n\n{scope.summary()}",
