@@ -100,14 +100,25 @@ def assess_host(host: str, entry: dict) -> dict:
             "open_count": len(pset)}
 
 
-def _evidence(transcript, *tool_names):
-    """Find the command + output of the first successful matching tool run."""
+def _evidence(transcript, tool_names, hosts=None):
+    """Command + output of a matching tool run.
+
+    Prefer a run that actually targeted one of the finding's hosts (so the
+    evidence isn't, say, a loopback probe); fall back to the first match.
+    """
+    hosts = hosts or []
+    fallback = None
     for e in transcript or []:
-        if e.get("kind") == "tool_result" and e.get("name") in tool_names:
-            cmd = e.get("command") or f"{e.get('name')} {e.get('args', {})}"
-            out = (e.get("output") or e.get("summary") or "").strip()
+        if e.get("kind") != "tool_result" or e.get("name") not in tool_names:
+            continue
+        cmd = e.get("command") or f"{e.get('name')} {e.get('args', {})}"
+        out = (e.get("output") or e.get("summary") or "").strip()
+        ctx = f"{cmd} {e.get('args', {})} {out}"
+        if hosts and any(h in ctx for h in hosts):
             return cmd, out[:1500]
-    return "", ""
+        if fallback is None:
+            fallback = (cmd, out[:1500])
+    return fallback or ("", "")
 
 
 # Generic finding rules. Each: predicate over a host's open ports + facts =>
@@ -192,7 +203,7 @@ def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
         matched = hosts_where(r["pred"])
         if not matched:
             continue
-        cmd, out = _evidence(transcript, *r["tools"])
+        cmd, out = _evidence(transcript, r["tools"], matched)
         findings.append({
             "id": f"F-{fid:02d}", "title": r["title"], "severity": r["severity"],
             "cvss": r["cvss"], "hosts": matched, "description": r["desc"],

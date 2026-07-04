@@ -85,11 +85,22 @@ def parse_normal(text: str) -> list[Record]:
     return out
 
 
+def _is_loopback(host: str) -> bool:
+    hl = str(host).strip().lower()
+    return hl.startswith("127.") or hl in ("::1", "localhost", "0.0.0.0")
+
+
 def record_to_store(records: list[Record]) -> int:
-    """Persist parsed records into the shared store. Returns host count."""
+    """Persist parsed records into the shared store. Returns host count.
+
+    Loopback/localhost is skipped — it is never a real assessment target and
+    would otherwise pollute the service matrix, agent priming, and reports.
+    """
     from . import store
     n = 0
     for host, hostname, ports in records:
+        if _is_loopback(host):
+            continue
         store.record_ports(host, ports, hostname=hostname or None)
         n += 1
     return n

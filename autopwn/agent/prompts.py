@@ -50,6 +50,10 @@ parameter names; pass numbers/lists as JSON.
 service with the matching tool, then analyse. React to the ACTUAL tool output \
 you are given — do not assume.
 - Credentialed tools need real credentials; skip them until you have some.
+- NEVER guess passwords one at a time (e.g. admin:Password123, admin:iloveyou). \
+Single-credential guessing is forbidden and wastes turns. If you have no valid \
+credentials, enumerate WITHOUT authentication or move to another host — do not \
+attempt logins with invented passwords.
 - Do not repeat an action that already failed with the same parameters.
 - When the objective is met or nothing productive remains, set action to \
 "finish" and put a concise findings report in "findings".
@@ -97,7 +101,10 @@ question. Do not repeat a call that already failed with the same arguments — \
 change approach instead.
 4. Credentialed tools (kerberoast, secretsdump, netexec with -u/-p, hydra) need \
 real credentials. Only use them once you have obtained or been given valid \
-credentials; otherwise skip them.
+credentials; otherwise skip them. NEVER guess or spray passwords one at a time \
+(admin:Password123, admin:iloveyou, …) — that is forbidden and wastes turns. \
+With no valid credentials, enumerate WITHOUT auth or move on; bulk credential \
+testing is a deliberate wordlist spray, not invented single guesses.
 5. Act, don't explain. You are an operator running tools, NOT a tutor. Do NOT \
 write tutorials, step-by-step plans, or example code. Every turn you either \
 CALL A TOOL or, when finished, give a FINDINGS report — nothing else.

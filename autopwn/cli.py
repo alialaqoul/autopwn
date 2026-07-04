@@ -451,8 +451,47 @@ _MENU = [
     ("6", "List tools (by category)"),
     ("7", "Scope (view / add / remove allow & deny)"),
     ("8", "Variables (discovered domain / creds / …)"),
+    ("9", "Clear ALL (results, variables, saved reports & finished jobs)"),
     ("q", "Quit"),
 ]
+
+
+def _clear_all(ns) -> None:
+    """Full fresh slate: wipe the results store (hosts/ports/services) and all
+    discovered variables, and delete session transcripts/reports and finished
+    job files from the logs folder. Any *running* job is left untouched."""
+    from . import store, jobs as _jobs
+    from pathlib import Path as _Path
+    cfg = Config.load(getattr(ns(), "config", "config.yaml"))
+    log_dir = _Path(cfg.log_dir)
+
+    sessions = list(log_dir.glob("session-*"))
+    running = {j["id"] for j in _jobs.list_jobs(log_dir) if j.get("status") == "running"}
+    jobs_dir = log_dir / "jobs"
+    job_files = [f for f in jobs_dir.glob("*")
+                 if f.is_file() and not any(rid in f.name for rid in running)]
+
+    console.print(f"[yellow]This will clear all hosts/variables and delete "
+                  f"{len(sessions)} session/report file(s) and {len(job_files)} "
+                  f"job file(s).[/]")
+    if running:
+        console.print(f"[dim]({len(running)} running job(s) will be kept.)[/]")
+    if _ask("proceed with full reset? [y/N] ").lower() not in ("y", "yes"):
+        console.print("[dim]cancelled.[/]"); _pause(); return
+
+    store.clear()
+    store.clear_facts()
+    removed = 0
+    for f in sessions + job_files:
+        try:
+            f.unlink(); removed += 1
+        except OSError:
+            pass
+    console.print(f"[yellow]Fresh slate:[/] results and variables reset; "
+                  f"{removed} file(s) deleted from {log_dir}.")
+    if running:
+        console.print(f"[dim]{len(running)} running job(s) left intact.[/]")
+    _pause()
 
 
 def _vars_menu(ns, cfg_path) -> None:
@@ -561,7 +600,7 @@ def _results_menu(ns, cfg_path) -> None:
         c = _submenu("Results", [
             ("1", "Service → hosts matrix"),
             ("2", "Hosts — pick one for its port/service detail"),
-            ("3", "Export report of the last AI job (PDF/HTML/MD)"),
+            ("3", "Export report of the last AI job (HTML/DOCX/MD)"),
             ("4", "Clear stored results"),
             ("b", "Back")])
         if c == "1":
@@ -569,7 +608,7 @@ def _results_menu(ns, cfg_path) -> None:
         elif c == "2":
             _hosts_menu(ns, cfg_path)
         elif c == "3":
-            fmt = _ask("formats [pdf,docx,html,md]: ") or "pdf,docx,html,md"
+            fmt = _ask("formats [html,docx,md]: ") or "html,docx,md"
             cmd_report(ns(transcript=None, format=fmt)); _pause()
         elif c == "4":
             if _ask("really clear all results? [y/N] ").lower() in ("y", "yes"):
@@ -623,7 +662,7 @@ def _agent_menu(ns, cfg_path) -> None:
 
     rc = cmd_agent(ns(target=target, objective=objective, background=True,
                       engagement=engagement, client=client, assessor=assessor,
-                      authorized_by=authorized_by, report_format="pdf,docx,html,md"))
+                      authorized_by=authorized_by, report_format="html,docx,md"))
     if rc == 0 and _ask("watch it now? [Y/n] ").lower() in ("", "y", "yes"):
         js = jobs.list_jobs(cfg.log_dir)
         if js:
@@ -799,11 +838,16 @@ def cmd_menu(args) -> int:
         "6": lambda: (cmd_tools(ns()), _pause()),  # direct action → self-pause
         "7": lambda: _scope_menu(ns, cfg_path),
         "8": lambda: _vars_menu(ns, cfg_path),
+        "9": lambda: _clear_all(ns),
     }
     while True:
         console.clear()  # keep the menu anchored at the top of the terminal
-        console.print(Panel("[bold]Autopwn[/] — interactive menu\n"
-                            "[dim]by Ali Alaqoul[/]", border_style="cyan"))
+        console.print(Panel(
+            "[bold]Autopwn[/] — interactive menu\n"
+            "[dim]by Ali Alaqoul[/]\n"
+            "[dim]alialaqoul@gmail.com[/]\n"
+            "[dim]https://www.linkedin.com/in/alialaqoul/[/]",
+            border_style="cyan"))
         for key, label in _MENU:
             console.print(f"  [bold cyan]{key}[/]  {label}")
         choice = _ask("\n[bold]select>[/] ").lower()
@@ -901,12 +945,10 @@ def cmd_agent(args) -> int:
     _store.configure(f"{cfg.log_dir}/results.json")
     model = report.build_model(meta, agent.transcript, _store.all_hosts(),
                                _store.facts(), final)
-    formats = [f.strip() for f in (args.report_format or "md,html").split(",")]
+    formats = [f.strip() for f in (args.report_format or "html,docx,md").split(",")]
     written = report.export(model, path.with_suffix(""), formats)
     if written:
         console.print("[green]Report:[/] " + ", ".join(str(w) for w in written))
-    if "pdf" in formats and not any(str(w).endswith(".pdf") for w in written):
-        console.print("[dim](PDF skipped — pip install xhtml2pdf to enable)[/]")
     console.print("[bold green]══ agent run complete ══[/]")
     return 0
 
@@ -939,7 +981,7 @@ def cmd_report(args) -> int:
     if written:
         console.print("[green]Exported:[/] " + ", ".join(str(w) for w in written))
     else:
-        console.print("[yellow]Nothing written (for PDF: pip install xhtml2pdf).[/]")
+        console.print("[yellow]Nothing written (for DOCX: pip install python-docx).[/]")
     return 0
 
 
@@ -1004,13 +1046,13 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--assessor", help="Who is running the assessment.")
     a.add_argument("--authorized-by", dest="authorized_by",
                    help="Who authorized the test.")
-    a.add_argument("--report-format", default="pdf,docx,html,md",
-                   help="Auto-export formats on completion (pdf,docx,html,md).")
+    a.add_argument("--report-format", default="html,docx,md",
+                   help="Auto-export formats on completion (html,docx,md).")
     a.set_defaults(func=cmd_agent)
 
     rp = sub.add_parser("report", help="Export a saved session transcript as a report.")
     rp.add_argument("--transcript", help="Path to logs/session-*.json (default: latest).")
-    rp.add_argument("--format", default="pdf,docx,html,md", help="pdf,docx,html,md")
+    rp.add_argument("--format", default="html,docx,md", help="html,docx,md")
     rp.set_defaults(func=cmd_report)
 
     j = sub.add_parser("jobs", help="List background agent jobs.")

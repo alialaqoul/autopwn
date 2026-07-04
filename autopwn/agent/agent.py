@@ -27,6 +27,10 @@ Reporter = Callable[[str, str], None]  # (event_type, text)
 class Agent:
     #: how many consecutive narrate-instead-of-act turns to tolerate
     MAX_STALLS = 3
+    #: after this many failed credential guesses on one host, block further ones
+    CRED_FAIL_LIMIT = 2
+    #: consecutive failed/blocked credential guesses that abort the run
+    CRED_SPIN_LIMIT = 3
     #: corrective sent when the model writes prose instead of calling a tool
     NUDGE = (
         "You did NOT call a tool. Do not explain, plan, summarize, or write "
@@ -62,6 +66,12 @@ class Agent:
             scope=self.scope,
             confirm_active_actions=self.config.agent.confirm_active_actions,
         )
+        # Credential-guessing guardrail state (per run). Small local models tend
+        # to burn steps trying default passwords one-by-one; we cap that.
+        self._auth_fails: dict[str, int] = {}
+        self._tried_creds: set[tuple] = set()
+        self._cred_spin = 0
+        self._abort = False
         self._structured = self.config.agent.structured
         system = (STRUCTURED_SYSTEM.replace(
             "{tools}", tool_signatures(self.registry.all()))
@@ -172,6 +182,11 @@ class Agent:
                         role="user",
                         content=f"Result of {call.name}:\n{observation}\n\n"
                                 "Choose the next action (or finish)."))
+            if self._abort:
+                self.report("warn", "Repeated failed logins with no valid "
+                            "credentials — stopping the password-guessing loop "
+                            "and synthesising findings.")
+                break
         else:
             self.report("warn", "Reached max steps.")
 
@@ -368,6 +383,32 @@ class Agent:
             self._log("tool_error", {"name": name, "error": "unknown"})
             return msg
 
+        # Credential-guessing guardrail: an authenticated attempt is any call
+        # carrying a non-empty password at a host. Small models spray default
+        # passwords one-at-a-time, which is slow (a full LLM round-trip per
+        # guess) and pointless. Block repeats and stop after a few failures.
+        host = args.get("target") or args.get("host") or ""
+        pw, user = args.get("password"), args.get("username", "")
+        is_cred = bool(pw) and bool(host)
+        if is_cred:
+            key = (host, str(user), str(pw))
+            if key in self._tried_creds:
+                self._cred_spin += 1
+                if self._cred_spin >= self.CRED_SPIN_LIMIT:
+                    self._abort = True
+                return (f"[BLOCKED] {user or '(blank)'}:{pw} was already tried on "
+                        f"{host} and failed. Do not repeat or guess credentials.")
+            if self._auth_fails.get(host, 0) >= self.CRED_FAIL_LIMIT:
+                self._cred_spin += 1
+                if self._cred_spin >= self.CRED_SPIN_LIMIT:
+                    self._abort = True
+                return (f"[BLOCKED] {self._auth_fails[host]} credential guesses "
+                        f"already failed on {host}; you have NO valid credentials "
+                        f"for it. Stop guessing passwords one-by-one — continue "
+                        f"unauthenticated enumeration or move to another host. "
+                        f"(Bulk credential testing needs a wordlist spray, not "
+                        f"single guesses.)")
+
         # Human-in-the-loop gate for intrusive tools.
         if tool.active and ctx.confirm_active_actions and self.confirm_hook:
             if not self.confirm_hook(name, args):
@@ -386,6 +427,24 @@ class Agent:
         except Exception as e:  # tool crashed; report, keep the loop alive
             self._log("tool_exception", {"name": name, "error": repr(e)})
             return f"[ERROR] Tool '{name}' failed: {e}"
+
+        # Update the credential guardrail from the result.
+        if is_cred:
+            self._tried_creds.add(key)
+            blob = (result.summary + " " + (result.raw_output or "")).upper()
+            raw = result.raw_output or ""
+            failed = ("LOGON_FAILURE" in blob or "ACCESS_DENIED" in blob
+                      or "ACCOUNT_LOCKED" in blob
+                      or ("[-]" in raw and "[+]" not in raw))
+            if failed:
+                self._auth_fails[host] = self._auth_fails.get(host, 0) + 1
+                self._cred_spin += 1
+                if self._cred_spin >= self.CRED_SPIN_LIMIT:
+                    self._abort = True
+            else:
+                self._cred_spin = 0  # a valid login breaks the guess loop
+        else:
+            self._cred_spin = 0  # any non-credential action resets the counter
 
         self._log("tool_result", {"name": name, "args": args,
                                   "ok": result.ok, "summary": result.summary,

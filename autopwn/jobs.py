@@ -41,15 +41,35 @@ def log_path(job_id: str) -> Path:
 def _alive(pid: int) -> bool:
     if pid <= 0:
         return False
-    try:
-        if os.name == "nt":
+    if os.name == "nt":
+        try:
             out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
                                  capture_output=True, text=True)
             return str(pid) in out.stdout
+        except OSError:
+            return False
+    # POSIX. A detached job is a direct child of the process that launched it;
+    # when it exits it becomes a zombie (<defunct>) until reaped. os.kill(pid, 0)
+    # succeeds on a zombie, so we must detect and discount that state, otherwise
+    # finished jobs show as "running" forever.
+    try:  # if it's our child and already exited, reap it — then it's gone.
+        reaped, _ = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            return False
+    except (ChildProcessError, OSError):
+        pass  # not our child (different process is asking), or already reaped
+    try:
         os.kill(pid, 0)
-        return True
     except (OSError, ProcessLookupError):
         return False
+    try:  # exists — but a zombie counts as finished, not running.
+        with open(f"/proc/{pid}/stat", "r") as f:
+            state = f.read().rsplit(")", 1)[1].split()[0]
+        if state == "Z":
+            return False
+    except (OSError, IndexError):
+        pass
+    return True
 
 
 def start(cli_args: list[str], label: str, log_dir: str | Path) -> str:

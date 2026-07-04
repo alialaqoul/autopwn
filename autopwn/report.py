@@ -1,21 +1,60 @@
 # Author: Ali Alaqoul <alialaqoul@gmail.com>
-"""Assessment report generation — export an AI job as Markdown / HTML / PDF / DOCX.
+"""Assessment report generation — export an AI job as Markdown / HTML / DOCX.
 
 Builds a professional penetration-test report (executive summary, finding
 summary, scope, testing process, per-finding detail with evidence, prioritised
 recommendations, and a command-log appendix) entirely from the session
 transcript, the results store, and the deterministic analysis — nothing is
-hardcoded to any environment. PDF uses xhtml2pdf and DOCX uses python-docx when
-installed; Markdown/HTML always work with no dependencies.
+hardcoded to any environment. DOCX uses python-docx when installed;
+Markdown/HTML always work with no dependencies.
 """
 from __future__ import annotations
 
 import html as _html
+import re as _re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 _SEV_ORDER = ["Critical", "High", "Medium", "Low", "Info"]
+
+
+def _routable_hosts(hosts: dict) -> dict:
+    """Drop loopback / localhost entries — never real assessment targets."""
+    out = {}
+    for h, entry in (hosts or {}).items():
+        hl = str(h).strip().lower()
+        if hl.startswith("127.") or hl in ("::1", "localhost", "0.0.0.0"):
+            continue
+        out[h] = entry
+    return out
+
+
+def _clean_summary(text: str) -> str:
+    """Turn the model's final message into clean prose for the exec summary.
+
+    Strips the machine-readable EVIDENCE block the agent appends to its
+    narrative, drops a repeated 'Executive Summary' label, and normalises
+    markdown emphasis / bullet glyphs so they don't render literally.
+    """
+    t = (text or "").strip()
+    if not t:
+        return ""
+    for marker in ("--- EVIDENCE", "EVIDENCE (from tool", "--- Discovered",
+                   "Discovered variables:"):
+        i = t.find(marker)
+        if i != -1:
+            t = t[:i].strip()
+    t = _re.sub(r"^\**\s*executive summary\s*\**[:\-]?\s*", "", t, flags=_re.I)
+    t = t.replace("**", "").replace("__", "")
+    # Models often write bullets inline ("include: * a * b" / "paths: • x • y").
+    # Break those onto their own lines so they render as a real list.
+    t = _re.sub(r"\s*[•‣▪]\s+", "\n- ", t)                 # glyph bullets
+    t = _re.sub(r"(?<=[\w\).:,])\s+\*\s+", "\n- ", t)       # ' * ' between words
+    t = _re.sub(r"^\s*[•‣▪·*]\s+", "- ", t, flags=_re.M)    # line-start bullet
+    t = _re.sub(r"[•‣▪·]", "-", t)                          # any stray glyph
+    t = _re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
 
 
 @dataclass
@@ -58,6 +97,7 @@ def build_model(meta: Engagement, transcript: list, hosts: dict,
                 facts: dict, final: str) -> dict:
     from .analysis import assess, build_findings
 
+    hosts = _routable_hosts(hosts)
     analysis = assess(hosts, facts or {})
     findings = build_findings(hosts, facts or {}, transcript)
 
@@ -97,8 +137,10 @@ def build_model(meta: Engagement, transcript: list, hosts: dict,
                      "action": f["recommendation"], "finding": f["id"]})
     recs.sort(key=lambda r: {"High": 0, "Medium": 1, "Low": 2}[r["priority"]])
 
-    # Executive summary: prefer the model's real narrative, else a factual one.
-    exec_summary = final if _real(final) else _auto_summary(analysis, counts)
+    # Executive summary: prefer the model's real narrative (cleaned of the
+    # machine evidence block and markdown noise), else a factual auto-summary.
+    cleaned = _clean_summary(final)
+    exec_summary = cleaned if _real(cleaned) else _auto_summary(analysis, counts)
 
     return {
         "meta": meta, "exec_summary": exec_summary, "analysis": analysis,
@@ -109,7 +151,8 @@ def build_model(meta: Engagement, transcript: list, hosts: dict,
                          "command": e.get("command", "") or f"{e.get('name')} {e.get('args', {})}",
                          "ok": e.get("ok", False),
                          "output": (e.get("output") or e.get("summary") or "")}
-                        for e in actions],
+                        for e in actions
+                        if "127.0.0.1" not in (e.get("command", "") + str(e.get("args", "")))],
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -204,10 +247,11 @@ h2{color:#0b5394;margin-top:26px;border-bottom:1px solid #ccc;padding-bottom:3px
 h3{color:#222;margin-top:18px}h4{color:#444;margin:10px 0 2px}
 table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px;table-layout:fixed}
 th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;word-wrap:break-word}
-th{background:#0b5394;color:#fff}tr:nth-child(even){background:#f4f7fb}
-.sev-Critical{color:#fff;background:#7b0000;padding:1px 6px}.sev-High{color:#fff;background:#c00;padding:1px 6px}
-.sev-Medium{color:#000;background:#f4b400;padding:1px 6px}.sev-Low{color:#fff;background:#3c78d8;padding:1px 6px}
-.sev-Info{color:#fff;background:#888;padding:1px 6px}
+th{background:#0b5394;color:#fff}tbody tr:nth-child(even){background:#f4f7fb}
+tr{page-break-inside:avoid}thead{display:table-header-group}
+.sev-Critical{color:#fff;background:#7b0000;padding:1px 5px;white-space:nowrap}.sev-High{color:#fff;background:#c00;padding:1px 5px;white-space:nowrap}
+.sev-Medium{color:#000;background:#f4b400;padding:1px 5px;white-space:nowrap}.sev-Low{color:#fff;background:#3c78d8;padding:1px 5px;white-space:nowrap}
+.sev-Info{color:#fff;background:#888;padding:1px 5px;white-space:nowrap}
 pre{background:#f5f5f5;border:1px solid #ddd;padding:8px;font-size:11px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word}
 .meta td{border:none;padding:2px 8px}.foot{color:#888;font-size:11px;margin-top:30px;border-top:1px solid #ddd;padding-top:8px}
 """
@@ -215,6 +259,56 @@ pre{background:#f5f5f5;border:1px solid #ddd;padding:8px;font-size:11px;white-sp
 
 def _e(s):
     return _html.escape(str(s or ""))
+
+
+def _pre(text: str, width: int = 88) -> str:
+    """Escape text for a <pre> block and hard-wrap over-long lines.
+
+    Long unbreakable tokens (e.g. a comma-separated port list) can overflow the
+    page when the HTML is printed. We insert real breaks at a separator near the
+    width — preserving all existing whitespace (nmap output columns) rather than
+    collapsing it the way textwrap would.
+    """
+    out = []
+    for line in str(text or "").split("\n"):
+        while len(line) > width:
+            seg = line[:width]
+            cut = max(seg.rfind(","), seg.rfind(" "), seg.rfind("/"),
+                      seg.rfind(";"), seg.rfind("|"))
+            if cut < width - 24:      # no good separator near the edge → hard cut
+                cut = width - 1
+            out.append(line[:cut + 1])
+            line = line[cut + 1:]
+        out.append(line)
+    return _e("\n".join(out))
+
+
+def _summary_html(text: str) -> str:
+    """Render cleaned summary text as HTML paragraphs and bullet lists."""
+    para: list[str] = []
+    bullets: list[str] = []
+    out: list[str] = []
+
+    def flush_para():
+        if para:
+            out.append(f"<p>{_e(' '.join(para))}</p>")
+            para.clear()
+
+    def flush_bullets():
+        if bullets:
+            out.append("<ul>" + "".join(f"<li>{_e(b)}</li>" for b in bullets) + "</ul>")
+            bullets.clear()
+
+    for ln in (text or "").splitlines():
+        s = ln.strip()
+        if not s:
+            flush_para(); flush_bullets(); continue
+        if s.startswith("- "):
+            flush_para(); bullets.append(s[2:].strip())
+        else:
+            flush_bullets(); para.append(s)
+    flush_para(); flush_bullets()
+    return "".join(out) or f"<p>{_e(text)}</p>"
 
 
 def to_html(m: dict) -> str:
@@ -228,41 +322,38 @@ def to_html(m: dict) -> str:
     p.append("</table>")
 
     p.append("<h2>1. Executive Summary</h2>")
-    p.append(f"<p>{_e(m['exec_summary'])}</p>")
+    p.append(_summary_html(m['exec_summary']))
 
     p.append("<h2>2. Finding Summary</h2>")
-    p.append("<table><colgroup><col width='60%'><col width='40%'></colgroup>"
-             "<tr><th>Severity</th><th>Count</th></tr>")
+    p.append("<table><thead><tr><th width='60%'>Severity</th><th width='40%'>Count</th></tr></thead><tbody>")
     for s in _SEV_ORDER:
-        p.append(f"<tr><td><span class='sev-{s}'>{s}</span></td><td>{m['counts'][s]}</td></tr>")
-    p.append("</table>")
-    p.append("<table><colgroup><col width='10%'><col width='45%'><col width='15%'>"
-             "<col width='30%'></colgroup>"
-             "<tr><th>ID</th><th>Title</th><th>Severity</th><th>Host(s)</th></tr>")
+        p.append(f"<tr><td width='60%'><span class='sev-{s}'>{s}</span></td>"
+                 f"<td width='40%'>{m['counts'][s]}</td></tr>")
+    p.append("</tbody></table>")
+    p.append("<table><thead><tr><th width='8%'>ID</th><th width='40%'>Title</th>"
+             "<th width='16%'>Severity</th><th width='36%'>Host(s)</th></tr></thead><tbody>")
     for f in m["findings"]:
-        p.append(f"<tr><td>{f['id']}</td><td>{_e(f['title'])}</td>"
-                 f"<td><span class='sev-{f['severity']}'>{f['severity']}</span></td>"
-                 f"<td>{_e(', '.join(f['hosts']))}</td></tr>")
+        p.append(f"<tr><td width='8%'>{f['id']}</td><td width='40%'>{_e(f['title'])}</td>"
+                 f"<td width='16%'><span class='sev-{f['severity']}'>{f['severity']}</span></td>"
+                 f"<td width='36%'>{_e(', '.join(f['hosts']))}</td></tr>")
     if not m["findings"]:
         p.append("<tr><td>—</td><td>No findings identified</td><td>—</td><td>—</td></tr>")
-    p.append("</table>")
+    p.append("</tbody></table>")
 
     p.append("<h2>3. Scope Overview</h2>")
-    p.append("<table><colgroup><col width='22%'><col width='20%'><col width='28%'>"
-             "<col width='30%'></colgroup>"
-             "<tr><th>IP Address</th><th>Hostname</th><th>Role</th><th>OS</th></tr>")
+    p.append("<table><thead><tr><th width='20%'>IP Address</th><th width='22%'>Hostname</th>"
+             "<th width='28%'>Role</th><th width='30%'>OS</th></tr></thead><tbody>")
     for s in m["scope"]:
-        p.append(f"<tr><td>{_e(s['ip'])}</td><td>{_e(s['hostname'])}</td>"
-                 f"<td>{_e(s['role'])}</td><td>{_e(s['os'])}</td></tr>")
-    p.append("</table>")
+        p.append(f"<tr><td width='20%'>{_e(s['ip'])}</td><td width='22%'>{_e(s['hostname'])}</td>"
+                 f"<td width='28%'>{_e(s['role'])}</td><td width='30%'>{_e(s['os'])}</td></tr>")
+    p.append("</tbody></table>")
 
     p.append("<h2>4. Testing Process</h2><h3>4.1 Methodology</h3>")
     p.append(f"<p>{_e(m['methodology'])}</p><h3>4.2 Tools Used</h3>")
-    p.append("<table><colgroup><col width='25%'><col width='75%'></colgroup>"
-             "<tr><th>Tool</th><th>Purpose</th></tr>")
+    p.append("<table><thead><tr><th width='25%'>Tool</th><th width='75%'>Purpose</th></tr></thead><tbody>")
     for t in m["tools_used"]:
-        p.append(f"<tr><td>{_e(t['tool'])}</td><td>{_e(t['purpose'])}</td></tr>")
-    p.append("</table>")
+        p.append(f"<tr><td width='25%'>{_e(t['tool'])}</td><td width='75%'>{_e(t['purpose'])}</td></tr>")
+    p.append("</tbody></table>")
 
     p.append("<h2>5. Findings</h2>")
     for f in m["findings"]:
@@ -270,44 +361,29 @@ def to_html(m: dict) -> str:
                  f"<span class='sev-{f['severity']}'>{f['severity']}</span></h3>")
         p.append(f"<h4>Description</h4><p>{_e(f['description'])}</p>")
         if f["evidence_cmd"]:
-            p.append(f"<h4>Evidence — Command</h4><pre>{_e(f['evidence_cmd'])}</pre>")
+            p.append(f"<h4>Evidence — Command</h4><pre>{_pre(f['evidence_cmd'])}</pre>")
         if f["evidence_out"]:
-            p.append(f"<h4>Evidence — Output</h4><pre>{_e(f['evidence_out'][:1200])}</pre>")
+            p.append(f"<h4>Evidence — Output</h4><pre>{_pre(f['evidence_out'][:1200])}</pre>")
         p.append(f"<h4>Impact</h4><p>{_e(f['impact'])}</p>")
         p.append(f"<h4>Recommendation</h4><p>{_e(f['recommendation'])}</p>")
     if not m["findings"]:
         p.append("<p><i>No findings were identified in this assessment.</i></p>")
 
     p.append("<h2>6. Recommendations (Prioritised)</h2>")
-    p.append("<table><colgroup><col width='14%'><col width='72%'><col width='14%'></colgroup>"
-             "<tr><th>Priority</th><th>Action</th><th>Finding</th></tr>")
+    p.append("<table><thead><tr><th width='14%'>Priority</th><th width='72%'>Action</th>"
+             "<th width='14%'>Finding</th></tr></thead><tbody>")
     for r in m["recommendations"]:
-        p.append(f"<tr><td>{r['priority']}</td><td>{_e(r['action'])}</td>"
-                 f"<td>{r['finding']}</td></tr>")
-    p.append("</table>")
+        p.append(f"<tr><td width='14%'>{r['priority']}</td><td width='72%'>{_e(r['action'])}</td>"
+                 f"<td width='14%'>{r['finding']}</td></tr>")
+    p.append("</tbody></table>")
 
     p.append("<h2>Appendix A — Command Log</h2>")
     for c in m["command_log"]:
-        p.append(f"<h4>{_e(c['tool'])} — <code>{_e(c['command'])}</code></h4>"
-                 f"<pre>{_e(c['output'][:1000].strip())}</pre>")
+        p.append(f"<h4>{_e(c['tool'])} — <code>{_pre(c['command'])}</code></h4>"
+                 f"<pre>{_pre(c['output'][:1000].strip())}</pre>")
     p.append(f"<div class='foot'>Generated by Autopwn on {m['generated']} — "
              "for authorized security testing only.</div></body></html>")
     return "\n".join(p)
-
-
-# ---- PDF --------------------------------------------------------------------
-
-def to_pdf(html_str: str, path: Path) -> bool:
-    try:
-        from xhtml2pdf import pisa
-    except Exception:
-        return False
-    try:
-        with open(path, "wb") as f:
-            status = pisa.CreatePDF(html_str, dest=f)
-        return not status.err
-    except Exception:
-        return False
 
 
 # ---- DOCX -------------------------------------------------------------------
@@ -329,7 +405,14 @@ def to_docx(m: dict, path: Path) -> bool:
                 r = t.add_row().cells; r[0].text = k; r[1].text = str(v)
 
         doc.add_heading("1. Executive Summary", level=1)
-        doc.add_paragraph(m["exec_summary"])
+        for ln in (m["exec_summary"] or "").splitlines():
+            s = ln.strip()
+            if not s:
+                continue
+            if s.startswith("- "):
+                doc.add_paragraph(s[2:].strip(), style="List Bullet")
+            else:
+                doc.add_paragraph(s)
 
         doc.add_heading("2. Finding Summary", level=1)
         st = doc.add_table(rows=1, cols=2); st.style = "Light Grid Accent 1"
@@ -411,7 +494,6 @@ def to_docx(m: dict, path: Path) -> bool:
         return False
 
 
-import re as _re
 # Strip ANSI escapes and control characters that are invalid in XML/DOCX.
 _ANSI = _re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _CTRL = _re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -435,14 +517,9 @@ def export(m: dict, base: Path, formats: list[str]) -> list[Path]:
     if "md" in formats:
         p = base.with_suffix(".md"); p.write_text(to_markdown(m), encoding="utf-8")
         written.append(p)
-    html_str = to_html(m)
     if "html" in formats:
-        p = base.with_suffix(".html"); p.write_text(html_str, encoding="utf-8")
+        p = base.with_suffix(".html"); p.write_text(to_html(m), encoding="utf-8")
         written.append(p)
-    if "pdf" in formats:
-        p = base.with_suffix(".pdf")
-        if to_pdf(html_str, p):
-            written.append(p)
     if "docx" in formats:
         p = base.with_suffix(".docx")
         if to_docx(m, p):
