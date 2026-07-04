@@ -442,17 +442,27 @@ def cmd_stop(args) -> int:
     return 0 if ok else 1
 
 
-_MENU = [
-    ("1", "Scan (sweep host/range) → service matrix"),
-    ("2", "Results (service matrix / hosts / clear)"),
-    ("3", "AI agent (autopilot / custom objective)"),
-    ("4", "Jobs (list / watch / stop)"),
-    ("5", "Run a single tool"),
-    ("6", "List tools (by category)"),
-    ("7", "Scope (view / add / remove allow & deny)"),
-    ("8", "Variables (discovered domain / creds / …)"),
-    ("9", "Clear ALL (results, variables, saved reports & finished jobs)"),
-    ("q", "Quit"),
+# Grouped for display. Keys stay stable (muscle memory + dispatch unchanged);
+# the grouping is purely presentational. Each group: (title, icon, [(key, label)]).
+_MENU_GROUPS = [
+    ("Manual", "🛠", [
+        ("1", "Scan (sweep host/range) → service matrix"),
+        ("2", "Results (service matrix / hosts / clear)"),
+        ("5", "Run a single tool"),
+        ("6", "List tools (by category)"),
+    ]),
+    ("AI-Assisted", "🤖", [
+        ("3", "AI agent (autopilot / custom objective)"),
+        ("4", "Jobs (list / watch / stop)"),
+    ]),
+    ("Configuration", "⚙", [
+        ("7", "Scope (view / add / remove allow & deny)"),
+        ("8", "Variables (discovered domain / creds / …)"),
+    ]),
+    ("Maintenance", "🧹", [
+        ("9", "Clear ALL (results, variables, saved reports & finished jobs)"),
+        ("q", "Quit"),
+    ]),
 ]
 
 
@@ -840,17 +850,25 @@ def cmd_menu(args) -> int:
         "8": lambda: _vars_menu(ns, cfg_path),
         "9": lambda: _clear_all(ns),
     }
+    # Distinct accent per category so the two workflows read at a glance.
+    group_style = {"Manual": "bright_green", "AI-Assisted": "bright_magenta",
+                   "Configuration": "bright_blue", "Maintenance": "yellow"}
     while True:
         console.clear()  # keep the menu anchored at the top of the terminal
         console.print(Panel(
-            "[bold]Autopwn[/] — interactive menu\n"
-            "[dim]by Ali Alaqoul[/]\n"
-            "[dim]alialaqoul@gmail.com[/]\n"
-            "[dim]https://www.linkedin.com/in/alialaqoul/[/]",
-            border_style="cyan"))
-        for key, label in _MENU:
-            console.print(f"  [bold cyan]{key}[/]  {label}")
-        choice = _ask("\n[bold]select>[/] ").lower()
+            "[bold bright_cyan]Autopwn[/]  [dim]— AI-orchestrated authorized "
+            "security testing[/]\n"
+            "[dim]Ali Alaqoul · alialaqoul@gmail.com · "
+            "linkedin.com/in/alialaqoul[/]",
+            border_style="bright_cyan", padding=(0, 1)))
+        for title, icon, items in _MENU_GROUPS:
+            accent = group_style.get(title, "cyan")
+            console.print(f"\n [bold {accent}]{icon}  {title.upper()}[/]")
+            for key, label in items:
+                main, _, hint = label.partition(" (")
+                hint = f" [dim]({hint}[/]" if hint else ""
+                console.print(f"    [bold {accent}]{key}[/]  {main}{hint}")
+        choice = _ask("\n [bold]select ›[/] ").lower()
         if choice == "q":
             console.clear()
             return 0
