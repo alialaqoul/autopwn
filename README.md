@@ -41,14 +41,19 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   OpenAI-compatible endpoint. Local models run fully offline.
 - **Authorization gate** — every tool call is checked against your scope
   (allow/deny CIDRs, hostnames, and an expiry date) before any packet is sent.
-- **Full tool coverage** — 24+ tools across network, web, SMB/Active Directory,
-  and credential testing, run through a safe, auditable wrapper.
+- **Full tool coverage** — 40 tools across recon, web, SMB/Active Directory
+  (incl. AD CS, BloodHound, Kerberos roasting), and credential testing, run
+  through a safe, auditable wrapper.
 - **Autopilot** — give it just a target and it fingerprints the host, then
   adapts its methodology to whatever it is (DC, IIS/nginx/Apache, database, mail,
   remote-access host, …).
-- **Text tool-call fallback** — works even with smaller local models that don't
-  support structured function-calling.
-- **Extensible** — add a new tool with a few lines of declarative config.
+- **RAG-guided decisions** — a knowledge base of pentest playbooks is retrieved
+  each step and injected into the agent, so it follows real methodology (what
+  technique next, which tool, how to read the output) instead of guessing.
+- **Grounded reporting** — deterministic role/exposure/attack-path analysis plus
+  an LLM summary, exported as PDF/HTML/Markdown with engagement details.
+- **Extensible** — add a tool (a few lines of declarative config) or teach it new
+  tradecraft (drop a `.md` playbook into `autopwn/knowledge/`).
 - **Full transcripts** — every agent session is logged to JSON for reporting.
 
 ---
@@ -378,14 +383,14 @@ into a single host** for its ports and services:
 
 ## Tool catalog
 
-39 tools across five categories (run `autopwn tools` for the live list with
+40 tools across five categories (run `autopwn tools` for the live list with
 install status):
 
 | Category | Tools |
 |---|---|
 | **recon** (9) | `nmap_scan`, `native_port_scan`, `masscan`, `dns_recon`, `subfinder`, `amass`, `theharvester`, `httpx`, `gau` |
 | **web** (13) | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `feroxbuster`, `katana`, `wpscan`, `sqlmap`, `arjun`, `testssl`, `subzy` |
-| **ad-smb** (12) | `netexec_smb`, `netexec_winrm`, `netexec_ldap`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `bloodhound_python`, `secretsdump` |
+| **ad-smb** (13) | `netexec_smb`, `netexec_winrm`, `netexec_ldap`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `certipy_find`, `bloodhound_python`, `secretsdump` |
 | **credentials** (4) | `hydra`, `john`, `hashcat`, `hashid` |
 | **exploit** (1) | `searchsploit` |
 
@@ -452,16 +457,36 @@ on `PATH`, and the agent sees it immediately. No new classes required.
 
 ---
 
+## Knowledge base (RAG) — teaching it tradecraft
+
+The agent's decisions are grounded in a knowledge base of pentest playbooks in
+`autopwn/knowledge/` (methodology, Active Directory, web, credentials, and
+enterprise services like WSUS / AD CS / ePO). At each step, the relevant
+playbook for the current situation is retrieved (embedded via `nomic-embed-text`,
+cached to disk) and injected into the model — so it knows the technique sequence,
+the exact tool, and how to interpret the output, instead of guessing.
+
+**This is how you make it smarter — no model retraining.** Drop a new `.md` file
+into `autopwn/knowledge/` (write it in terms of Autopwn's tools: when to use it,
+which tool, how to read the result), and it's automatically chunked, embedded,
+and retrieved on the next run. After editing, delete
+`autopwn/knowledge/.emb_cache.json` to force a re-embed.
+
+Controlled by `agent.use_kb` / `agent.kb_top_k` in `config.yaml`.
+
 ## How the agent works
 
-1. It's given an objective (or generates one in autopilot) plus the list of
-   installed tools.
-2. The LLM plans and requests a tool call (structured, or as JSON text for
-   models without function-calling — both are handled).
-3. The tool is authorized against your scope, executed as a safe argument list
-   (never a shell string), and its real output is fed back.
-4. The loop repeats — chaining findings — until the objective is met or the step
-   budget is reached, ending with a `FINDINGS:` summary.
+Each step layers three retrieval mechanisms so the model acts like it knows the
+playbook:
+1. **Applicability** — only tools that fit the target's real open ports/banners
+   are offered (no `wpscan` on a DC's WinRM port).
+2. **Semantic tool retrieval** — of those, the top-k most relevant to the moment.
+3. **Knowledge-base RAG** — the matching methodology is injected into the prompt.
+
+Then: the model requests a tool call (forced JSON, with a text fallback); the
+tool is authorized against scope and run as a safe argument list (never a shell
+string); its real output is fed back and harvested for variables (domain, creds,
+SMB signing); and the loop repeats until it produces a grounded findings report.
 
 ---
 
