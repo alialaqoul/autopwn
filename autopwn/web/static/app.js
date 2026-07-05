@@ -424,6 +424,7 @@ function openSessionFrom(cred) {   // called from Findings "Open session"
   $("#ex_domain").value = cred.domain || "";
   $("#ex_auth").value = "password";
   updateSecretLabel();
+  setTimeout(() => $("#ex_host").focus(), 100);   // pick the target host next
 }
 
 function updateSecretLabel() {
@@ -432,13 +433,16 @@ function updateSecretLabel() {
   $("#ex_secret").placeholder = hash ? "aad3b435...:<nthash> or <nthash>" : "password";
 }
 
+let _execBusy = false;
 async function execRun() {
   const host = $("#ex_host").value.trim(), cmd = $("#ex_cmd").value.trim();
-  if (!host || !cmd) return;
-  const out = $("#ex_out"), btn = $("#ex_run");
+  if (_execBusy) return;
+  if (!host) { alert("Set a target host first."); return; }
+  if (!cmd) return;
+  const out = $("#ex_out"), term = $("#exTerm"), input = $("#ex_cmd");
   out.insertAdjacentHTML("beforeend", `<span class="l-run">$ ${esc(cmd)}</span>\n`);
-  out.scrollTop = out.scrollHeight;
-  btn.disabled = true;
+  input.value = ""; input.placeholder = "running…"; _execBusy = true;
+  term.scrollTop = term.scrollHeight;
   try {
     const r = await api("/api/exec", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -451,7 +455,8 @@ async function execRun() {
   } catch (e) {
     out.insertAdjacentHTML("beforeend", `<span class="l-warn">error: ${esc(e.message)}</span>\n`);
   } finally {
-    btn.disabled = false; $("#ex_cmd").value = ""; out.scrollTop = out.scrollHeight;
+    _execBusy = false; input.placeholder = "command… (Enter to run)";
+    term.scrollTop = term.scrollHeight; input.focus();
   }
 }
 
@@ -479,21 +484,23 @@ function watchListener(id) {
   if (_lstES) { _lstES.close(); _lstES = null; }
   _lstActive = id;
   $("#lstActive").textContent = "#" + id;
-  const out = $("#lst_out"); out.innerHTML = "";
+  const out = $("#lst_out"), term = $("#lstTerm"), input = $("#lst_cmd");
+  out.innerHTML = "";
   $("#lstStatus").textContent = "streaming"; $("#lstStatus").className = "badge text-bg-success";
-  $("#lst_cmd").disabled = false; $("#lst_send").disabled = false;
+  input.disabled = false; input.placeholder = "type into the shell (Enter to send)"; input.focus();
   const es = new EventSource(`/api/listeners/${id}/stream`);
   _lstES = es;
-  es.onmessage = (ev) => { out.insertAdjacentHTML("beforeend", esc(ev.data) + "\n"); out.scrollTop = out.scrollHeight; };
+  es.onmessage = (ev) => { out.insertAdjacentHTML("beforeend", esc(ev.data) + "\n"); term.scrollTop = term.scrollHeight; };
   es.onerror = () => { $("#lstStatus").textContent = "disconnected"; $("#lstStatus").className = "badge text-bg-warning"; };
 }
 
 async function sendListenerCmd() {
-  const cmd = $("#lst_cmd").value;
+  const input = $("#lst_cmd"), cmd = input.value;
   if (!_lstActive || !cmd) return;
+  input.value = "";
   try { await api(`/api/listeners/${_lstActive}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: cmd }) }); }
-  catch (e) { return alert(e.message); }
-  $("#lst_cmd").value = "";
+  catch (e) { alert(e.message); }
+  input.focus();
 }
 
 /* ---- findings / results ----------------------------------------------- */
@@ -1120,8 +1127,9 @@ $("#sessionNewBtn").addEventListener("click", newSession);
 $("#testAiBtn").addEventListener("click", testAi);
 $("#aiLogRefresh").addEventListener("click", loadAiLog);
 
-$("#ex_run").addEventListener("click", execRun);
-$("#ex_cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") execRun(); });
+// interactive terminals: click anywhere focuses the inline input; Enter runs
+$("#ex_cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); execRun(); } });
+$("#exTerm").addEventListener("mouseup", () => { if (!getSelection().toString()) $("#ex_cmd").focus(); });
 $("#ex_auth").addEventListener("change", updateSecretLabel);
 $("#listenerForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -1130,8 +1138,8 @@ $("#listenerForm").addEventListener("submit", async (e) => {
   catch (err) { return alert(err.message); }
   e.target.reset(); loadListeners();
 });
-$("#lst_send").addEventListener("click", sendListenerCmd);
-$("#lst_cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") sendListenerCmd(); });
+$("#lst_cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendListenerCmd(); } });
+$("#lstTerm").addEventListener("mouseup", () => { if (!getSelection().toString() && !$("#lst_cmd").disabled) $("#lst_cmd").focus(); });
 $$('#launchForm input[name="mode"]').forEach(r => r.addEventListener("change", updateMode));
 updateMode();
 

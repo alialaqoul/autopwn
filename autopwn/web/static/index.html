@@ -221,12 +221,11 @@
                   <div class="col-md-4"><label class="pb-lbl">Domain <span class="text-secondary">(optional)</span></label>
                     <input class="form-control form-control-sm" id="ex_domain" placeholder="corp.local"></div>
                 </div>
-                <div class="input-group input-group-sm mb-2">
-                  <span class="input-group-text">cmd</span>
-                  <input class="form-control font-monospace" id="ex_cmd" placeholder="whoami /all" autocomplete="off">
-                  <button class="btn btn-danger" id="ex_run">Run</button>
+                <div class="terminal" id="exTerm" style="height:46vh">
+                  <div class="t-out" id="ex_out">Set a target + credential above, then click here and type a command (Enter to run). SMB exec needs local admin (Pwn3d!); WinRM needs Remote Management membership.
+</div>
+                  <div class="term-line"><span class="term-prompt">$</span><input class="term-input" id="ex_cmd" autocomplete="off" spellcheck="false" placeholder="command… (Enter to run)"></div>
                 </div>
-                <pre class="console-log" id="ex_out" style="height:46vh">Enter a target + credential, then run a command. SMB exec needs local admin (Pwn3d!); WinRM needs Remote Management membership.</pre>
               </div>
             </div>
           </div>
@@ -246,11 +245,11 @@
                     <span class="small fw-semibold">Shell <span class="text-secondary" id="lstActive"></span></span>
                     <span class="badge text-bg-secondary" id="lstStatus">idle</span>
                   </div>
-                  <div class="card-body p-0"><pre class="console-log mb-0" id="lst_out" style="height:34vh">Select a listener to view its shell.</pre></div>
-                  <div class="card-footer p-1">
-                    <div class="input-group input-group-sm">
-                      <input class="form-control font-monospace" id="lst_cmd" placeholder="command → shell" autocomplete="off" disabled>
-                      <button class="btn btn-outline-secondary" id="lst_send" disabled>Send</button>
+                  <div class="card-body p-0">
+                    <div class="terminal" id="lstTerm" style="height:36vh; border-radius:0 0 .375rem .375rem">
+                      <div class="t-out" id="lst_out">Select a listener to interact with its shell.
+</div>
+                      <div class="term-line"><span class="term-prompt">&rsaquo;</span><input class="term-input" id="lst_cmd" autocomplete="off" spellcheck="false" disabled placeholder="select a listener…"></div>
                     </div>
                   </div>
                 </div>
