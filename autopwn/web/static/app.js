@@ -19,7 +19,7 @@ async function api(path, opts) {
 /* ---- view switching --------------------------------------------------- */
 const TITLES = { dashboard: "Dashboard", launch: "Launch Assessment",
   findings: "Findings", playbooks: "Playbooks", tools: "Tools", jobs: "Jobs",
-  reports: "Reports", scope: "Scope & Vars" };
+  reports: "Reports", scope: "Scope & Vars", settings: "Settings" };
 
 function show(view) {
   $$("#mainNav .ap-nav-link").forEach(b => b.classList.toggle("active", b.dataset.view === view));
@@ -27,7 +27,7 @@ function show(view) {
   $("#viewTitle").textContent = TITLES[view] || view;
   const loaders = { dashboard: loadDashboard, findings: loadFindings,
     playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
-    reports: loadReports, scope: loadScope };
+    reports: loadReports, scope: loadScope, settings: loadSettings };
   loaders[view]?.();
 }
 $$("#mainNav .ap-nav-link").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
@@ -36,6 +36,7 @@ $$("#mainNav .ap-nav-link").forEach(b => b.addEventListener("click", () => show(
 async function loadDashboard() {
   let d;
   try { d = await api("/api/summary"); } catch (e) { return; }
+  if (typeof d.ai_enabled === "boolean") { _aiEnabled = d.ai_enabled; reflectAi(); }
   const rb = $("#runningBadge"), n = d.counts.running_jobs;
   rb.textContent = `${n} running`;
   rb.classList.toggle("d-none", n === 0);
@@ -796,6 +797,61 @@ $("#factForm").addEventListener("submit", async (e) => {
   catch (err) { alert(err.message); }
   e.target.reset(); loadScope();
 });
+
+/* ---- settings (AI / model) -------------------------------------------- */
+async function loadSettings() {
+  let s;
+  try { s = await api("/api/settings"); } catch { return; }
+  $("#s_ai_enabled").checked = !!s.ai_enabled;
+  const L = s.llm || {};
+  $("#s_provider").value = L.provider || "";
+  $("#s_model").value = L.model || "";
+  $("#s_embed_model").value = L.embed_model || "";
+  $("#s_base_url").value = L.base_url || "";
+  $("#s_api_key").value = "";
+  $("#s_key_state").textContent = L.has_api_key ? "(set — blank keeps it)" : "(none)";
+  $("#s_temperature").value = L.temperature ?? "";
+  $("#s_max_tokens").value = L.max_tokens ?? "";
+  $("#s_request_timeout").value = L.request_timeout ?? "";
+  const A = s.agent || {};
+  $("#s_max_steps").value = A.max_steps ?? "";
+  $("#s_prime_recon").checked = !!A.prime_recon;
+  $("#s_use_kb").checked = !!A.use_kb;
+  $("#s_confirm_active_actions").checked = !!A.confirm_active_actions;
+  _aiEnabled = !!s.ai_enabled;
+  reflectAi();
+}
+
+$("#settingsForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    ai_enabled: $("#s_ai_enabled").checked,
+    llm: {
+      provider: $("#s_provider").value.trim(), model: $("#s_model").value.trim(),
+      embed_model: $("#s_embed_model").value.trim(), base_url: $("#s_base_url").value.trim(),
+      api_key: $("#s_api_key").value, temperature: $("#s_temperature").value,
+      max_tokens: $("#s_max_tokens").value, request_timeout: $("#s_request_timeout").value,
+    },
+    agent: {
+      max_steps: $("#s_max_steps").value,
+      prime_recon: $("#s_prime_recon").checked, use_kb: $("#s_use_kb").checked,
+      confirm_active_actions: $("#s_confirm_active_actions").checked,
+    },
+  };
+  try { await api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
+  catch (err) { return alert("Save failed: " + err.message); }
+  const ok = $("#settingsSaved"); ok.classList.remove("d-none");
+  setTimeout(() => ok.classList.add("d-none"), 2000);
+  loadSettings();
+});
+
+/* AI enabled state reflected on the Launch page + sidebar */
+let _aiEnabled = true;
+function reflectAi() {
+  const warn = $("#aiDisabledWarn"), btn = $("#launchBtn");
+  if (warn) warn.classList.toggle("d-none", _aiEnabled);
+  if (btn) btn.disabled = !_aiEnabled;
+}
 
 /* ---- sessions --------------------------------------------------------- */
 async function loadSessions() {

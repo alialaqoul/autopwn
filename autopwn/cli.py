@@ -931,6 +931,10 @@ def _seed_creds(args) -> None:
 
 def cmd_agent(args) -> int:
     cfg, scope = _load(args)
+    if not cfg.ai_enabled:
+        console.print("[yellow]AI is disabled (ai_enabled: false). Enable it in "
+                      "config.yaml or the web Settings, or run a playbook/tool.[/]")
+        return 1
     _seed_creds(args)
 
     # Autopilot: with only --target and no --objective, generate a full

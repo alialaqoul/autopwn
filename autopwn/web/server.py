@@ -143,6 +143,59 @@ def create_app(config_path: str = "config.yaml"):
             raise HTTPException(404, "Session not found.")
         return {"current": _sess()["name"], "sessions": sessions.list_sessions()}
 
+    # ---- settings (AI / model) ------------------------------------------- #
+    @app.get("/api/settings")
+    def get_settings():
+        c = Config.load(config_path)
+        return {
+            "ai_enabled": c.ai_enabled,
+            "llm": {
+                "provider": c.llm.provider, "model": c.llm.model,
+                "base_url": c.llm.base_url or "", "has_api_key": bool(c.llm.api_key),
+                "temperature": c.llm.temperature, "max_tokens": c.llm.max_tokens,
+                "embed_model": c.llm.embed_model,
+                "request_timeout": c.llm.request_timeout,
+            },
+            "agent": {
+                "max_steps": c.agent.max_steps,
+                "confirm_active_actions": c.agent.confirm_active_actions,
+                "use_kb": c.agent.use_kb, "prime_recon": c.agent.prime_recon,
+            },
+        }
+
+    @app.put("/api/settings")
+    def put_settings(body: dict):
+        c = Config.load(config_path)
+        if "ai_enabled" in body:
+            c.ai_enabled = bool(body["ai_enabled"])
+        llm = body.get("llm", {}) or {}
+        for k in ("provider", "model", "embed_model"):
+            if k in llm and llm[k] != "":
+                setattr(c.llm, k, str(llm[k]))
+        if "base_url" in llm:
+            c.llm.base_url = str(llm["base_url"]) or None
+        # only overwrite the API key when a new one is actually provided
+        if llm.get("api_key"):
+            c.llm.api_key = str(llm["api_key"])
+        for k, cast in (("temperature", float), ("request_timeout", float),
+                        ("max_tokens", int)):
+            if k in llm and llm[k] not in ("", None):
+                try:
+                    setattr(c.llm, k, cast(llm[k]))
+                except (TypeError, ValueError):
+                    pass
+        ag = body.get("agent", {}) or {}
+        if "max_steps" in ag and ag["max_steps"] not in ("", None):
+            try:
+                c.agent.max_steps = int(ag["max_steps"])
+            except (TypeError, ValueError):
+                pass
+        for k in ("confirm_active_actions", "use_kb", "prime_recon"):
+            if k in ag:
+                setattr(c.agent, k, bool(ag[k]))
+        c.save(config_path)
+        return get_settings()
+
     # ---- engagement snapshot --------------------------------------------- #
     @app.get("/api/summary")
     def summary():
@@ -156,6 +209,7 @@ def create_app(config_path: str = "config.yaml"):
             "engagement": sc.engagement,
             "authorized_by": sc.authorized_by,
             "expires": sc.expires,
+            "ai_enabled": Config.load(config_path).ai_enabled,
             "scope": {"allow": sc.allow, "deny": sc.deny},
             "hosts": hosts,
             "services": services,
@@ -331,6 +385,9 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.post("/api/jobs/agent")
     def launch_agent(body: AgentLaunch):
+        if not Config.load(config_path).ai_enabled:
+            raise HTTPException(403, "AI is disabled in Settings. Enable it to run "
+                                "the agent, or run a playbook instead.")
         target = (body.target or "").strip()
         objective = (body.objective or "").strip()
         if not target and not objective:

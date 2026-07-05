@@ -56,6 +56,9 @@ class Config(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     scope_file: str = "scope.yaml"
     log_dir: str = "logs"
+    # Master switch: when False, the LLM agent (autopilot) is disabled and only
+    # deterministic playbooks/tools run.
+    ai_enabled: bool = True
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "Config":
@@ -72,3 +75,11 @@ class Config(BaseModel):
         if env_model := os.environ.get("AUTOPWN_LLM_MODEL"):
             cfg.llm.model = env_model
         return cfg
+
+    def save(self, path: str | Path = "config.yaml") -> None:
+        """Persist the config back to YAML (used by the web Settings page)."""
+        path = Path(path)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(yaml.safe_dump(self.model_dump(), sort_keys=False,
+                                      default_flow_style=False), encoding="utf-8")
+        tmp.replace(path)

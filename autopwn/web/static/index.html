@@ -56,6 +56,9 @@
       <button class="ap-nav-link" data-view="scope">
         <svg class="ico" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
         Scope &amp; Vars</button>
+      <button class="ap-nav-link" data-view="settings">
+        <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings</button>
     </nav>
 
     <div class="ap-sidebar-foot">
@@ -106,6 +109,9 @@
           <div class="card">
             <div class="card-header fw-semibold">Launch AI assessment</div>
             <div class="card-body">
+              <div class="alert alert-warning py-2 d-none" id="aiDisabledWarn">
+                AI is <b>disabled</b> in Settings — the agent can't run. Enable it in <b>Settings</b>, or use <b>Playbooks</b> to run deterministic actions.
+              </div>
               <form id="launchForm">
                 <div class="mb-3">
                   <label class="form-label">Target host / range</label>
@@ -265,6 +271,70 @@
             </div>
           </div>
         </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section data-panel="settings" hidden>
+        <div class="row"><div class="col-xxl-9">
+          <form id="settingsForm">
+            <div class="card mb-3">
+              <div class="card-header fw-semibold">Artificial Intelligence</div>
+              <div class="card-body">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" role="switch" id="s_ai_enabled">
+                  <label class="form-check-label" for="s_ai_enabled">
+                    <b>Enable AI agent</b> — when off, the LLM autopilot is disabled and only deterministic playbooks/tools run.
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="card mb-3" id="modelCard">
+              <div class="card-header fw-semibold">Model</div>
+              <div class="card-body">
+                <div class="row g-2 mb-2">
+                  <div class="col-md-4"><label class="pb-lbl">Provider</label>
+                    <input class="form-control form-control-sm" id="s_provider" list="dlProvider" placeholder="ollama">
+                    <datalist id="dlProvider"><option value="ollama"><option value="openai"><option value="openai_compatible"></datalist></div>
+                  <div class="col-md-4"><label class="pb-lbl">Model</label>
+                    <input class="form-control form-control-sm" id="s_model" placeholder="llama3.1:8b"></div>
+                  <div class="col-md-4"><label class="pb-lbl">Embedding model</label>
+                    <input class="form-control form-control-sm" id="s_embed_model" placeholder="nomic-embed-text"></div>
+                </div>
+                <div class="row g-2 mb-2">
+                  <div class="col-md-8"><label class="pb-lbl">Base URL <span class="text-secondary">(for OpenAI-compatible / remote Ollama)</span></label>
+                    <input class="form-control form-control-sm" id="s_base_url" placeholder="http://127.0.0.1:11434"></div>
+                  <div class="col-md-4"><label class="pb-lbl">API key <span class="text-secondary" id="s_key_state"></span></label>
+                    <input class="form-control form-control-sm" id="s_api_key" type="password" placeholder="leave blank to keep"></div>
+                </div>
+                <div class="row g-2">
+                  <div class="col-md-3"><label class="pb-lbl">Temperature</label>
+                    <input class="form-control form-control-sm" id="s_temperature" type="number" step="0.1" min="0" max="2"></div>
+                  <div class="col-md-3"><label class="pb-lbl">Max tokens</label>
+                    <input class="form-control form-control-sm" id="s_max_tokens" type="number" min="1"></div>
+                  <div class="col-md-3"><label class="pb-lbl">Request timeout (s)</label>
+                    <input class="form-control form-control-sm" id="s_request_timeout" type="number" min="1"></div>
+                  <div class="col-md-3"><label class="pb-lbl">Agent max steps</label>
+                    <input class="form-control form-control-sm" id="s_max_steps" type="number" min="1"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card mb-3">
+              <div class="card-header fw-semibold">Agent behavior</div>
+              <div class="card-body">
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="s_prime_recon"><label class="form-check-label" for="s_prime_recon">Prime recon (auto-scan before deciding)</label></div>
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="s_use_kb"><label class="form-check-label" for="s_use_kb">Use knowledge base (RAG)</label></div>
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="s_confirm_active_actions"><label class="form-check-label" for="s_confirm_active_actions">Confirm intrusive actions</label></div>
+              </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-3">
+              <button class="btn btn-danger" type="submit">Save settings</button>
+              <span class="text-success small d-none" id="settingsSaved">Saved.</span>
+            </div>
+          </form>
+        </div></div>
       </section>
     </div>
   </main>
