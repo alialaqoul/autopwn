@@ -180,101 +180,42 @@ def _evidence(transcript, tool_names, hosts=None):
 # Generic finding rules. Each: predicate over a host's open ports + facts =>
 # a finding dict. Severity/impact/recommendation are standard and NOT tied to
 # any specific environment.
-def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
+def build_findings(hosts: dict, facts: dict, transcript=None,
+                   log_dir=None) -> list[dict]:
+    """Generate report findings from the finding playbooks (those with a
+    severity). Editing a playbook's severity/CVSS/impact/recommendation — or its
+    match — changes the report. Falls back to the built-in default playbooks when
+    no per-engagement playbooks file is given.
+    """
+    from . import playbooks as pb_mod
+
+    books = pb_mod.load(log_dir) if log_dir else pb_mod.DEFAULT_PLAYBOOKS
     findings: list[dict] = []
-
-    def host_facts(entry):
-        return entry.get("facts", {})
-
-    # Collect hosts matching each condition.
-    def hosts_where(pred):
-        out = []
-        for h, entry in sorted(hosts.items()):
-            ports = {p["port"] for p in entry.get("ports", {}).values()
-                     if p.get("state") == "open"}
-            if pred(h, entry, ports):
-                out.append(h)
-        return out
-
-    rules = [
-        dict(title="SMB Signing Not Enforced", severity="High", cvss="6.5",
-             pred=lambda h, e, p: host_facts(e).get("smb_signing") == "False" and 445 in p,
-             desc="One or more hosts do not require SMB signing. Unsigned SMB "
-                  "allows an attacker who can capture or coerce NTLM "
-                  "authentication to relay it to these hosts.",
-             impact="NTLM/SMB relay to the host can yield command execution or a "
-                    "credential/SAM dump, enabling lateral movement.",
-             rec="Enforce SMB signing (Require) via GPO on all servers and "
-                 "workstations; disable NTLM where possible.",
-             tools=("netexec_smb",)),
-        dict(title="SMB Null / Anonymous Authentication Permitted", severity="Medium",
-             cvss="5.3",
-             pred=lambda h, e, p: host_facts(e).get("smb_nullauth") == "True" and 445 in p,
-             desc="The host accepts an anonymous (null) SMB session. The evidence "
-                  "below shows what an unauthenticated attacker can enumerate over "
-                  "that session (e.g. shares) — confirming real, not just theoretical, "
-                  "exposure.",
-             impact="Anonymous users can enumerate shares, and depending on "
-                    "configuration also users (RID cycling) and password policy — "
-                    "valuable reconnaissance for an unauthenticated attacker and a "
-                    "starting point for further access.",
-             rec="Restrict anonymous access (RestrictNullSessAccess=1, "
-                 "RestrictAnonymous=1); review share and RID enumeration exposure.",
-             tools=("smbclient_shares", "netexec_smb")),
-        dict(title="WSUS Served Over HTTP", severity="High", cvss="8.1",
-             pred=lambda h, e, p: 8530 in p,
-             desc="A WSUS update service is reachable over cleartext HTTP (8530).",
-             impact="If clients are not forced to use WSUS over SSL, an on-path "
-                    "attacker can spoof updates and execute code as SYSTEM on "
-                    "managed endpoints.",
-             rec="Require WSUS over HTTPS (8531) and set the "
-                 "'Do not store passwords'/SSL enforcement GPO for clients.",
-             tools=("nmap_scan",), ports=(8530, 8531)),
-        dict(title="Administration Console Exposed", severity="Low", cvss="4.0",
-             pred=lambda h, e, p: bool({8443, 8444} & p),
-             desc="A management console / agent handler (e.g. endpoint-management "
-                  "platform) is network-reachable.",
-             impact="If protected only by default or weak credentials, console "
-                    "access can push tasks/software to every managed endpoint.",
-             rec="Restrict the console to management networks, enforce strong "
-                 "unique admin credentials and MFA, and patch to current.",
-             tools=("nmap_scan",), ports=(8443, 8444)),
-        dict(title="Remote Desktop (RDP) Exposed", severity="Low", cvss="4.0",
-             pred=lambda h, e, p: 3389 in p,
-             desc="RDP (3389) is reachable on the network.",
-             impact="Credential brute-force / password-spray surface; legacy "
-                    "hosts may be vulnerable to pre-auth RCE (e.g. BlueKeep).",
-             rec="Restrict RDP to jump hosts/VPN, require NLA, enforce account "
-                 "lockout, and keep hosts patched.",
-             tools=("nmap_scan",), ports=(3389,)),
-        dict(title="Missing HTTP Security Headers", severity="Low", cvss="3.1",
-             pred=lambda h, e, p: bool({80, 8080, 8000} & p) and _has_missing_headers(transcript, h),
-             desc="Web responses omit recommended security headers "
-                  "(e.g. Content-Security-Policy, X-Frame-Options, HSTS).",
-             impact="Increases exposure to clickjacking, MIME sniffing, and "
-                    "transport downgrade attacks.",
-             rec="Add CSP, X-Frame-Options/frame-ancestors, "
-                 "X-Content-Type-Options, and Strict-Transport-Security.",
-             tools=("http_probe",)),
-    ]
-
     fid = 1
-    for r in rules:
-        matched = hosts_where(r["pred"])
+    for pb in books:
+        if not pb.get("severity"):
+            continue  # attack-path playbook, not a reportable finding
+        matched = pb_mod.matching_hosts(pb, hosts)
+        detector = pb.get("detector")
+        if detector == "missing_http_headers":
+            matched = [h for h in matched if _has_missing_headers(transcript, h)]
         if not matched:
             continue
-        if r.get("ports"):
-            # Port-based finding: build evidence from the results store (complete
-            # and per-host) rather than a truncated scan dump, so it actually
-            # shows the finding's hosts and their open port(s).
-            cmd = _scan_cmd(transcript, r["ports"], matched)
-            out = _port_evidence(hosts, matched, set(r["ports"]))
+        ports = pb.get("match", {}).get("any_ports") or []
+        ev_tools = pb.get("evidence_tools") or []
+        if ev_tools:
+            cmd, out = _evidence(transcript, tuple(ev_tools), matched)
+        elif ports:
+            cmd = _scan_cmd(transcript, tuple(ports), matched)
+            out = _port_evidence(hosts, matched, set(ports))
         else:
-            cmd, out = _evidence(transcript, r["tools"], matched)
+            cmd, out = "", ""
         findings.append({
-            "id": f"F-{fid:02d}", "title": r["title"], "severity": r["severity"],
-            "cvss": r["cvss"], "hosts": matched, "description": r["desc"],
-            "impact": r["impact"], "recommendation": r["rec"],
+            "id": f"F-{fid:02d}", "title": pb.get("name", pb.get("id", "")),
+            "severity": pb["severity"], "cvss": pb.get("cvss", ""),
+            "hosts": matched, "description": pb.get("summary", ""),
+            "impact": pb.get("impact", ""),
+            "recommendation": pb.get("recommendation", ""),
             "evidence_cmd": cmd, "evidence_out": out,
         })
         fid += 1

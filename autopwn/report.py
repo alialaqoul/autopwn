@@ -113,12 +113,12 @@ def _variables(facts: dict) -> list:
 
 
 def build_model(meta: Engagement, transcript: list, hosts: dict,
-                facts: dict, final: str) -> dict:
+                facts: dict, final: str, log_dir=None) -> dict:
     from .analysis import assess, build_findings, extract_results
 
     hosts = _routable_hosts(hosts)
     analysis = assess(hosts, facts or {})
-    findings = build_findings(hosts, facts or {}, transcript)
+    findings = build_findings(hosts, facts or {}, transcript, log_dir)
     results = extract_results(transcript, (facts or {}).get("domain", ""))
     # A credential captured/harvested into facts (e.g. by a custom action) counts.
     f = facts or {}
@@ -263,7 +263,8 @@ def to_markdown(m: dict) -> str:
 
     o += ["", "## 5. Findings", ""]
     for f in m["findings"]:
-        o += [f"### {f['id']} — {f['title']} ({f['severity']})", "",
+        _cv = f" · CVSS {f['cvss']}" if f.get("cvss") else ""
+        o += [f"### {f['id']} — {f['title']} ({f['severity']}{_cv})", "",
               "**Description**", "", f["description"], ""]
         if f["evidence_cmd"]:
             o += ["**Evidence — Command**", "", "```", f["evidence_cmd"], "```", ""]
@@ -425,8 +426,9 @@ def to_html(m: dict) -> str:
 
     p.append("<h2>5. Findings</h2>")
     for f in m["findings"]:
+        _cv = f" <span class='badge'>CVSS {_e(f['cvss'])}</span>" if f.get("cvss") else ""
         p.append(f"<h3>{f['id']} — {_e(f['title'])} "
-                 f"<span class='sev-{f['severity']}'>{f['severity']}</span></h3>")
+                 f"<span class='sev-{f['severity']}'>{f['severity']}</span>{_cv}</h3>")
         p.append(f"<h4>Description</h4><p>{_e(f['description'])}</p>")
         if f["evidence_cmd"]:
             p.append(f"<h4>Evidence — Command</h4><pre>{_pre(f['evidence_cmd'])}</pre>")
@@ -617,6 +619,8 @@ def to_docx(m: dict, path: Path) -> bool:
             badge = h.add_run(f" {f['severity']} ")
             badge.bold = True; badge.font.color.rgb = RGBColor(*txt)
             _dx_run_shade(badge, fill)
+            if f.get("cvss"):
+                h.add_run(f"  CVSS {f['cvss']}").italic = True
             doc.add_heading("Description", level=3)
             doc.add_paragraph(f["description"])
             if f["evidence_cmd"]:

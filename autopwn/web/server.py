@@ -205,18 +205,18 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.get("/api/playbook-schema")
     def playbook_schema():
-        from . import playbooks as pb
+        from .. import playbooks as pb
         return pb.SCHEMA
 
     @app.get("/api/playbooks")
     def get_playbooks():
-        from . import playbooks as pb
-        return pb.annotate(store.host_summary(), store.service_matrix(),
+        from .. import playbooks as pb
+        return pb.annotate(store.all_hosts(), store.service_matrix(),
                            store.facts(), _ld())
 
     @app.get("/api/playbooks/{pb_id}")
     def get_playbook(pb_id: str):
-        from . import playbooks as pb
+        from .. import playbooks as pb
         for p in pb.load(_ld()):
             if p.get("id") == pb_id:
                 return p
@@ -224,7 +224,7 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.put("/api/playbooks/{pb_id}")
     def put_playbook(pb_id: str, body: dict):
-        from . import playbooks as pb
+        from .. import playbooks as pb
         if not isinstance(body, dict) or not body.get("id"):
             raise HTTPException(400, "Playbook must be an object with an 'id'.")
         books = pb.load(_ld())
@@ -240,7 +240,7 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.post("/api/playbooks")
     def create_playbook(body: dict):
-        from . import playbooks as pb
+        from .. import playbooks as pb
         if not isinstance(body, dict) or not body.get("id"):
             raise HTTPException(400, "Playbook must be an object with an 'id'.")
         books = pb.load(_ld())
@@ -252,7 +252,7 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.delete("/api/playbooks/{pb_id}")
     def delete_playbook(pb_id: str):
-        from . import playbooks as pb
+        from .. import playbooks as pb
         books = pb.load(_ld())
         kept = [p for p in books if p.get("id") != pb_id]
         if len(kept) == len(books):
@@ -262,13 +262,13 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.post("/api/playbooks/reset")
     def reset_playbooks():
-        from . import playbooks as pb
+        from .. import playbooks as pb
         return pb.reset(_ld())
 
     @app.post("/api/playbooks/{pb_id}/run")
     def run_playbook(pb_id: str, body: dict):
         """Launch the playbook's macro tool as a detached job against a target."""
-        from . import playbooks as pb
+        from .. import playbooks as pb
         target = (body or {}).get("target", "").strip()
         if not target:
             raise HTTPException(400, "A target is required to run a playbook.")
@@ -438,7 +438,7 @@ def create_app(config_path: str = "config.yaml"):
             except (json.JSONDecodeError, OSError):
                 transcript = []
         from ..analysis import extract_results
-        findings = build_findings(hosts, facts, transcript)
+        findings = build_findings(hosts, facts, transcript, str(ld))
         _res = extract_results(transcript, facts.get("domain", ""))
         creds, users = _res["credentials"], _res["users"]
         # a credential seeded/captured into facts counts too

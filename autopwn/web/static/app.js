@@ -108,14 +108,24 @@ async function loadPlaybooks() {
     const badge = ev.matched
       ? `<span class="badge text-bg-success">matches scan</span>`
       : `<span class="badge text-bg-light text-secondary border">no match yet</span>`;
+    const sev = pb.severity
+      ? `<span class="badge ${SEV_CLASS[pb.severity] || "text-bg-secondary"}">${esc(pb.severity)}</span>${pb.cvss ? ` <span class="badge text-bg-light text-secondary border">CVSS ${esc(pb.cvss)}</span>` : ""}` : "";
+    const report = pb.severity ? `
+        <div class="pb-section-label mt-3">Report content (finding)</div>
+        <div class="pb-match">
+          ${pb.impact ? `<div class="small"><b>Impact:</b> ${esc(pb.impact)}</div>` : ""}
+          ${pb.recommendation ? `<div class="small mt-1"><b>Recommendation:</b> ${esc(pb.recommendation)}</div>` : ""}
+          ${(ev.matched_hosts || []).length ? `<div class="small mt-1"><b>Affected hosts:</b> ${ev.matched_hosts.map(h => `<code>${esc(h)}</code>`).join(" ")}</div>` : ""}
+        </div>` : "";
     const runTool = (pb.run || {}).tool;
     const runBtn = runTool
       ? `<button class="btn btn-sm btn-outline-danger py-0" data-pb-run="${esc(pb.id)}" title="Run ${esc(runTool)}">▶ Run</button>` : "";
+    const hasSteps = (pb.steps || []).length;
     return `<div class="card pb-card">
       <div class="card-body">
         <div class="pb-head mb-2">
           <div>
-            <div class="h6 mb-1">${esc(pb.name)} <span class="text-secondary small">(${esc(pb.id)})</span></div>
+            <div class="h6 mb-1">${esc(pb.name)} <span class="text-secondary small">(${esc(pb.id)})</span> ${sev}</div>
             <div class="text-secondary small">${esc(pb.summary || "")}</div>
           </div>
           <div class="text-end text-nowrap">
@@ -129,9 +139,10 @@ async function loadPlaybooks() {
         </div>
         <div class="pb-section-label">Matching against scan results</div>
         ${pbMatchPanel(ev)}
-        <div class="pb-section-label mt-3">Execution</div>
+        ${report}
+        ${hasSteps ? `<div class="pb-section-label mt-3">Execution</div>
         ${runTool ? `<div class="small mb-1"><span class="text-secondary">launches:</span> <code>${esc(runTool)}</code></div>` : ""}
-        <div class="pb-flow">${steps}</div>
+        <div class="pb-flow">${steps}</div>` : ""}
       </div></div>`;
   }).join("");
 
@@ -241,6 +252,23 @@ function renderBuilder() {
     <div class="mb-3"><label class="pb-lbl">Match — fact signals</label>
       <div class="pb-chips">${chipRow("signals", d.match.signals, undefined, _pbSchema.signals)}</div></div>
     <hr>
+    <div class="pb-section-label mb-1">Report — set a severity to make this a finding</div>
+    <div class="row g-2 mb-2">
+      <div class="col-md-4"><label class="pb-lbl">Severity</label>
+        <select class="form-select form-select-sm" data-field="severity">
+          <option value="">— none (attack path) —</option>
+          ${(_pbSchema.severities || []).map(s => `<option ${d.severity === s ? "selected" : ""}>${s}</option>`).join("")}
+        </select></div>
+      <div class="col-md-3"><label class="pb-lbl">CVSS</label>
+        <input class="form-control form-control-sm" value="${esc(d.cvss || "")}" data-field="cvss" placeholder="6.5"></div>
+      <div class="col-md-5"><label class="pb-lbl">Match — host facts <span class="text-secondary">(key = value per line)</span></label>
+        <textarea class="form-control form-control-sm font-monospace" rows="2" data-field="host_facts" placeholder="smb_signing = False">${esc(Object.entries((d.match || {}).host_facts || {}).map(([k, v]) => `${k} = ${v}`).join("\n"))}</textarea></div>
+    </div>
+    <div class="mb-2"><label class="pb-lbl">Impact</label>
+      <textarea class="form-control form-control-sm" rows="2" data-field="impact">${esc(d.impact || "")}</textarea></div>
+    <div class="mb-2"><label class="pb-lbl">Recommendation</label>
+      <textarea class="form-control form-control-sm" rows="2" data-field="recommendation">${esc(d.recommendation || "")}</textarea></div>
+    <hr>
     <div class="d-flex justify-content-between align-items-center mb-2">
       <span class="pb-section-label mb-0">Steps</span>
       <button class="btn btn-sm btn-outline-primary py-0" type="button" data-act="addStep">+ Add step</button>
@@ -307,6 +335,15 @@ function bindBuilder() {
       _pbDraft.steps[+t.dataset.step][f] = t.value;
     } else if (f === "ports") {
       _pbDraft.match.any_ports = parsePorts(t.value);
+    } else if (f === "host_facts") {
+      const hf = {};
+      t.value.split("\n").forEach(line => {
+        const i = line.indexOf("=");
+        if (i < 1) return;
+        const k = line.slice(0, i).trim(), v = line.slice(i + 1).trim();
+        if (k) hf[k] = v;
+      });
+      _pbDraft.match.host_facts = hf;
     } else if (f === "tool") {
       _pbDraft.run.tool = t.value;
     } else {

@@ -44,19 +44,49 @@ SIGNALS = [
     "kerberoastable", "asreproastable",
 ]
 NEXT_CHOICES = ["next", "final"]
+SEVERITIES = ["Critical", "High", "Medium", "Low", "Info"]
+# Host facts a finding playbook can match on (fact -> what it means).
+HOST_FACTS = {
+    "smb_signing": "'False' when SMB signing is not enforced",
+    "smb_nullauth": "'True' when anonymous SMB is permitted",
+    "os": "OS string harvested from the host",
+    "pwned": "'Pwn3d!' when an account is admin on the host",
+    "kerberoastable": "SPN hashes were obtained",
+    "asreproastable": "AS-REP hashes were obtained",
+}
 
 SCHEMA = {
     "artifacts": ARTIFACTS,   # what a step can consume / produce
     "triggers": TRIGGERS,     # common step preconditions
     "signals": SIGNALS,       # fact signals usable in match / triggers
     "next": NEXT_CHOICES,
+    "severities": SEVERITIES,
+    "host_facts": HOST_FACTS,
     "notes": {
         "trigger": "The condition that fires this step.",
         "consumes": "Artifacts this step needs from earlier steps.",
         "produces": "Artifacts this step hands to the next / final step.",
         "next": "'next' = fall through, 'final' = goal, or a step title.",
+        "severity": "Set severity+cvss to make this playbook a reportable finding.",
+        "host_facts": "Match a host only when these facts equal these values.",
     },
 }
+
+
+def _finding(pb_id, name, severity, cvss, summary, impact, recommendation,
+             any_ports=None, host_facts=None, evidence_tools=None,
+             detector="", signals=None):
+    """A detection/reporting playbook: when it matches the scan it becomes a
+    finding in the report carrying this severity, CVSS, impact and recommendation."""
+    return {
+        "id": pb_id, "name": name, "category": "finding",
+        "severity": severity, "cvss": cvss, "summary": summary,
+        "impact": impact, "recommendation": recommendation,
+        "match": {"any_ports": any_ports or [], "host_facts": host_facts or {},
+                  "signals": signals or []},
+        "evidence_tools": evidence_tools or [], "detector": detector,
+        "run": {"tool": ""}, "steps": [],
+    }
 
 
 def _step(n, title, trigger, tool, consumes, produces, detail, nxt="next",
@@ -176,6 +206,61 @@ DEFAULT_PLAYBOOKS = [
                   "Any recovered credential → spray across the AD estate.", "final"),
         ],
     },
+
+    # ---- finding playbooks (detection + report content) ------------------
+    _finding("smb-signing", "SMB Signing Not Enforced", "High", "6.5",
+             "One or more hosts do not require SMB signing. Unsigned SMB allows "
+             "an attacker who can capture or coerce NTLM authentication to relay "
+             "it to these hosts.",
+             "NTLM/SMB relay to the host can yield command execution or a "
+             "credential/SAM dump, enabling lateral movement.",
+             "Enforce SMB signing (Require) via GPO on all servers and "
+             "workstations; disable NTLM where possible.",
+             any_ports=[445], host_facts={"smb_signing": "False"},
+             evidence_tools=["netexec_smb"]),
+    _finding("smb-nullauth", "SMB Null / Anonymous Authentication Permitted",
+             "Medium", "5.3",
+             "The host accepts an anonymous (null) SMB session. The evidence "
+             "shows what an unauthenticated attacker can enumerate over that "
+             "session (e.g. shares) — confirming real, not just theoretical, exposure.",
+             "Anonymous users can enumerate shares, and depending on configuration "
+             "also users (RID cycling) and password policy — valuable recon and a "
+             "starting point for further access.",
+             "Restrict anonymous access (RestrictNullSessAccess=1, "
+             "RestrictAnonymous=1); review share and RID enumeration exposure.",
+             any_ports=[445], host_facts={"smb_nullauth": "True"},
+             evidence_tools=["smbclient_shares", "netexec_smb"]),
+    _finding("wsus-http", "WSUS Served Over HTTP", "High", "8.1",
+             "A WSUS update service is reachable over cleartext HTTP (8530).",
+             "If clients are not forced to use WSUS over SSL, an on-path attacker "
+             "can spoof updates and execute code as SYSTEM on managed endpoints.",
+             "Require WSUS over HTTPS (8531) and set the 'Do not store passwords'/"
+             "SSL enforcement GPO for clients.",
+             any_ports=[8530]),
+    _finding("admin-console", "Administration Console Exposed", "Low", "4.0",
+             "A management console / agent handler (e.g. endpoint-management "
+             "platform) is network-reachable.",
+             "If protected only by default or weak credentials, console access can "
+             "push tasks/software to every managed endpoint.",
+             "Restrict the console to management networks, enforce strong unique "
+             "admin credentials and MFA, and patch to current.",
+             any_ports=[8443, 8444]),
+    _finding("rdp-exposed", "Remote Desktop (RDP) Exposed", "Low", "4.0",
+             "RDP (3389) is reachable on the network.",
+             "Credential brute-force / password-spray surface; legacy hosts may be "
+             "vulnerable to pre-auth RCE (e.g. BlueKeep).",
+             "Restrict RDP to jump hosts/VPN, require NLA, enforce account lockout, "
+             "and keep hosts patched.",
+             any_ports=[3389]),
+    _finding("http-headers", "Missing HTTP Security Headers", "Low", "3.1",
+             "Web responses omit recommended security headers (e.g. "
+             "Content-Security-Policy, X-Frame-Options, HSTS).",
+             "Increases exposure to clickjacking, MIME sniffing, and transport "
+             "downgrade attacks.",
+             "Add CSP, X-Frame-Options/frame-ancestors, X-Content-Type-Options, "
+             "and Strict-Transport-Security.",
+             any_ports=[80, 8080, 8000], evidence_tools=["http_probe"],
+             detector="missing_http_headers"),
 ]
 
 
@@ -222,27 +307,54 @@ def _open_ports(services: list) -> dict:
     return ports
 
 
-def evaluate(pb: dict, hosts: list, services: list, facts: dict) -> dict:
+def _host_open_ports(entry: dict) -> set:
+    return {p["port"] for p in entry.get("ports", {}).values()
+            if p.get("state") == "open"}
+
+
+def matching_hosts(pb: dict, hosts: dict) -> list:
+    """Hosts a playbook applies to: those exposing one of its ports AND whose
+    facts equal every required host_fact (that's what makes a finding per-host)."""
+    match = pb.get("match", {}) or {}
+    any_ports = set(int(p) for p in (match.get("any_ports") or []))
+    host_facts = match.get("host_facts") or {}
+    out = []
+    for h, entry in sorted((hosts or {}).items()):
+        ports = _host_open_ports(entry)
+        if any_ports and not (any_ports & ports):
+            continue
+        hf = entry.get("facts", {})
+        if any(str(hf.get(k)) != str(v) for k, v in host_facts.items()):
+            continue
+        out.append(h)
+    return out
+
+
+def evaluate(pb: dict, hosts: dict, services: list, facts: dict) -> dict:
     """Explain whether *pb* matches the current scan results.
 
-    Returns {matched: bool, reasons: [{rule, matched, hits}]}. A playbook matches
-    when any required port is open somewhere (or it declares no port rule). Fact
-    signals are reported too but do not gate the match — they add context.
+    Returns {matched, matched_hosts, reasons:[{rule,matched,hits}]}. A playbook
+    matches when a required port is open (and, for finding playbooks, the required
+    host facts hold on that host). Signals add context.
     """
     ports = _open_ports(services)
     reasons = []
     match = pb.get("match", {}) or {}
+    host_facts = match.get("host_facts") or {}
 
     any_ports = match.get("any_ports") or []
     port_matched = None
     if any_ports:
-        hits = []
-        for p in any_ports:
-            for h in ports.get(int(p), []):
-                hits.append(f"{h}:{p}")
+        hits = [f"{h}:{p}" for p in any_ports for h in ports.get(int(p), [])]
         port_matched = bool(hits)
         reasons.append({"rule": f"any open port in {any_ports}",
                         "matched": port_matched, "hits": sorted(hits)})
+
+    matched_hosts = matching_hosts(pb, hosts)
+    for k, v in host_facts.items():
+        hits = [h for h in matched_hosts]
+        reasons.append({"rule": f"host fact {k} = {v}",
+                        "matched": bool(matched_hosts), "hits": hits})
 
     for sig in match.get("signals") or []:
         present = bool(facts.get(sig)) or (sig == "username" and (
@@ -251,11 +363,16 @@ def evaluate(pb: dict, hosts: list, services: list, facts: dict) -> dict:
                         "matched": bool(present),
                         "hits": [f"{sig}={facts.get(sig)}"] if facts.get(sig) else []})
 
-    matched = port_matched if port_matched is not None else True
-    return {"matched": matched, "reasons": reasons}
+    if host_facts:
+        matched = bool(matched_hosts)
+    elif port_matched is not None:
+        matched = port_matched
+    else:
+        matched = True
+    return {"matched": matched, "matched_hosts": matched_hosts, "reasons": reasons}
 
 
-def annotate(hosts: list, services: list, facts: dict, log_dir) -> list:
+def annotate(hosts: dict, services: list, facts: dict, log_dir) -> list:
     out = []
     for pb in load(log_dir):
         out.append({**pb, "evaluation": evaluate(pb, hosts, services, facts)})

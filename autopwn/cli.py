@@ -1017,7 +1017,7 @@ def cmd_agent(args) -> int:
     from . import report, store as _store
     _store.configure(f"{cfg.log_dir}/results.json")
     model = report.build_model(meta, agent.transcript, _store.all_hosts(),
-                               _store.facts(), final)
+                               _store.facts(), final, log_dir=cfg.log_dir)
     formats = [f.strip() for f in (args.report_format or "html,docx,md").split(",")]
     written = report.export(model, path.with_suffix(""), formats)
     if written:
@@ -1048,7 +1048,7 @@ def cmd_report(args) -> int:
                   if e.get("kind") == "final"), "")
     meta = report.Engagement(engagement="Security assessment")
     model = report.build_model(meta, transcript, _store.all_hosts(),
-                               _store.facts(), final)
+                               _store.facts(), final, log_dir=cfg.log_dir)
     formats = [f.strip() for f in args.format.split(",")]
     written = report.export(model, tpath.with_suffix(""), formats)
     if written:
