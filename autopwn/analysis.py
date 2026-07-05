@@ -182,7 +182,7 @@ def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
                     "managed endpoints.",
              rec="Require WSUS over HTTPS (8531) and set the "
                  "'Do not store passwords'/SSL enforcement GPO for clients.",
-             tools=("nmap_scan",)),
+             tools=("nmap_scan",), ports=(8530, 8531)),
         dict(title="Administration Console Exposed", severity="Low", cvss="4.0",
              pred=lambda h, e, p: bool({8443, 8444} & p),
              desc="A management console / agent handler (e.g. endpoint-management "
@@ -191,7 +191,7 @@ def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
                     "access can push tasks/software to every managed endpoint.",
              rec="Restrict the console to management networks, enforce strong "
                  "unique admin credentials and MFA, and patch to current.",
-             tools=("nmap_scan",)),
+             tools=("nmap_scan",), ports=(8443, 8444)),
         dict(title="Remote Desktop (RDP) Exposed", severity="Low", cvss="4.0",
              pred=lambda h, e, p: 3389 in p,
              desc="RDP (3389) is reachable on the network.",
@@ -199,7 +199,7 @@ def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
                     "hosts may be vulnerable to pre-auth RCE (e.g. BlueKeep).",
              rec="Restrict RDP to jump hosts/VPN, require NLA, enforce account "
                  "lockout, and keep hosts patched.",
-             tools=("nmap_scan",)),
+             tools=("nmap_scan",), ports=(3389,)),
         dict(title="Missing HTTP Security Headers", severity="Low", cvss="3.1",
              pred=lambda h, e, p: bool({80, 8080, 8000} & p) and _has_missing_headers(transcript, h),
              desc="Web responses omit recommended security headers "
@@ -216,7 +216,14 @@ def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
         matched = hosts_where(r["pred"])
         if not matched:
             continue
-        cmd, out = _evidence(transcript, r["tools"], matched)
+        if r.get("ports"):
+            # Port-based finding: build evidence from the results store (complete
+            # and per-host) rather than a truncated scan dump, so it actually
+            # shows the finding's hosts and their open port(s).
+            cmd = _scan_cmd(transcript, r["ports"], matched)
+            out = _port_evidence(hosts, matched, set(r["ports"]))
+        else:
+            cmd, out = _evidence(transcript, r["tools"], matched)
         findings.append({
             "id": f"F-{fid:02d}", "title": r["title"], "severity": r["severity"],
             "cvss": r["cvss"], "hosts": matched, "description": r["desc"],
@@ -225,6 +232,33 @@ def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
         })
         fid += 1
     return findings
+
+
+def _port_evidence(hosts: dict, matched: list, ports: set) -> str:
+    """Per-host open-port evidence straight from the results store — shows each
+    finding host with the relevant open port(s) and service/version."""
+    lines = []
+    for h in matched:
+        entry = hosts.get(h, {})
+        for p in sorted(entry.get("ports", {}).values(),
+                        key=lambda x: x.get("port", 0)):
+            if p.get("state") == "open" and (not ports or p.get("port") in ports):
+                svc = (str(p.get("service", "")) + " "
+                       + str(p.get("version", ""))).strip()
+                lines.append(f"{h:<16} {p['port']}/tcp open  {svc}".rstrip())
+    return "\n".join(lines)
+
+
+def _scan_cmd(transcript, ports, matched) -> str:
+    """The nmap command that discovered these ports, if in the transcript;
+    otherwise a representative command scoped to the finding's hosts/ports."""
+    for e in transcript or []:
+        if e.get("kind") == "tool_result" and e.get("name") == "nmap_scan":
+            cmd = e.get("command")
+            if cmd:
+                return cmd
+    plist = ",".join(str(p) for p in sorted(ports))
+    return f"nmap -Pn -p {plist} " + " ".join(matched)
 
 
 def _has_missing_headers(transcript, host: str) -> bool:
