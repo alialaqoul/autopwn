@@ -18,6 +18,13 @@ dependencies = [
     "pydantic>=2.7",
 ]
 
+[project.optional-dependencies]
+# Web console (autopwn web). Bootstrap is vendored, so the UI runs fully offline.
+web = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+]
+
 [project.urls]
 Homepage = "https://github.com/your-username/autopwn"
 
@@ -26,3 +33,11 @@ autopwn = "autopwn.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["autopwn*"]
+
+[tool.setuptools.package-data]
+autopwn = [
+    "knowledge/*.md",
+    "web/static/*",
+    "web/static/vendor/*",
+    "web/templates/*",
+]

@@ -1,0 +1,35 @@
+/* Autopwn console — small overrides on top of vendored Bootstrap. */
+:root { --ap-accent: #dc3545; }
+
+body { font-size: .925rem; }
+
+.brand-mark { color: var(--ap-accent); letter-spacing: -2px; }
+
+.nav-pills .nav-link { cursor: pointer; }
+.nav-pills .nav-link.active { background-color: var(--ap-accent); }
+
+.stat-card .display-6 { font-weight: 600; line-height: 1; }
+.stat-card .stat-label { text-transform: uppercase; letter-spacing: .04em;
+  font-size: .72rem; color: var(--bs-secondary-color); }
+
+.console-log {
+  height: 62vh; overflow-y: auto; margin: 0; padding: .85rem 1rem;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: .8rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+  background: #0b0e11; color: #d6d9dc;
+}
+.console-log .l-think  { color: #6ea8fe; }
+.console-log .l-run    { color: #ffd666; }
+.console-log .l-result { color: #75d18a; }
+.console-log .l-warn   { color: #ff7b7b; }
+.console-log .l-final  { color: #fff; font-weight: 600; }
+
+.badge-port { font-family: ui-monospace, monospace; }
+
+table td, table th { vertical-align: middle; }
+
+.chip { display: inline-flex; align-items: center; gap: .35rem;
+  padding: .1rem .5rem; margin: .15rem; border-radius: 1rem;
+  background: var(--bs-secondary-bg); font-size: .8rem; }
+.chip button { border: 0; background: transparent; color: var(--bs-danger);
+  line-height: 1; cursor: pointer; padding: 0; }

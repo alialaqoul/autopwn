@@ -959,6 +959,14 @@ def cmd_agent(args) -> int:
             relaunch += ["--target", args.target]
         if args.objective:
             relaunch += ["--objective", args.objective]
+        # Carry starting credentials so a detached authenticated / assumed-breach
+        # run seeds them from step one (otherwise the background job loses them).
+        for flag, val in (("--username", getattr(args, "username", None)),
+                          ("--password", getattr(args, "password", None)),
+                          ("--domain", getattr(args, "domain", None)),
+                          ("--hash", getattr(args, "nt_hash", None))):
+            if val:
+                relaunch += [flag, val]
         for flag, val in (("--engagement", meta.engagement), ("--client", meta.client),
                           ("--assessor", meta.assessor),
                           ("--authorized-by", meta.authorized_by)):
@@ -1040,6 +1048,25 @@ def cmd_report(args) -> int:
         console.print("[green]Exported:[/] " + ", ".join(str(w) for w in written))
     else:
         console.print("[yellow]Nothing written (for DOCX: pip install python-docx).[/]")
+    return 0
+
+
+def cmd_web(args) -> int:
+    """Launch the web console (Bootstrap SPA served by uvicorn)."""
+    try:
+        from .web import run as run_web
+    except ImportError as e:
+        console.print(f"[red]Web console needs FastAPI + uvicorn:[/] {e}\n"
+                      "  pip install 'autopwn[web]'   (or: pip install fastapi uvicorn)")
+        return 1
+    url = f"http://{args.host}:{args.port}"
+    console.print(Panel(f"Autopwn web console\n[bold]{url}[/]\n\n"
+                        "Authorized security testing only.",
+                        title="autopwn web", border_style="cyan"))
+    try:
+        run_web(host=args.host, port=args.port, config_path=args.config)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Web console stopped.[/]")
     return 0
 
 
@@ -1129,6 +1156,12 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("stop", help="Stop a running background job.")
     st.add_argument("job_id")
     st.set_defaults(func=cmd_stop)
+
+    wb = sub.add_parser("web", help="Launch the web console (uvicorn + Bootstrap).")
+    wb.add_argument("--host", default="127.0.0.1",
+                    help="Bind address (default 127.0.0.1; use 0.0.0.0 to expose).")
+    wb.add_argument("--port", type=int, default=8000, help="Port (default 8000).")
+    wb.set_defaults(func=cmd_web)
     return p
 
 
