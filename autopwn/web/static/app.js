@@ -849,21 +849,24 @@ async function loadAiLog() {
 
 async function testAi() {
   const btn = $("#testAiBtn"), status = $("#testAiStatus");
-  btn.disabled = true; status.className = "small text-secondary";
-  status.textContent = "Testing…";
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Testing…`;
+  status.className = "small text-secondary";
+  status.textContent = "Pinging the model — local models can take 10–30s…";
   try {
     const r = await api("/api/settings/test-ai", { method: "POST" });
     if (r.ok) {
       status.className = "small text-success";
-      status.textContent = `✓ Connected to ${r.model} in ${r.latency_ms} ms — reply: “${r.reply || ""}”`;
+      status.textContent = `✓ Connected to ${r.model} in ${(r.latency_ms / 1000).toFixed(1)}s — reply: “${r.reply || ""}”`;
     } else {
       status.className = "small text-danger";
-      status.textContent = `✗ ${r.error || "failed"} (${r.latency_ms} ms)`;
+      status.textContent = `✗ ${r.error || "failed"} (${(r.latency_ms / 1000).toFixed(1)}s)`;
     }
   } catch (e) {
     status.className = "small text-danger"; status.textContent = "✗ " + e.message;
   } finally {
-    btn.disabled = false;
+    btn.disabled = false; btn.textContent = label;
     loadAiLog();
   }
 }

@@ -104,7 +104,12 @@ def create_app(config_path: str = "config.yaml"):
     @app.middleware("http")
     async def _session_context(request, call_next):
         _ld()  # every request sees the currently-selected session's data
-        return await call_next(request)
+        resp = await call_next(request)
+        # Never serve a stale console: always revalidate the SPA assets.
+        path = request.url.path
+        if path == "/" or path.startswith("/static"):
+            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
 
     # ---- page ------------------------------------------------------------- #
     @app.get("/", response_class=HTMLResponse)
