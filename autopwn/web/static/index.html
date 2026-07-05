@@ -123,8 +123,14 @@
                   <div class="form-text" id="modeHint">Recons the target and runs every matching playbook automatically.</div>
                 </div>
                 <div class="mb-3">
-                  <label class="form-label">Target host / range</label>
+                  <label class="form-label">Target(s)</label>
                   <input class="form-control" name="target" placeholder="192.168.140.0/24">
+                  <div class="form-text">
+                    Single IP <code>192.168.140.10</code> ·
+                    Multiple <code>192.168.140.10, 192.168.140.11</code> ·
+                    Range <code>192.168.140.10-20</code> ·
+                    CIDR <code>192.168.140.0/24</code>
+                  </div>
                 </div>
                 <div class="mb-3 d-none" id="objectiveRow">
                   <label class="form-label">Custom objective <span class="text-secondary">(AI mode, optional)</span></label>

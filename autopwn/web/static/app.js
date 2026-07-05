@@ -833,14 +833,25 @@ async function loadSessionsAdmin() {
   $("#sessionsTable tbody").innerHTML = data.sessions.map(s => {
     const badges = (s.current ? ` <span class="badge text-bg-success">current</span>` : "")
       + (s.name === "default" ? ` <span class="badge text-bg-light text-secondary border">default</span>` : "");
+    const clear = `<button class="btn btn-sm btn-outline-secondary py-0 me-1" data-clear-session="${esc(s.name)}">Clear data</button>`;
     const del = s.name === "default"
       ? `<span class="text-secondary small">protected</span>`
       : `<button class="btn btn-sm btn-outline-danger py-0" data-del-session="${esc(s.name)}">Delete</button>`;
     return `<tr><td class="fw-semibold">${esc(s.name)}${badges}</td>
       <td class="small">${s.hosts} host${s.hosts === 1 ? "" : "s"}</td>
-      <td class="text-end">${del}</td></tr>`;
+      <td class="text-end text-nowrap">${clear}${del}</td></tr>`;
   }).join("");
+  $$("#sessionsTable [data-clear-session]").forEach(b => b.onclick = () => clearSession(b.dataset.clearSession));
   $$("#sessionsTable [data-del-session]").forEach(b => b.onclick = () => deleteSession(b.dataset.delSession));
+}
+
+async function clearSession(name) {
+  if (!confirm(`Clear ALL assessment data in session "${name}" (results, findings, jobs, reports)? Scope, playbooks and custom tools are kept.`)) return;
+  try { await api(`/api/sessions/${encodeURIComponent(name)}/clear`, { method: "POST" }); }
+  catch (e) { return alert(e.message); }
+  await loadSessions();
+  loadSettings();
+  loadDashboard();
 }
 
 async function deleteSession(name) {

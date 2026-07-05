@@ -939,8 +939,14 @@ def cmd_autorun(args) -> int:
     from .facts import autofill
     cfg, scope = _load(args)
     _seed_creds(args)
-    if not _ensure_in_scope(scope, args.target):
+    # Accept single IP, comma/space-separated IPs, ranges (a-b) and CIDR.
+    targets = [t.strip() for t in args.target.replace(",", " ").split() if t.strip()]
+    if not targets:
+        console.print("[red]No target given.[/]")
         return 2
+    for t in targets:
+        if not _ensure_in_scope(scope, t):
+            return 2
 
     registry = default_registry(cfg.tools)
     ctx = ToolContext(scope=scope, confirm_active_actions=False)
@@ -976,11 +982,12 @@ def cmd_autorun(args) -> int:
     console.print(Panel(f"[bold]Playbook Autopilot (no AI)[/]\n{args.target}",
                         title="Autopwn", border_style="cyan"))
 
-    # 1) Recon: discover hosts/ports/services.
+    # 1) Recon: discover hosts/ports/services (each target: IP / range / CIDR).
     from .tools.runner import which
     scan = "nmap_scan" if which(cfg.tools.nmap_path) else "native_port_scan"
-    console.print(f"[cyan]═ Recon ═[/] {scan} {args.target}")
-    _run(scan, target=args.target)
+    for t in targets:
+        console.print(f"[cyan]═ Recon ═[/] {scan} {t}")
+        _run(scan, target=t)
 
     # 2) Enrich per host so finding conditions (SMB signing/null-auth) + web
     #    header findings have their evidence.

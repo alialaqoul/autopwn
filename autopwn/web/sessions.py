@@ -119,6 +119,33 @@ def create(name: str) -> dict:
     return entry
 
 
+def clear(name: str) -> None:
+    """Wipe a session's assessment data (results, facts, jobs, reports,
+    transcripts, AI log, chain workdir) while keeping the session itself and its
+    configuration (scope, playbooks, custom tools)."""
+    data = _read()
+    entry = _find(data, name)
+    if not entry:
+        raise KeyError(name)
+    d = Path(entry["dir"])
+    d.mkdir(parents=True, exist_ok=True)
+    # reset the results store (hosts + engagement variables)
+    (d / "results.json").write_text('{"hosts": {}, "facts": {}}', encoding="utf-8")
+    for p in d.glob("session-*"):          # transcripts + exported reports
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    for f in ("ai_calls.jsonl", "users.txt"):
+        try:
+            (d / f).unlink()
+        except OSError:
+            pass
+    for sub in ("chain", "jobs"):          # chain workdir + background jobs
+        shutil.rmtree(d / sub, ignore_errors=True)
+    shutil.rmtree(d / "results.lock", ignore_errors=True)
+
+
 def delete(name: str) -> None:
     if name == "default":
         raise ValueError("The default session cannot be deleted.")

@@ -141,6 +141,14 @@ def create_app(config_path: str = "config.yaml"):
             raise HTTPException(404, "Session not found.")
         return {"current": _sess()["name"], "sessions": sessions.list_sessions()}
 
+    @app.post("/api/sessions/{name}/clear")
+    def clear_session(name: str):
+        try:
+            sessions.clear(name)
+        except KeyError:
+            raise HTTPException(404, "Session not found.")
+        return {"cleared": name, "sessions": sessions.list_sessions()}
+
     @app.delete("/api/sessions/{name}")
     def remove_session(name: str):
         try:
@@ -434,13 +442,13 @@ def create_app(config_path: str = "config.yaml"):
         if mode == "ai" and not target and not objective:
             raise HTTPException(400, "Provide a target (autopilot) or an objective.")
 
-        # Authorize the target the same way the CLI does: auto-add unless denied.
+        # Authorize each target (single IP, comma/space list, range, or CIDR).
         sc = _scope()
-        if target:
-            if sc.is_denied(target):
-                raise HTTPException(403, f"'{target}' is on the deny list.")
-            if not sc.is_allowed(target):
-                sc.add_allow(target)
+        for t in target.replace(",", " ").split():
+            if sc.is_denied(t):
+                raise HTTPException(403, f"'{t}' is on the deny list.")
+            if not sc.is_allowed(t):
+                sc.add_allow(t)
 
         cmd = "autorun" if mode == "playbook" else "agent"
         argv = _session_args() + [cmd]
