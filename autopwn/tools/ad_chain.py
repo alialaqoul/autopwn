@@ -82,9 +82,12 @@ class AdChainTool(Tool):
             store.set_fact("admin_hash", nt)
 
         # Build a compact, grounded summary of what actually happened.
+        users = state.get("users", [])
         lines = [f"AD kill chain against {target}"
                  + (f" ({domain})" if domain else "")]
         lines += [f"  - {s}" for s in state.get("steps", [])]
+        if users:
+            lines.append(f"Users ({len(users)}): " + ", ".join(users))
         if creds:
             lines.append("Credentials: " + ", ".join(f"{u}:{p}" for u, p in creds))
         if state.get("admin"):
@@ -99,7 +102,7 @@ class AdChainTool(Tool):
             ok=bool(creds or state.get("admin") or state.get("flags")),
             summary=summary,
             data={"target": target, "domain": domain,
-                  "creds": creds, "admin": state.get("admin", []),
+                  "creds": creds, "users": users, "admin": state.get("admin", []),
                   "flags": state.get("flags", []),
                   "chain_findings": state.get("findings", []),
                   "command": f"ad_kill_chain {target}"},

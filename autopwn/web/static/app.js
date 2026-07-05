@@ -22,9 +22,12 @@ const TITLES = { dashboard: "Dashboard", launch: "Launch Assessment",
   reports: "Reports", scope: "Scope & Vars", settings: "Settings" };
 
 function show(view) {
+  if (!TITLES[view]) view = "dashboard";
   $$("#mainNav .ap-nav-link").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   $$("section[data-panel]").forEach(s => (s.hidden = s.dataset.panel !== view));
   $("#viewTitle").textContent = TITLES[view] || view;
+  // remember the view in the URL so a refresh stays put (no history spam)
+  try { history.replaceState(null, "", "#" + view); } catch { }
   const loaders = { dashboard: loadDashboard, findings: loadFindings,
     playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
     reports: loadReports, scope: loadScope, settings: loadSettings };
@@ -51,14 +54,14 @@ async function loadDashboard() {
     </div></div>`).join("");
 
   $("#hostsTable tbody").innerHTML = d.hosts.length ? d.hosts.map(h => `
-    <tr><td class="font-monospace">${esc(h.host)}</td><td>${esc(h.hostname)}</td>
+    <tr><td class="small text-secondary">${esc(h.host)}</td><td class="small text-secondary">${esc(h.hostname)}</td>
     <td>${h.open_ports.map(p => `<span class="badge text-bg-secondary badge-port">${p}</span>`).join(" ")}</td>
     <td class="small text-secondary">${esc(h.services.join(", "))}</td></tr>`).join("")
     : `<tr><td colspan="4" class="text-center text-secondary py-3">No hosts yet — launch an assessment.</td></tr>`;
 
   $("#servicesTable tbody").innerHTML = d.services.length ? d.services.map(s => {
     const uniqHosts = [...new Set(s.hosts.map(h => h.host))];
-    return `<tr><td>${esc(s.service)}</td>
+    return `<tr><td class="small text-secondary">${esc(s.service)}</td>
     <td>${s.ports.map(p => `<span class="badge text-bg-secondary badge-port">${p}</span>`).join(" ")}</td>
     <td class="small text-secondary">${uniqHosts.map(esc).join(", ")}</td></tr>`;
   }).join("")
@@ -917,12 +920,25 @@ $("#settingsForm").addEventListener("submit", async (e) => {
   loadSettings();
 });
 
-/* AI enabled state reflected on the Launch page + sidebar */
+/* AI enabled state reflected on the Launch page */
 let _aiEnabled = true;
 function reflectAi() {
-  const warn = $("#aiDisabledWarn"), btn = $("#launchBtn");
-  if (warn) warn.classList.toggle("d-none", _aiEnabled);
-  if (btn) btn.disabled = !_aiEnabled;
+  const aiRadio = $("#mode_ai");
+  if (!aiRadio) return;
+  aiRadio.disabled = !_aiEnabled;
+  const lbl = document.querySelector('label[for="mode_ai"]');
+  if (lbl) lbl.classList.toggle("disabled", !_aiEnabled);
+  if (!_aiEnabled && aiRadio.checked) { $("#mode_playbook").checked = true; }
+  updateMode();
+}
+function updateMode() {
+  const ai = $("#mode_ai") && $("#mode_ai").checked;
+  const objRow = $("#objectiveRow");
+  if (objRow) objRow.classList.toggle("d-none", !ai);
+  const hint = $("#modeHint");
+  if (hint) hint.textContent = ai
+    ? "The LLM agent reasons step-by-step and can improvise, but is slower and non-reproducible."
+    : "Recons the target and runs every matching playbook automatically — reliable and reproducible.";
 }
 
 /* ---- sessions --------------------------------------------------------- */
@@ -975,12 +991,17 @@ $("#sessionSelect").addEventListener("change", (e) => selectSession(e.target.val
 $("#sessionNewBtn").addEventListener("click", newSession);
 $("#testAiBtn").addEventListener("click", testAi);
 $("#aiLogRefresh").addEventListener("click", loadAiLog);
+$$('#launchForm input[name="mode"]').forEach(r => r.addEventListener("change", updateMode));
+updateMode();
 
 $("#refreshBtn").addEventListener("click", () => {
   loadSessions();
   show($("#mainNav .ap-nav-link.active").dataset.view);
 });
+
+// restore the view from the URL hash (survives a browser refresh); react to back/forward
+window.addEventListener("hashchange", () => show((location.hash || "").slice(1)));
 loadSessions();
-loadDashboard();
+show((location.hash || "").slice(1) || "dashboard");
 setInterval(() => { if (!$('section[data-panel="dashboard"]').hidden) loadDashboard(); }, 8000);
 setInterval(() => { if (!$('section[data-panel="jobs"]').hidden) loadJobs(); }, 5000);

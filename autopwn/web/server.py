@@ -38,6 +38,7 @@ _REPORT_SUFFIXES = (".html", ".docx", ".md")
 # request bodies
 # --------------------------------------------------------------------------- #
 class AgentLaunch(BaseModel):
+    mode: str = ""          # "ai" (LLM agent) | "playbook" (deterministic autorun)
     target: str = ""
     objective: str = ""
     username: str = ""
@@ -419,12 +420,18 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.post("/api/jobs/agent")
     def launch_agent(body: AgentLaunch):
-        if not Config.load(config_path).ai_enabled:
-            raise HTTPException(403, "AI is disabled in Settings. Enable it to run "
-                                "the agent, or run a playbook instead.")
+        ai_enabled = Config.load(config_path).ai_enabled
+        # Default mode follows the AI switch: deterministic when AI is off.
+        mode = (body.mode or ("ai" if ai_enabled else "playbook")).strip()
         target = (body.target or "").strip()
         objective = (body.objective or "").strip()
-        if not target and not objective:
+
+        if mode == "ai" and not ai_enabled:
+            raise HTTPException(403, "AI is disabled in Settings. Use the "
+                                "Playbook (no-AI) mode, or enable AI.")
+        if mode == "playbook" and not target:
+            raise HTTPException(400, "Playbook autopilot needs a target/range.")
+        if mode == "ai" and not target and not objective:
             raise HTTPException(400, "Provide a target (autopilot) or an objective.")
 
         # Authorize the target the same way the CLI does: auto-add unless denied.
@@ -435,12 +442,12 @@ def create_app(config_path: str = "config.yaml"):
             if not sc.is_allowed(target):
                 sc.add_allow(target)
 
-        # Build the detached `autopwn agent ...` argv, carrying creds + metadata
-        # so authenticated / assumed-breach runs work from step one. The session
-        # overrides make the run read/write the currently-selected session.
-        argv = _session_args() + ["agent"]
-        pairs = [
-            ("--target", target), ("--objective", objective),
+        cmd = "autorun" if mode == "playbook" else "agent"
+        argv = _session_args() + [cmd]
+        pairs = [("--target", target)]
+        if mode == "ai":
+            pairs.append(("--objective", objective))
+        pairs += [
             ("--username", body.username), ("--password", body.password),
             ("--domain", body.domain), ("--hash", body.nt_hash),
             ("--engagement", body.engagement), ("--client", body.client),
@@ -451,9 +458,9 @@ def create_app(config_path: str = "config.yaml"):
             if val:
                 argv += [flag, val]
 
-        job_id = jobs.start(argv, label=f"agent {target or objective[:24]}",
-                            log_dir=_ld())
-        return {"id": job_id, "status": "running", "args": argv}
+        label = f"{'playbook' if mode == 'playbook' else 'agent'} {target or objective[:24]}"
+        job_id = jobs.start(argv, label=label, log_dir=_ld())
+        return {"id": job_id, "status": "running", "mode": mode, "args": argv}
 
     @app.post("/api/jobs/{job_id}/stop")
     def stop_job(job_id: str):

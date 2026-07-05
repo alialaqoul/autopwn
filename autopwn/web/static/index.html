@@ -96,7 +96,7 @@
             <div class="card h-100">
               <div class="card-header fw-semibold">Service matrix</div>
               <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="servicesTable">
-                <thead><tr><th>Service</th><th>Ports</th><th>Hosts</th></tr></thead>
+                <thead><tr><th style="width:16%">Service</th><th style="width:30%">Ports</th><th style="width:54%">Hosts</th></tr></thead>
                 <tbody></tbody></table></div></div>
             </div>
           </div>
@@ -107,19 +107,25 @@
       <section data-panel="launch" hidden>
         <div class="row"><div class="col-xxl-9">
           <div class="card">
-            <div class="card-header fw-semibold">Launch AI assessment</div>
+            <div class="card-header fw-semibold">Launch assessment</div>
             <div class="card-body">
-              <div class="alert alert-warning py-2 d-none" id="aiDisabledWarn">
-                AI is <b>disabled</b> in Settings — the agent can't run. Enable it in <b>Settings</b>, or use <b>Playbooks</b> to run deterministic actions.
-              </div>
               <form id="launchForm">
                 <div class="mb-3">
-                  <label class="form-label">Target host / range</label>
-                  <input class="form-control" name="target" placeholder="192.168.140.11">
-                  <div class="form-text">With no objective, Autopwn runs a full adaptive autopilot on this target.</div>
+                  <label class="form-label">Mode</label>
+                  <div class="btn-group w-100" role="group">
+                    <input type="radio" class="btn-check" name="mode" id="mode_playbook" value="playbook" checked>
+                    <label class="btn btn-outline-secondary" for="mode_playbook">⚙ Playbook autopilot <span class="text-secondary">— deterministic, no AI</span></label>
+                    <input type="radio" class="btn-check" name="mode" id="mode_ai" value="ai">
+                    <label class="btn btn-outline-secondary" for="mode_ai">✷ AI autopilot <span class="text-secondary">— LLM agent</span></label>
+                  </div>
+                  <div class="form-text" id="modeHint">Recons the target and runs every matching playbook automatically — reliable and reproducible.</div>
                 </div>
                 <div class="mb-3">
-                  <label class="form-label">Custom objective <span class="text-secondary">(optional)</span></label>
+                  <label class="form-label">Target host / range</label>
+                  <input class="form-control" name="target" placeholder="192.168.140.0/24">
+                </div>
+                <div class="mb-3 d-none" id="objectiveRow">
+                  <label class="form-label">Custom objective <span class="text-secondary">(AI mode, optional)</span></label>
                   <textarea class="form-control" name="objective" rows="2" placeholder="e.g. Assess the DC and attempt to reach Domain Admin."></textarea>
                 </div>
                 <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#credsBox">Starting credentials (assumed breach)</button>

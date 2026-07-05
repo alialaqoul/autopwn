@@ -18,6 +18,7 @@ _CHAIN_CRED_RE = re.compile(r"valid credential:\s*([^\s:]+):(\S+?)(?:\s|$)", re.
 _KERBRUTE_RE = re.compile(r"VALID USERNAME:\s+([^@\s]+)@")
 _LDAP_USER_RE = re.compile(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}")
 _RID_USER_RE = re.compile(r"\\([^\\\s]+)\s+\(SidTypeUser\)", re.I)
+_CHAIN_USERS_RE = re.compile(r"^Users \(\d+\):\s*(.+)$", re.M)
 
 
 def extract_results(transcript, domain: str = "") -> dict:
@@ -56,6 +57,11 @@ def extract_results(transcript, domain: str = "") -> dict:
         for m in _RID_USER_RE.finditer(out):
             if not m.group(1).endswith("$"):
                 users.add(m.group(1))
+        for m in _CHAIN_USERS_RE.finditer(out):   # ad_kill_chain "Users (N): ..."
+            for u in m.group(1).split(","):
+                u = u.strip()
+                if u and not u.endswith("$"):
+                    users.add(u)
     return {"credentials": list(creds.values()), "users": sorted(users)}
 
 

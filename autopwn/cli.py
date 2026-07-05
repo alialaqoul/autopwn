@@ -931,6 +931,101 @@ def _seed_creds(args) -> None:
                       + ", ".join(seeded) + " — credentialed tools enabled.")
 
 
+def cmd_autorun(args) -> int:
+    """Deterministic 'Playbook Autopilot' — no AI. Recon a target/range, then run
+    every playbook whose match conditions fire, and report."""
+    import json as _json
+    from . import playbooks as pb_mod, report, store as _store
+    from .facts import autofill
+    cfg, scope = _load(args)
+    _seed_creds(args)
+    if not _ensure_in_scope(scope, args.target):
+        return 2
+
+    registry = default_registry(cfg.tools)
+    ctx = ToolContext(scope=scope, confirm_active_actions=False)
+    transcript: list = []
+
+    def _run(tool_name, **kw):
+        tool = registry.get(tool_name)
+        if tool is None:
+            return None
+        try:
+            r = tool.run(ctx, **kw)
+        except Exception as e:
+            console.print(f"[red]{tool_name} error: {e}[/]")
+            return None
+        transcript.append({"kind": "tool_result", "name": tool_name,
+                           "command": (r.data or {}).get("command", tool_name),
+                           "ok": r.ok, "output": r.raw_output or r.summary})
+        return r
+
+    from .report import Engagement
+    meta = Engagement(
+        engagement=getattr(args, "engagement", None) or scope.engagement or "Security assessment",
+        client=getattr(args, "client", None) or "", assessor=getattr(args, "assessor", None) or "",
+        authorized_by=getattr(args, "authorized_by", None) or scope.authorized_by or "",
+        target=args.target, objective=f"Deterministic playbook assessment of {args.target}")
+    console.print(Panel(f"[bold]Playbook Autopilot (no AI)[/]\n{args.target}",
+                        title="Autopwn", border_style="cyan"))
+
+    # 1) Recon: discover hosts/ports/services.
+    from .tools.runner import which
+    scan = "nmap_scan" if which(cfg.tools.nmap_path) else "native_port_scan"
+    console.print(f"[cyan]═ Recon ═[/] {scan} {args.target}")
+    _run(scan, target=args.target)
+
+    # 2) Enrich per host so finding conditions (SMB signing/null-auth) + web
+    #    header findings have their evidence.
+    for host, entry in list(_store.all_hosts().items()):
+        ports = {p["port"] for p in entry.get("ports", {}).values()
+                 if p.get("state") == "open"}
+        if 445 in ports:
+            _run("netexec_smb", target=host)
+        if {80, 8080, 8000} & ports:
+            _run("http_probe", url=f"http://{host}")
+
+    # 3) Run every playbook whose match fires and that has a runnable macro tool.
+    hosts = _store.all_hosts()
+    ran = 0
+    for pb in pb_mod.load(cfg.log_dir):
+        tool_name = (pb.get("run") or {}).get("tool", "").strip()
+        if not tool_name:
+            continue
+        tool = registry.get(tool_name)
+        if tool is None:
+            continue
+        matched = pb_mod.matching_hosts(pb, hosts)
+        for host in matched:
+            console.print(f"[cyan]▶ {pb.get('id')} → {tool_name}[/] on {host}")
+            kw = autofill(set(tool.parameters.get("properties", {})))
+            kw["target"] = host
+            r = _run(tool_name, **kw)
+            ran += 1
+            if r:
+                console.print(f"    [dim]{r.summary}[/]")
+
+    # 4) Save a transcript (so the web Findings view picks it up) + export report.
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    tpath = Path(cfg.log_dir) / f"session-{ts}.json"
+    tpath.parent.mkdir(parents=True, exist_ok=True)
+    tpath.write_text(_json.dumps(transcript, indent=2), encoding="utf-8")
+
+    final = f"Deterministic assessment ran {ran} playbook action(s) across {args.target}."
+    model = report.build_model(meta, transcript, _store.all_hosts(),
+                               _store.facts(), final, log_dir=cfg.log_dir)
+    formats = [f.strip() for f in (getattr(args, "report_format", None) or "html,docx,md").split(",")]
+    written = report.export(model, tpath.with_suffix(""), formats)
+    creds = model.get("credentials", [])
+    console.print(f"[green]Findings:[/] {len(model['findings'])} | "
+                  f"[green]Credentials:[/] {len(creds)} | "
+                  f"[green]Users:[/] {len(model.get('users', []))}")
+    if written:
+        console.print("[green]Report:[/] " + ", ".join(str(w) for w in written))
+    console.print("[bold green]══ playbook autopilot complete ══[/]")
+    return 0
+
+
 def cmd_agent(args) -> int:
     cfg, scope = _load(args)
     if not cfg.ai_enabled:
@@ -1136,6 +1231,19 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Set a variable, repeatable. e.g. --set username=admin")
     vp.add_argument("--clear", action="store_true", help="Clear all variables.")
     vp.set_defaults(func=cmd_vars)
+
+    ar = sub.add_parser("autorun", help="Deterministic playbook autopilot (no AI).")
+    ar.add_argument("--target", required=True, help="Host/IP/range to assess.")
+    ar.add_argument("--username", help="Starting username (assumed-breach).")
+    ar.add_argument("--password", help="Starting password.")
+    ar.add_argument("--domain", help="AD domain.")
+    ar.add_argument("--hash", dest="nt_hash", help="Starting NTLM hash.")
+    ar.add_argument("--engagement", help="Engagement name.")
+    ar.add_argument("--client", help="Client / organization.")
+    ar.add_argument("--assessor", help="Who is running the assessment.")
+    ar.add_argument("--authorized-by", dest="authorized_by", help="Who authorized it.")
+    ar.add_argument("--report-format", default="html,docx,md", help="html,docx,md")
+    ar.set_defaults(func=cmd_autorun)
 
     a = sub.add_parser("agent", help="Run the AI agent (autopilot with --target).")
     a.add_argument("--target", help="Target host/IP. With no --objective, runs "
