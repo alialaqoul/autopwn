@@ -41,7 +41,7 @@ carry the severity/CVSS/impact that lands in the report:
 <p align="center"><img src="assets/playbooks.png" alt="Playbooks — editable attack paths and findings" width="90%"></p>
 
 <p align="center">
-  <img src="assets/tools.png" alt="Tools library — every action and how it runs" width="49%">
+  <img src="assets/gui-tools.png" alt="Tools library — every action and how it runs" width="49%">
   <img src="assets/settings.png" alt="Settings — AI model config, connection test, and AI call log" width="49%">
 </p>
 
@@ -498,9 +498,7 @@ them; the AD roasting tools produce hashes that `john`/`hashcat` crack; and
 Credentialed tools (Kerberoast, secretsdump, netexec with `-u/-p`, RBCD, hydra)
 require valid credentials and are skipped until you have them (or supply them up
 front for an authenticated engagement). `autopwn tools` shows the whole catalog
-grouped by category with install status:
-
-<p align="center"><img src="assets/tools.png" alt="Tool catalog by category" width="70%"></p>
+grouped by category with install status.
 
 ---
 
