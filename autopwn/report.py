@@ -387,6 +387,76 @@ def to_html(m: dict) -> str:
 
 
 # ---- DOCX -------------------------------------------------------------------
+# Palette mirrored from the HTML report so both look the same.
+_DX_BLUE = (0x0B, 0x53, 0x94)          # headings + table header background
+_DX_WHITE = (0xFF, 0xFF, 0xFF)
+_DX_SEV = {                            # severity -> (fill hex, text rgb) — matches CSS
+    "Critical": ("7B0000", _DX_WHITE), "High": ("C00000", _DX_WHITE),
+    "Medium": ("F4B400", (0, 0, 0)), "Low": ("3C78D8", _DX_WHITE),
+    "Info": ("888888", _DX_WHITE),
+}
+
+
+def _dx_shade(cell, fill_hex: str) -> None:
+    """Set a table cell's background fill (like a CSS background-color)."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear"); shd.set(qn("w:fill"), fill_hex)
+    tcPr.append(shd)
+
+
+def _dx_cell(cell, text, bold=False, rgb=None, size=None, mono=False) -> None:
+    from docx.shared import Pt, RGBColor
+    cell.text = ""
+    run = cell.paragraphs[0].add_run(_xml_safe(str(text)))
+    run.font.name = "Consolas" if mono else "Arial"
+    if bold:
+        run.bold = True
+    if rgb is not None:
+        run.font.color.rgb = RGBColor(*rgb)
+    if size:
+        run.font.size = Pt(size)
+
+
+def _dx_table(doc, headers, widths=None):
+    """A Table-Grid table with a blue header row + white bold text (HTML look)."""
+    from docx.shared import Inches
+    t = doc.add_table(rows=1, cols=len(headers)); t.style = "Table Grid"
+    for i, h in enumerate(headers):
+        _dx_cell(t.rows[0].cells[i], h, bold=True, rgb=_DX_WHITE)
+        _dx_shade(t.rows[0].cells[i], "0B5394")
+        if widths and i < len(widths):
+            t.rows[0].cells[i].width = Inches(widths[i])
+    return t
+
+
+def _force_arial(doc) -> None:
+    """Make Arial the document-wide font and colour headings like the HTML."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    from docx.shared import RGBColor
+    for name in ("Normal", "Title", "Heading 1", "Heading 2", "Heading 3",
+                 "Heading 4", "List Bullet"):
+        try:
+            st = doc.styles[name]
+        except KeyError:
+            continue
+        st.font.name = "Arial"
+        rpr = st.element.get_or_add_rPr()
+        rfonts = rpr.find(qn("w:rFonts"))
+        if rfonts is None:
+            rfonts = OxmlElement("w:rFonts"); rpr.append(rfonts)
+        for a in ("w:ascii", "w:hAnsi", "w:cs"):
+            rfonts.set(qn(a), "Arial")
+    for name, rgb in (("Title", _DX_BLUE), ("Heading 1", _DX_BLUE),
+                      ("Heading 2", (0x22, 0x22, 0x22)), ("Heading 3", (0x44, 0x44, 0x44))):
+        try:
+            doc.styles[name].font.color.rgb = RGBColor(*rgb)
+        except KeyError:
+            pass
+
 
 def to_docx(m: dict, path: Path) -> bool:
     try:
@@ -397,12 +467,15 @@ def to_docx(m: dict, path: Path) -> bool:
     try:
         meta: Engagement = m["meta"]
         doc = Document()
+        _force_arial(doc)
         doc.add_heading("Penetration Test Report", level=0)
         doc.add_heading(meta.engagement, level=1)
-        t = doc.add_table(rows=0, cols=2); t.style = "Light List Accent 1"
+        t = doc.add_table(rows=0, cols=2); t.style = "Table Grid"
         for k, v in meta.rows():
             if v and k != "Engagement":
-                r = t.add_row().cells; r[0].text = k; r[1].text = str(v)
+                r = t.add_row().cells
+                _dx_cell(r[0], k, bold=True); _dx_shade(r[0], "F4F7FB")
+                _dx_cell(r[1], v)
 
         doc.add_heading("1. Executive Summary", level=1)
         for ln in (m["exec_summary"] or "").splitlines():
@@ -415,39 +488,48 @@ def to_docx(m: dict, path: Path) -> bool:
                 doc.add_paragraph(s)
 
         doc.add_heading("2. Finding Summary", level=1)
-        st = doc.add_table(rows=1, cols=2); st.style = "Light Grid Accent 1"
-        st.rows[0].cells[0].text = "Severity"; st.rows[0].cells[1].text = "Count"
+        st = _dx_table(doc, ["Severity", "Count"])
         for s in _SEV_ORDER:
-            c = st.add_row().cells; c[0].text = s; c[1].text = str(m["counts"][s])
-        ft = doc.add_table(rows=1, cols=4); ft.style = "Light Grid Accent 1"
-        for i, h in enumerate(["ID", "Title", "Severity", "Host(s)"]):
-            ft.rows[0].cells[i].text = h
+            c = st.add_row().cells
+            fill, txt = _DX_SEV[s]
+            _dx_cell(c[0], s, bold=True, rgb=txt); _dx_shade(c[0], fill)
+            _dx_cell(c[1], m["counts"][s])
+        ft = _dx_table(doc, ["ID", "Title", "Severity", "Host(s)"])
         for f in m["findings"]:
             c = ft.add_row().cells
-            c[0].text = f["id"]; c[1].text = f["title"]
-            c[2].text = f["severity"]; c[3].text = ", ".join(f["hosts"])
+            _dx_cell(c[0], f["id"]); _dx_cell(c[1], f["title"])
+            fill, txt = _DX_SEV.get(f["severity"], ("888888", _DX_WHITE))
+            _dx_cell(c[2], f["severity"], bold=True, rgb=txt); _dx_shade(c[2], fill)
+            _dx_cell(c[3], ", ".join(f["hosts"]))
+        if not m["findings"]:
+            c = ft.add_row().cells
+            for i, v in enumerate(["—", "No findings identified", "—", "—"]):
+                _dx_cell(c[i], v)
 
         doc.add_heading("3. Scope Overview", level=1)
-        sc = doc.add_table(rows=1, cols=4); sc.style = "Light Grid Accent 1"
-        for i, h in enumerate(["IP Address", "Hostname", "Role", "OS"]):
-            sc.rows[0].cells[i].text = h
+        sc = _dx_table(doc, ["IP Address", "Hostname", "Role", "OS"])
         for s in m["scope"]:
             c = sc.add_row().cells
-            c[0].text = s["ip"]; c[1].text = s["hostname"]
-            c[2].text = s["role"]; c[3].text = s["os"]
+            _dx_cell(c[0], s["ip"]); _dx_cell(c[1], s["hostname"])
+            _dx_cell(c[2], s["role"]); _dx_cell(c[3], s["os"])
 
         doc.add_heading("4. Testing Process", level=1)
         doc.add_heading("4.1 Methodology", level=2)
         doc.add_paragraph(m["methodology"])
         doc.add_heading("4.2 Tools Used", level=2)
-        tt = doc.add_table(rows=1, cols=2); tt.style = "Light Grid Accent 1"
-        tt.rows[0].cells[0].text = "Tool"; tt.rows[0].cells[1].text = "Purpose"
+        tt = _dx_table(doc, ["Tool", "Purpose"])
         for t2 in m["tools_used"]:
-            c = tt.add_row().cells; c[0].text = t2["tool"]; c[1].text = t2["purpose"]
+            c = tt.add_row().cells
+            _dx_cell(c[0], t2["tool"]); _dx_cell(c[1], t2["purpose"])
 
         doc.add_heading("5. Findings", level=1)
         for f in m["findings"]:
-            doc.add_heading(f"{f['id']} — {f['title']} ({f['severity']})", level=2)
+            h = doc.add_heading("", level=2)
+            h.add_run(f"{f['id']} — {f['title']}  ")
+            fill, txt = _DX_SEV.get(f["severity"], ("888888", _DX_WHITE))
+            badge = h.add_run(f" {f['severity']} ")
+            badge.bold = True; badge.font.color.rgb = RGBColor(*txt)
+            _dx_run_shade(badge, fill)
             doc.add_heading("Description", level=3)
             doc.add_paragraph(f["description"])
             if f["evidence_cmd"]:
@@ -464,12 +546,11 @@ def to_docx(m: dict, path: Path) -> bool:
             doc.add_paragraph("No findings were identified in this assessment.")
 
         doc.add_heading("6. Recommendations (Prioritised)", level=1)
-        rt = doc.add_table(rows=1, cols=3); rt.style = "Light Grid Accent 1"
-        for i, h in enumerate(["Priority", "Action", "Finding"]):
-            rt.rows[0].cells[i].text = h
+        rt = _dx_table(doc, ["Priority", "Action", "Finding"])
         for r in m["recommendations"]:
             c = rt.add_row().cells
-            c[0].text = r["priority"]; c[1].text = r["action"]; c[2].text = r["finding"]
+            _dx_cell(c[0], r["priority"]); _dx_cell(c[1], r["action"])
+            _dx_cell(c[2], r["finding"])
 
         doc.add_heading("Appendix A — Command Log", level=1)
         for c in m["command_log"]:
@@ -482,6 +563,7 @@ def to_docx(m: dict, path: Path) -> bool:
         foot = doc.add_paragraph(
             f"Generated by Autopwn on {m['generated']} — for authorized "
             "security testing only.")
+        foot.runs[0].font.name = "Arial"
         foot.runs[0].font.size = Pt(8)
         foot.runs[0].font.color.rgb = RGBColor(0x88, 0x88, 0x88)
         doc.save(str(path))
@@ -503,11 +585,26 @@ def _xml_safe(text: str) -> str:
     return _CTRL.sub("", _ANSI.sub("", str(text or "")))
 
 
+def _dx_run_shade(run, fill_hex: str) -> None:
+    """Give a run a background highlight (the severity 'badge' look)."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    rpr = run._r.get_or_add_rPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear"); shd.set(qn("w:fill"), fill_hex)
+    rpr.append(shd)
+
+
 def _mono(doc, text: str):
+    """Evidence/command block: monospace in a light-grey bordered box, mirroring
+    the HTML report's <pre> styling (so tool output stays column-aligned)."""
     from docx.shared import Pt
-    p = doc.add_paragraph()
-    run = p.add_run(_xml_safe(text))
+    t = doc.add_table(rows=1, cols=1); t.style = "Table Grid"
+    cell = t.rows[0].cells[0]
+    cell.text = ""
+    run = cell.paragraphs[0].add_run(_xml_safe(text))
     run.font.name = "Consolas"; run.font.size = Pt(8)
+    _dx_shade(cell, "F5F5F5")
 
 
 # ---- export -----------------------------------------------------------------
