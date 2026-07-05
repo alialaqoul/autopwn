@@ -26,7 +26,12 @@ def main():
     argv = json.loads(sys.argv[1])
     logf, cmdf = sys.argv[2], sys.argv[3]
     _log(logf, f"[*] opening session: {argv[0]} → {argv[-1] if argv else ''}\n")
-    env = dict(os.environ, TERM="dumb")   # discourage colour/interactive prompts
+    # Force unbuffered/line-buffered child output — Python tools (wmiexec) block-
+    # buffer stdout when piped, so without this their output never reaches us.
+    env = dict(os.environ, TERM="dumb", PYTHONUNBUFFERED="1")
+    from shutil import which as _which
+    if os.name == "posix" and _which("stdbuf"):
+        argv = ["stdbuf", "-oL", "-eL"] + argv
     try:
         p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, bufsize=1, text=True, env=env)

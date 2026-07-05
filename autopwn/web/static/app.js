@@ -501,6 +501,8 @@ async function execRun() {   // send a command into the persistent session
   const input = $("#ex_cmd"), cmd = input.value;
   if (!_execConnected || !_shellId || !cmd) return;
   input.value = "";
+  $("#ex_out").insertAdjacentHTML("beforeend", `<span class="l-run">&gt; ${esc(cmd)}</span>\n`);
+  $("#exTerm").scrollTop = $("#exTerm").scrollHeight;
   try { await api(`/api/shells/${_shellId}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: cmd }) }); }
   catch (e) { alert(e.message); }
   input.focus();

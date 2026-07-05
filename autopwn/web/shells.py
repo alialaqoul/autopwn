@@ -65,11 +65,12 @@ def _client_argv(host, protocol, username, secret, auth, domain) -> list:
         argv = ["evil-winrm", "-i", host, "-u", username]
         argv += (["-H", secret] if auth == "hash" else ["-p", secret])
         return argv
-    # SMB → impacket-wmiexec (stateful semi-interactive shell)
+    # SMB → impacket-psexec (a real interactive cmd.exe; wmiexec's semi-interactive
+    # shell doesn't return output when driven programmatically).
     dom = f"{domain}/" if domain else ""
     if auth == "hash":
-        return ["impacket-wmiexec", "-hashes", f":{secret}", f"{dom}{username}@{host}"]
-    return ["impacket-wmiexec", f"{dom}{username}:{secret}@{host}"]
+        return ["impacket-psexec", "-hashes", f":{secret}", f"{dom}{username}@{host}"]
+    return ["impacket-psexec", f"{dom}{username}:{secret}@{host}"]
 
 
 def start(host, protocol, username, secret, auth="password", domain="") -> dict:
