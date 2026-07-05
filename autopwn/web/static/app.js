@@ -824,6 +824,32 @@ async function loadSettings() {
   _aiEnabled = !!s.ai_enabled;
   reflectAi();
   loadAiLog();
+  loadSessionsAdmin();
+}
+
+async function loadSessionsAdmin() {
+  let data;
+  try { data = await api("/api/sessions"); } catch { return; }
+  $("#sessionsTable tbody").innerHTML = data.sessions.map(s => {
+    const badges = (s.current ? ` <span class="badge text-bg-success">current</span>` : "")
+      + (s.name === "default" ? ` <span class="badge text-bg-light text-secondary border">default</span>` : "");
+    const del = s.name === "default"
+      ? `<span class="text-secondary small">protected</span>`
+      : `<button class="btn btn-sm btn-outline-danger py-0" data-del-session="${esc(s.name)}">Delete</button>`;
+    return `<tr><td class="fw-semibold">${esc(s.name)}${badges}</td>
+      <td class="small">${s.hosts} host${s.hosts === 1 ? "" : "s"}</td>
+      <td class="text-end">${del}</td></tr>`;
+  }).join("");
+  $$("#sessionsTable [data-del-session]").forEach(b => b.onclick = () => deleteSession(b.dataset.delSession));
+}
+
+async function deleteSession(name) {
+  if (!confirm(`Delete session "${name}" and permanently remove ALL its data?`)) return;
+  try { await api(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" }); }
+  catch (e) { return alert(e.message); }
+  _allTools = []; _pbToolNames = [];
+  await loadSessions();
+  loadSettings();
 }
 
 function fmtMsgs(msgs) {
@@ -937,8 +963,8 @@ function updateMode() {
   if (objRow) objRow.classList.toggle("d-none", !ai);
   const hint = $("#modeHint");
   if (hint) hint.textContent = ai
-    ? "The LLM agent reasons step-by-step and can improvise, but is slower and non-reproducible."
-    : "Recons the target and runs every matching playbook automatically — reliable and reproducible.";
+    ? "The LLM agent reasons step-by-step and can improvise on unfamiliar targets."
+    : "Recons the target and runs every matching playbook automatically.";
 }
 
 /* ---- sessions --------------------------------------------------------- */
@@ -1003,5 +1029,16 @@ $("#refreshBtn").addEventListener("click", () => {
 window.addEventListener("hashchange", () => show((location.hash || "").slice(1)));
 loadSessions();
 show((location.hash || "").slice(1) || "dashboard");
-setInterval(() => { if (!$('section[data-panel="dashboard"]').hidden) loadDashboard(); }, 8000);
-setInterval(() => { if (!$('section[data-panel="jobs"]').hidden) loadJobs(); }, 5000);
+
+/* Seamless auto-refresh: silently reload the active view's data in place. Skips
+   form-heavy views (Launch/Settings) and pauses while a modal is open, so it
+   never clobbers what the operator is typing. */
+const _AUTO = { dashboard: loadDashboard, findings: loadFindings,
+  playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
+  reports: loadReports, scope: loadScope };
+setInterval(() => {
+  if (document.hidden || document.querySelector(".modal.show")) return;
+  const v = $("#mainNav .ap-nav-link.active")?.dataset.view;
+  if (v && _AUTO[v]) _AUTO[v]();
+}, 6000);
+setInterval(loadSessions, 15000);   // keep session host-counts fresh

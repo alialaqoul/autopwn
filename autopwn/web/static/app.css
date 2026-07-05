@@ -134,10 +134,10 @@ textarea::placeholder, input::placeholder {
   border-right: 1px solid var(--ap-sidebar-border);
   display: flex; flex-direction: column; padding: 1rem .75rem;
 }
-.ap-brand { display: flex; align-items: center; gap: .5rem; padding: .25rem .4rem .9rem;
-  font-size: 1.35rem; font-weight: 700; color: #1f2937; }
+.ap-brand { display: flex; align-items: center; gap: .55rem; padding: .3rem .3rem 1rem;
+  font-size: 1.55rem; font-weight: 700; color: #1f2937; }
 .brand-svg { flex: 0 0 auto; }
-.brand-name { letter-spacing: .01em; }
+.brand-name { letter-spacing: .01em; line-height: 1; }
 
 .ap-session { padding: 0 .35rem .75rem; margin-bottom: .5rem;
   border-bottom: 1px solid var(--ap-sidebar-border); }
@@ -285,3 +285,8 @@ textarea::placeholder, input::placeholder {
 }
 
 table td, table th { vertical-align: middle; }
+
+/* give the first/last columns breathing room from the card edges (tables sit in
+   p-0 card bodies, so without this the first column is flush against the edge) */
+.table > :not(caption) > * > *:first-child { padding-left: 1rem; }
+.table > :not(caption) > * > *:last-child { padding-right: 1rem; }

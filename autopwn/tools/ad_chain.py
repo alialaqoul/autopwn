@@ -8,6 +8,7 @@ with a single decision, and records findings/creds/flags along the way.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .base import Tool, ToolContext, ToolResult
@@ -77,6 +78,21 @@ class AdChainTool(Tool):
             u, p = creds[0]
             store.set_fact("username", u)
             store.set_fact("password", p)
+        # Save the enumerated users to a wordlist and expose it as `userlist` so
+        # it auto-fills into user-driven tools (spray, kerberoast, asrep…).
+        users = state.get("users", [])
+        if users:
+            try:
+                uf = Path(log_dir) / "users.txt"
+                existing = set()
+                if uf.exists():
+                    existing = {l.strip() for l in
+                                uf.read_text(encoding="utf-8").splitlines() if l.strip()}
+                merged = sorted(existing | set(users))
+                uf.write_text("\n".join(merged) + "\n", encoding="utf-8")
+                store.set_fact("userlist", str(uf))
+            except OSError:
+                pass
         for i, (acct, nt) in enumerate(state.get("admin", [])):
             store.set_fact("admin_account", acct)
             store.set_fact("admin_hash", nt)
@@ -88,8 +104,10 @@ class AdChainTool(Tool):
         lines += [f"  - {s}" for s in state.get("steps", [])]
         if users:
             lines.append(f"Users ({len(users)}): " + ", ".join(users))
-        if creds:
-            lines.append("Credentials: " + ", ".join(f"{u}:{p}" for u, p in creds))
+        # One line per credential, tagged with THIS chain's domain, so the
+        # result view labels each cred with the right domain (not a global one).
+        for u, p in creds:
+            lines.append(f"Credential: {u}:{p} @ {domain or 'unknown'}")
         if state.get("admin"):
             lines.append("ADMIN: " + ", ".join(a for a, _ in state["admin"]))
         if state.get("flags"):

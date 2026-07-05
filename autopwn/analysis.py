@@ -14,7 +14,12 @@ from typing import Any
 
 # ---- result extraction from a run transcript (shared by report + web) ------
 _CRED_RE = re.compile(r"\[\+\]\s*([^\\\s]+)\\([^:\s]+):([^\s(]+)")
-_CHAIN_CRED_RE = re.compile(r"valid credential:\s*([^\s:]+):(\S+?)(?:\s|$)", re.I)
+# ad_kill_chain emits "Credential: user:pass @ domain" (domain per credential).
+_CHAIN_CRED_RE = re.compile(r"^Credential:\s*([^\s:]+):(\S+?)\s*@\s*(\S+)\s*$", re.M)
+# Backward-compat: older chain output — an authoritative summary line
+# ("Credentials: a:b, c:d") and, failing that, per-step logs.
+_OLD_CHAIN_SUMMARY_RE = re.compile(r"^Credentials:\s*(.+)$", re.M)
+_OLD_CHAIN_CRED_RE = re.compile(r"valid credential:\s*([^\s:]+):(\S+?)(?:\s|\(|$)", re.I)
 _KERBRUTE_RE = re.compile(r"VALID USERNAME:\s+([^@\s]+)@")
 _LDAP_USER_RE = re.compile(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}")
 _RID_USER_RE = re.compile(r"\\([^\\\s]+)\s+\(SidTypeUser\)", re.I)
@@ -24,30 +29,46 @@ _CHAIN_USERS_RE = re.compile(r"^Users \(\d+\):\s*(.+)$", re.M)
 def extract_results(transcript, domain: str = "") -> dict:
     """Credentials and usernames a run discovered, from its tool output.
 
-    Shared by the web Findings view and the report so both reflect exactly what
-    an assessment (including custom actions/playbooks) actually recovered.
+    Deduped by (username, password) so the same login found in several domains /
+    tools shows once; a domain-bearing hit is preferred over a domainless one.
     """
-    creds: dict = {}
+    creds: dict = {}   # (user.lower(), password) -> record
     users: set = set()
+
+    # Built-in disabled accounts NetExec may report a "[+]" for — never real creds.
+    _NEVER = {"guest", "defaultaccount", "wdagutilityaccount", "krbtgt"}
+
+    def add_cred(u, pw, dom, note):
+        if u.lower() in _NEVER or u.endswith("$"):
+            return
+        users.add(u)
+        key = (u.lower(), pw)
+        ex = creds.get(key)
+        if ex is None:
+            creds[key] = {"username": u, "password": pw, "domain": dom, "note": note}
+        elif dom and not ex.get("domain"):   # upgrade with a real domain
+            ex["domain"], ex["note"] = dom, note
+
     for e in transcript or []:
         out = e.get("output") or e.get("raw_output") or e.get("summary") or ""
         if not out:
             continue
         for m in _CRED_RE.finditer(out):
-            dom, u, pw = m.group(1), m.group(2), m.group(3)
-            if u.lower() == "guest" or u.endswith("$"):
-                continue
-            creds[(u.lower(), dom.lower())] = {"username": u, "password": pw,
-                                               "domain": dom, "note": "netexec"}
-            users.add(u)
-        for m in _CHAIN_CRED_RE.finditer(out):
-            u, pw = m.group(1), m.group(2)
-            if u.lower() == "guest" or u.endswith("$"):
-                continue
-            creds.setdefault((u.lower(), domain.lower()),
-                             {"username": u, "password": pw, "domain": domain,
-                              "note": "kill-chain"})
-            users.add(u)
+            add_cred(m.group(2), m.group(3), m.group(1), "netexec")
+        chain_hits = list(_CHAIN_CRED_RE.finditer(out))
+        for m in chain_hits:       # authoritative "Credential: user:pass @ domain"
+            dom = "" if m.group(3) == "unknown" else m.group(3)
+            add_cred(m.group(1), m.group(2), dom, "kill-chain")
+        if not chain_hits:         # older transcripts: prefer the summary line
+            summ = _OLD_CHAIN_SUMMARY_RE.search(out)
+            if summ:
+                for pair in summ.group(1).split(","):
+                    u, _, pw = pair.strip().partition(":")
+                    if u and pw:
+                        add_cred(u, pw, "", "kill-chain")
+            else:                  # last resort: per-step logs (noisier)
+                for m in _OLD_CHAIN_CRED_RE.finditer(out):
+                    add_cred(m.group(1), m.group(2), "", "kill-chain")
         for m in _KERBRUTE_RE.finditer(out):
             users.add(m.group(1))
         for m in _LDAP_USER_RE.finditer(out):

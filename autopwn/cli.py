@@ -945,6 +945,12 @@ def cmd_autorun(args) -> int:
     registry = default_registry(cfg.tools)
     ctx = ToolContext(scope=scope, confirm_active_actions=False)
     transcript: list = []
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    tpath = Path(cfg.log_dir) / f"session-{ts}.json"
+    tpath.parent.mkdir(parents=True, exist_ok=True)
+
+    def _save():
+        tpath.write_text(_json.dumps(transcript, indent=2), encoding="utf-8")
 
     def _run(tool_name, **kw):
         tool = registry.get(tool_name)
@@ -958,6 +964,7 @@ def cmd_autorun(args) -> int:
         transcript.append({"kind": "tool_result", "name": tool_name,
                            "command": (r.data or {}).get("command", tool_name),
                            "ok": r.ok, "output": r.raw_output or r.summary})
+        _save()   # persist incrementally so the Findings view reflects progress
         return r
 
     from .report import Engagement
@@ -1005,12 +1012,8 @@ def cmd_autorun(args) -> int:
             if r:
                 console.print(f"    [dim]{r.summary}[/]")
 
-    # 4) Save a transcript (so the web Findings view picks it up) + export report.
-    ts = time.strftime("%Y%m%d-%H%M%S")
-    tpath = Path(cfg.log_dir) / f"session-{ts}.json"
-    tpath.parent.mkdir(parents=True, exist_ok=True)
-    tpath.write_text(_json.dumps(transcript, indent=2), encoding="utf-8")
-
+    # 4) Report (the transcript was saved incrementally during the run).
+    _save()
     final = f"Deterministic assessment ran {ran} playbook action(s) across {args.target}."
     model = report.build_model(meta, transcript, _store.all_hosts(),
                                _store.facts(), final, log_dir=cfg.log_dir)

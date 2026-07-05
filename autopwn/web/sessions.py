@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Optional
@@ -122,9 +123,19 @@ def delete(name: str) -> None:
     if name == "default":
         raise ValueError("The default session cannot be deleted.")
     data = _read()
-    if not _find(data, name):
+    entry = _find(data, name)
+    if not entry:
         raise KeyError(name)
     data["sessions"] = [s for s in data["sessions"] if s["name"] != name]
     if data["current"] == name:
         data["current"] = "default"
     _write(data)
+    # Remove all of the session's data — but only when it lives under our managed
+    # sessions/ folder, so we never touch the default log dir or anything outside.
+    try:
+        sdir = Path(entry["dir"]).resolve()
+        managed = (_ROOT / "sessions").resolve()
+        if managed in sdir.parents and sdir.is_dir():
+            shutil.rmtree(sdir, ignore_errors=True)
+    except (OSError, KeyError):
+        pass

@@ -119,15 +119,9 @@ def build_model(meta: Engagement, transcript: list, hosts: dict,
     hosts = _routable_hosts(hosts)
     analysis = assess(hosts, facts or {})
     findings = build_findings(hosts, facts or {}, transcript, log_dir)
-    results = extract_results(transcript, (facts or {}).get("domain", ""))
-    # A credential captured/harvested into facts (e.g. by a custom action) counts.
-    f = facts or {}
-    if f.get("username") and (f.get("password") or f.get("nthash")):
-        u = f["username"].lower()
-        if not any(c["username"].lower() == u for c in results["credentials"]):
-            results["credentials"].insert(0, {
-                "username": f["username"], "password": f.get("password", ""),
-                "domain": f.get("domain", ""), "note": "captured"})
+    # Credentials/users are taken from actual tool output (the transcript), not
+    # from the transient username/password facts (which mutate during a run).
+    results = extract_results(transcript)
 
     # Severity counts.
     counts = {s: 0 for s in _SEV_ORDER}

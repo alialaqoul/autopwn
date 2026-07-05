@@ -537,16 +537,12 @@ def create_app(config_path: str = "config.yaml"):
                 transcript = []
         from ..analysis import extract_results
         findings = build_findings(hosts, facts, transcript, str(ld))
-        _res = extract_results(transcript, facts.get("domain", ""))
-        creds, users = _res["credentials"], _res["users"]
-        # a credential seeded/captured into facts counts too
-        if facts.get("username") and (facts.get("password") or facts.get("nthash")):
-            key = facts["username"].lower()
-            if not any(c["username"].lower() == key for c in creds):
-                creds.insert(0, {"username": facts["username"],
-                                 "password": facts.get("password", ""),
-                                 "domain": facts.get("domain", ""), "note": "facts"})
-        return {"findings": findings, "credentials": creds, "users": users,
+        # Credentials/users come ONLY from actual tool output (the transcript) —
+        # not from the transient username/password facts, which mutate during a
+        # run and can pair values that were never a real login.
+        _res = extract_results(transcript)
+        return {"findings": findings, "credentials": _res["credentials"],
+                "users": _res["users"],
                 "transcript": sess[-1].name if sess else None}
 
     # ---- tools (actions) -------------------------------------------------- #

