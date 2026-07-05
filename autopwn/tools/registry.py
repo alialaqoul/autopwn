@@ -70,4 +70,15 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
         bound = replace(spec, binary=found) if found else spec
         reg.register(GenericCommandTool(bound))
 
+    # User-defined tools (created in the web console, stored in tools.json).
+    # Registered last so an operator can extend — or intentionally override — the
+    # catalogue. Included only when their binary is installed (like the catalogue).
+    from . import custom
+    for spec in custom.specs():
+        found = _resolve_binary(spec)
+        if found is None and not include_unavailable:
+            continue
+        bound = replace(spec, binary=found) if found else spec
+        reg.register(GenericCommandTool(bound))
+
     return reg

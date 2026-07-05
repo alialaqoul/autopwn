@@ -38,6 +38,8 @@ def _load(args) -> tuple[Config, Scope]:
     # Point the shared store and job manager at this engagement's log dir.
     store.configure(f"{cfg.log_dir}/results.json")
     jobs.configure(cfg.log_dir)
+    from .tools import custom as _custom
+    _custom.configure(cfg.log_dir)
     return cfg, scope
 
 

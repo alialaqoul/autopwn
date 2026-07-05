@@ -73,6 +73,8 @@ def create_app(config_path: str = "config.yaml"):
     log_dir = Path(cfg.log_dir)
     store.configure(f"{cfg.log_dir}/results.json")
     jobs.configure(cfg.log_dir)
+    from ..tools import custom as custom_tools
+    custom_tools.configure(cfg.log_dir)
 
     app = FastAPI(title="Autopwn Console", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -361,6 +363,93 @@ def create_app(config_path: str = "config.yaml"):
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
                                           "X-Accel-Buffering": "no"})
+
+    # ---- tools (actions) -------------------------------------------------- #
+    def _introspect_tool(tool, custom_names) -> dict:
+        spec = getattr(tool, "_spec", None)
+        info = {
+            "name": tool.name,
+            "description": getattr(tool, "description", ""),
+            "category": getattr(tool, "category", "misc"),
+            "active": getattr(tool, "active", False),
+            "parameters": getattr(tool, "parameters", {}),
+            "custom": tool.name in custom_names,
+        }
+        try:
+            info["installed"] = tool.available()
+        except Exception:
+            info["installed"] = True
+        if spec is None:
+            info.update(binary="(native module)", kind="native",
+                        template=None, programmatic=True)
+        else:
+            programmatic = spec.build_args is not None
+            info.update(
+                binary=spec.binary, kind="custom" if info["custom"] else "catalog",
+                programmatic=programmatic,
+                template=None if programmatic else custom_tools.command_template(spec),
+                subcommand=spec.subcommand, positional=spec.positional,
+                flags=spec.flags, fixed=spec.fixed,
+                install_hint=spec.install_hint)
+        return info
+
+    @app.get("/api/tools")
+    def list_tools():
+        from ..tools.registry import default_registry
+        reg = default_registry(cfg.tools, include_unavailable=True)
+        custom_names = {d.get("name") for d in custom_tools.load()}
+        tools = [_introspect_tool(t, custom_names) for t in reg.all()]
+        tools.sort(key=lambda t: (not t["custom"], t["category"], t["name"]))
+        return tools
+
+    @app.get("/api/tools/custom")
+    def list_custom_tools():
+        return custom_tools.load()
+
+    @app.get("/api/tools/custom/{name}")
+    def get_custom_tool(name: str):
+        for d in custom_tools.load():
+            if d.get("name") == name:
+                return d
+        raise HTTPException(404, "Custom tool not found.")
+
+    def _valid_tool(body: dict):
+        if not isinstance(body, dict) or not body.get("name") or not body.get("binary"):
+            raise HTTPException(400, "A tool needs at least a 'name' and 'binary'.")
+        if not str(body["name"]).replace("_", "").replace("-", "").isalnum():
+            raise HTTPException(400, "Tool name must be alphanumeric (with _ or -).")
+
+    @app.post("/api/tools/custom")
+    def create_custom_tool(body: dict):
+        _valid_tool(body)
+        tools = custom_tools.load()
+        if any(t.get("name") == body["name"] for t in tools):
+            raise HTTPException(409, f"Custom tool '{body['name']}' already exists.")
+        tools.append(body)
+        custom_tools.save(tools)
+        return body
+
+    @app.put("/api/tools/custom/{name}")
+    def update_custom_tool(name: str, body: dict):
+        _valid_tool(body)
+        tools = custom_tools.load()
+        idx = next((i for i, t in enumerate(tools) if t.get("name") == name), None)
+        if idx is None:
+            raise HTTPException(404, "Custom tool not found.")
+        if body["name"] != name and any(t.get("name") == body["name"] for t in tools):
+            raise HTTPException(409, f"Another tool already uses '{body['name']}'.")
+        tools[idx] = body
+        custom_tools.save(tools)
+        return body
+
+    @app.delete("/api/tools/custom/{name}")
+    def delete_custom_tool(name: str):
+        tools = custom_tools.load()
+        kept = [t for t in tools if t.get("name") != name]
+        if len(kept) == len(tools):
+            raise HTTPException(404, "Custom tool not found.")
+        custom_tools.save(kept)
+        return {"deleted": name}
 
     # ---- reports ---------------------------------------------------------- #
     @app.get("/api/reports")

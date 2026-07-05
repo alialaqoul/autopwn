@@ -19,6 +19,7 @@
       <button class="ap-nav-link active" data-view="dashboard"><span class="ico">▩</span> Dashboard</button>
       <button class="ap-nav-link" data-view="launch"><span class="ico">▶</span> Launch Assessment</button>
       <button class="ap-nav-link" data-view="playbooks"><span class="ico">⑃</span> Playbooks</button>
+      <button class="ap-nav-link" data-view="tools"><span class="ico">⚒</span> Tools</button>
       <button class="ap-nav-link" data-view="jobs"><span class="ico">≣</span> Jobs</button>
       <button class="ap-nav-link" data-view="reports"><span class="ico">▤</span> Reports</button>
       <button class="ap-nav-link" data-view="scope"><span class="ico">⚙</span> Scope &amp; Vars</button>
@@ -118,6 +119,18 @@
         <div id="playbooksList" class="d-flex flex-column gap-3"></div>
       </section>
 
+      <!-- TOOLS -->
+      <section data-panel="tools" hidden>
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+          <p class="text-secondary mb-0">Every action a playbook step can call. See exactly what each one runs; <b>custom</b> tools are editable, built-ins are shown read-only.</p>
+          <div class="text-nowrap">
+            <input class="form-control form-control-sm d-inline-block" id="toolSearch" placeholder="filter…" style="width:160px">
+            <button class="btn btn-sm btn-outline-primary" id="toolNewBtn">+ New tool</button>
+          </div>
+        </div>
+        <div id="toolsList"></div>
+      </section>
+
       <!-- JOBS -->
       <section data-panel="jobs" hidden>
         <div class="row g-3">
@@ -215,6 +228,56 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="btn btn-danger" id="pbEditorSave">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOOL EDITOR MODAL -->
+  <div class="modal fade" id="toolEditor" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="toolEditorTitle">New tool</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-secondary">A tool runs an installed command line. It is built as an argv list (never a shell string):
+            <code>binary → subcommand → &lt;positional&gt; → [flags] → fixed</code>. Parameters are derived from the positional and flag variables.</p>
+          <div class="row g-2 mb-2">
+            <div class="col-md-5"><label class="pb-lbl">Name</label>
+              <input class="form-control form-control-sm" id="t_name" placeholder="my_action"></div>
+            <div class="col-md-4"><label class="pb-lbl">Binary (on PATH)</label>
+              <input class="form-control form-control-sm" id="t_binary" placeholder="nxc"></div>
+            <div class="col-md-3"><label class="pb-lbl">Category</label>
+              <input class="form-control form-control-sm" id="t_category" list="dlCat" placeholder="ad-smb"></div>
+          </div>
+          <datalist id="dlCat"><option value="recon"><option value="web"><option value="ad-smb"><option value="credentials"><option value="exploit"><option value="custom"></datalist>
+          <div class="mb-2"><label class="pb-lbl">Description</label>
+            <textarea class="form-control form-control-sm" id="t_description" rows="2" placeholder="What this action does."></textarea></div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6"><label class="pb-lbl">Subcommand <span class="text-secondary">(space or comma separated)</span></label>
+              <input class="form-control form-control-sm" id="t_subcommand" placeholder="smb"></div>
+            <div class="col-md-6"><label class="pb-lbl">Positional variables <span class="text-secondary">(comma)</span></label>
+              <input class="form-control form-control-sm" id="t_positional" placeholder="target"></div>
+          </div>
+          <div class="mb-2"><label class="pb-lbl">Flags <span class="text-secondary">(one per line: <code>variable = -flag</code>; empty flag = bare boolean; use <code>--{v}</code> to template)</span></label>
+            <textarea class="form-control form-control-sm font-monospace" id="t_flags" rows="4" placeholder="username = -u&#10;password = -p&#10;domain = -d"></textarea></div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6"><label class="pb-lbl">Fixed trailing tokens <span class="text-secondary">(comma)</span></label>
+              <input class="form-control form-control-sm" id="t_fixed" placeholder="--shares"></div>
+            <div class="col-md-3"><label class="pb-lbl">Authorize on</label>
+              <select class="form-select form-select-sm" id="t_host_from"><option value="target">target</option><option value="url">url</option><option value="domain">domain</option></select></div>
+            <div class="col-md-3"><label class="pb-lbl">Install hint</label>
+              <input class="form-control form-control-sm" id="t_install_hint" placeholder="pipx install …"></div>
+          </div>
+          <div class="pb-lbl">Preview</div>
+          <div class="pb-match font-monospace" id="t_preview">—</div>
+          <div class="text-danger small mt-2" id="toolEditorError"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-danger" id="toolEditorSave">Save</button>
         </div>
       </div>
     </div>

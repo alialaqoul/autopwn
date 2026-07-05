@@ -18,14 +18,15 @@ async function api(path, opts) {
 
 /* ---- view switching --------------------------------------------------- */
 const TITLES = { dashboard: "Dashboard", launch: "Launch Assessment",
-  playbooks: "Playbooks", jobs: "Jobs", reports: "Reports", scope: "Scope & Vars" };
+  playbooks: "Playbooks", tools: "Tools", jobs: "Jobs", reports: "Reports",
+  scope: "Scope & Vars" };
 
 function show(view) {
   $$("#mainNav .ap-nav-link").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   $$("section[data-panel]").forEach(s => (s.hidden = s.dataset.panel !== view));
   $("#viewTitle").textContent = TITLES[view] || view;
   const loaders = { dashboard: loadDashboard, playbooks: loadPlaybooks,
-    jobs: loadJobs, reports: loadReports, scope: loadScope };
+    tools: loadTools, jobs: loadJobs, reports: loadReports, scope: loadScope };
   loaders[view]?.();
 }
 $$("#mainNav .ap-nav-link").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
@@ -140,10 +141,13 @@ async function loadPlaybooks() {
 /* ---- structured playbook builder ------------------------------------- */
 let _pbDraft = null;
 let _pbSchema = { artifacts: [], triggers: [], signals: [], next: ["next", "final"] };
+let _pbToolNames = [];
 
 async function ensureSchema() {
-  if (_pbSchema.artifacts.length) return;
-  try { _pbSchema = await api("/api/playbook-schema"); } catch { }
+  if (!_pbSchema.artifacts.length) {
+    try { _pbSchema = await api("/api/playbook-schema"); } catch { }
+  }
+  try { _pbToolNames = (await api("/api/tools")).map(t => t.name); } catch { }
 }
 
 function blankStep(n) {
@@ -170,6 +174,7 @@ function renderBuilder() {
   const triggerOpts = _pbSchema.triggers.map(t => `<option value="${esc(t)}">`).join("");
   const nextOpts = _pbSchema.next.concat(d.steps.map(s => s.title).filter(Boolean))
     .map(t => `<option value="${esc(t)}">`).join("");
+  const toolOpts = _pbToolNames.map(t => `<option value="${esc(t)}">`).join("");
 
   const steps = d.steps.map((st, i) => {
     const branches = (st.branches || []).map((b, j) => `
@@ -193,7 +198,7 @@ function renderBuilder() {
         <div class="col-md-7"><label class="pb-lbl">Title</label>
           <input class="form-control form-control-sm" value="${esc(st.title)}" data-step="${i}" data-field="title"></div>
         <div class="col-md-5"><label class="pb-lbl">Action / tool</label>
-          <input class="form-control form-control-sm" value="${esc(st.tool)}" data-step="${i}" data-field="tool" placeholder="e.g. netexec_spray"></div>
+          <input class="form-control form-control-sm" list="dlTools" value="${esc(st.tool)}" data-step="${i}" data-field="tool" placeholder="e.g. netexec_spray"></div>
       </div>
       <div class="row g-2 mb-2">
         <div class="col-md-7"><label class="pb-lbl">Trigger <span class="text-secondary">(when this step fires)</span></label>
@@ -216,6 +221,7 @@ function renderBuilder() {
   $("#pbBuilder").innerHTML = `
     <datalist id="dlTriggers">${triggerOpts}</datalist>
     <datalist id="dlNext">${nextOpts}</datalist>
+    <datalist id="dlTools">${toolOpts}</datalist>
     <div class="row g-2 mb-2">
       <div class="col-md-4"><label class="pb-lbl">ID</label>
         <input class="form-control form-control-sm" value="${esc(d.id)}" data-field="id"></div>
@@ -228,7 +234,7 @@ function renderBuilder() {
       <div class="col-md-7"><label class="pb-lbl">Match — any of these open ports</label>
         <input class="form-control form-control-sm" value="${(d.match.any_ports || []).join(", ")}" data-field="ports" placeholder="88, 445, 389"></div>
       <div class="col-md-5"><label class="pb-lbl">Run — macro tool <span class="text-secondary">(optional)</span></label>
-        <input class="form-control form-control-sm" value="${esc((d.run || {}).tool || "")}" data-field="tool" placeholder="ad_kill_chain"></div>
+        <input class="form-control form-control-sm" list="dlTools" value="${esc((d.run || {}).tool || "")}" data-field="tool" placeholder="ad_kill_chain"></div>
     </div>
     <div class="mb-3"><label class="pb-lbl">Match — fact signals</label>
       <div class="pb-chips">${chipRow("signals", d.match.signals, undefined, _pbSchema.signals)}</div></div>
@@ -357,6 +363,143 @@ async function pbReset() {
   if (!confirm("Restore the default playbooks? Your edits will be replaced.")) return;
   try { await api("/api/playbooks/reset", { method: "POST" }); } catch (e) { return alert(e.message); }
   loadPlaybooks();
+}
+
+/* ---- tools (actions) -------------------------------------------------- */
+let _toolModal = null;
+let _toolEditName = null;   // null = create
+let _allTools = [];
+
+const CAT_CLASS = { recon: "text-bg-info", web: "text-bg-primary",
+  "ad-smb": "text-bg-danger", credentials: "text-bg-warning",
+  exploit: "text-bg-dark", custom: "text-bg-success" };
+
+async function loadTools() {
+  try { _allTools = await api("/api/tools"); } catch { return; }
+  renderTools();
+}
+
+function renderTools() {
+  const q = ($("#toolSearch").value || "").toLowerCase();
+  const tools = _allTools.filter(t =>
+    !q || t.name.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q) ||
+    (t.category || "").toLowerCase().includes(q));
+
+  const rows = tools.map(t => {
+    const cat = `<span class="badge ${CAT_CLASS[t.category] || "text-bg-secondary"}">${esc(t.category)}</span>`;
+    const custom = t.custom ? `<span class="badge text-bg-success">custom</span>`
+      : (t.kind === "native" ? `<span class="badge text-bg-light text-secondary border">native</span>`
+        : `<span class="badge text-bg-light text-secondary border">built-in</span>`);
+    const inst = t.installed ? `<span class="badge rounded-pill text-bg-success" title="binary found">●</span>`
+      : `<span class="badge rounded-pill text-bg-secondary" title="binary not installed">○</span>`;
+    const cmd = t.programmatic
+      ? `<span class="text-secondary fst-italic">${t.kind === "native" ? "native module" : "programmatic argument builder"}</span>`
+      : `<code>${esc(t.template || "")}</code>`;
+    const params = Object.keys((t.parameters || {}).properties || {});
+    const paramBadges = params.map(p => `<span class="badge text-bg-light text-secondary border">${esc(p)}</span>`).join(" ");
+    const actions = t.custom
+      ? `<button class="btn btn-sm btn-outline-secondary py-0 me-1" data-tool-edit="${esc(t.name)}">Edit</button>
+         <button class="btn btn-sm btn-outline-danger py-0" data-tool-del="${esc(t.name)}">Delete</button>`
+      : `<span class="text-secondary small">read-only</span>`;
+    return `<div class="card mb-2"><div class="card-body py-2">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div class="flex-grow-1">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            ${inst} <span class="fw-semibold font-monospace">${esc(t.name)}</span> ${cat} ${custom}
+            ${t.binary && t.kind !== "native" ? `<span class="text-secondary small">binary: <code>${esc(t.binary)}</code></span>` : ""}
+          </div>
+          <div class="text-secondary small mt-1">${esc(t.description || "")}</div>
+          <div class="mt-1 small">${cmd}</div>
+          ${params.length ? `<div class="mt-1 small"><span class="text-secondary">params:</span> ${paramBadges}</div>` : ""}
+        </div>
+        <div class="text-nowrap">${actions}</div>
+      </div></div></div>`;
+  }).join("");
+  $("#toolsList").innerHTML = rows || `<div class="text-secondary py-3">No tools match.</div>`;
+
+  $$("#toolsList [data-tool-edit]").forEach(b => b.onclick = () => toolEdit(b.dataset.toolEdit));
+  $$("#toolsList [data-tool-del]").forEach(b => b.onclick = () => toolDelete(b.dataset.toolDel));
+}
+
+function _toolFieldGet() {
+  const flags = {};
+  ($("#t_flags").value || "").split("\n").forEach(line => {
+    if (!line.trim()) return;
+    const i = line.indexOf("=");
+    const k = (i === -1 ? line : line.slice(0, i)).trim();
+    const v = (i === -1 ? "" : line.slice(i + 1)).trim();
+    if (k) flags[k] = v;
+  });
+  const csv = (id) => ($(id).value || "").split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+  return {
+    name: $("#t_name").value.trim(), binary: $("#t_binary").value.trim(),
+    category: $("#t_category").value.trim() || "custom",
+    description: $("#t_description").value.trim(),
+    subcommand: csv("#t_subcommand"), positional: csv("#t_positional"),
+    flags, fixed: csv("#t_fixed"),
+    host_from: $("#t_host_from").value, install_hint: $("#t_install_hint").value.trim(),
+  };
+}
+
+function _toolPreview() {
+  const d = _toolFieldGet();
+  const parts = [d.binary || "binary", ...d.subcommand];
+  d.positional.forEach(v => parts.push(`<${v}>`));
+  for (const [v, f] of Object.entries(d.flags))
+    parts.push(f === "" ? `[${v}]` : f.includes("{v}") ? `[${f.replace("{v}", v)}]` : `[${f} <${v}>]`);
+  parts.push(...d.fixed);
+  $("#t_preview").textContent = parts.join(" ");
+}
+
+function _toolFieldSet(d) {
+  $("#t_name").value = d.name || "";
+  $("#t_binary").value = d.binary || "";
+  $("#t_category").value = d.category || "custom";
+  $("#t_description").value = d.description || "";
+  $("#t_subcommand").value = (d.subcommand || []).join(" ");
+  $("#t_positional").value = (d.positional || []).join(", ");
+  $("#t_flags").value = Object.entries(d.flags || {}).map(([k, v]) => `${k} = ${v}`).join("\n");
+  $("#t_fixed").value = (d.fixed || []).join(", ");
+  $("#t_host_from").value = d.host_from || "target";
+  $("#t_install_hint").value = d.install_hint || "";
+  _toolPreview();
+}
+
+function toolNew() {
+  _toolEditName = null;
+  $("#toolEditorTitle").textContent = "New tool";
+  $("#toolEditorError").textContent = "";
+  _toolFieldSet({ category: "custom", positional: ["target"], host_from: "target" });
+  _toolModal.show();
+}
+
+async function toolEdit(name) {
+  _toolEditName = name;
+  let d;
+  try { d = await api(`/api/tools/custom/${encodeURIComponent(name)}`); } catch (e) { return alert(e.message); }
+  $("#toolEditorTitle").textContent = "Edit tool — " + name;
+  $("#toolEditorError").textContent = "";
+  _toolFieldSet(d);
+  _toolModal.show();
+}
+
+async function toolSave() {
+  const body = _toolFieldGet();
+  if (!body.name || !body.binary) { $("#toolEditorError").textContent = "Name and binary are required."; return; }
+  try {
+    if (_toolEditName === null)
+      await api("/api/tools/custom", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    else
+      await api(`/api/tools/custom/${encodeURIComponent(_toolEditName)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch (e) { $("#toolEditorError").textContent = e.message; return; }
+  _toolModal.hide();
+  loadTools();
+}
+
+async function toolDelete(name) {
+  if (!confirm(`Delete custom tool "${name}"?`)) return;
+  try { await api(`/api/tools/custom/${encodeURIComponent(name)}`, { method: "DELETE" }); } catch (e) { return alert(e.message); }
+  loadTools();
 }
 
 /* ---- launch ----------------------------------------------------------- */
@@ -522,6 +665,13 @@ $("#pbNewBtn").addEventListener("click", pbNew);
 $("#pbResetBtn").addEventListener("click", pbReset);
 $("#pbEditorSave").addEventListener("click", pbSave);
 $("#pbApplyJson").addEventListener("click", applyJsonToDraft);
+
+_toolModal = new bootstrap.Modal($("#toolEditor"));
+$("#toolNewBtn").addEventListener("click", toolNew);
+$("#toolEditorSave").addEventListener("click", toolSave);
+$("#toolSearch").addEventListener("input", renderTools);
+["t_binary", "t_subcommand", "t_positional", "t_flags", "t_fixed"].forEach(id =>
+  $("#" + id).addEventListener("input", _toolPreview));
 
 $("#refreshBtn").addEventListener("click", () => {
   show($("#mainNav .ap-nav-link.active").dataset.view);
