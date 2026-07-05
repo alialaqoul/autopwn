@@ -202,7 +202,14 @@
         <div class="row g-3">
           <div class="col-xl-7">
             <div class="card">
-              <div class="card-header fw-semibold">Credentialed session <span class="text-secondary small">— run commands with a compromised credential</span></div>
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Credentialed session <span class="text-secondary small">— run commands with a compromised credential</span></span>
+                <div class="d-flex align-items-center gap-2">
+                  <span class="badge text-bg-secondary" id="ex_status">disconnected</span>
+                  <button class="btn btn-sm btn-danger" id="ex_connect">Connect</button>
+                  <button class="btn btn-sm btn-outline-secondary" id="ex_disconnect" disabled>Disconnect</button>
+                </div>
+              </div>
               <div class="card-body">
                 <div class="row g-2 mb-2">
                   <div class="col-md-6"><label class="pb-lbl">Target host</label>
@@ -224,7 +231,7 @@
                 <div class="terminal" id="exTerm" style="height:46vh">
                   <div class="t-out" id="ex_out">Set a target + credential above, then click here and type a command (Enter to run). SMB exec needs local admin (Pwn3d!); WinRM needs Remote Management membership.
 </div>
-                  <div class="term-line"><span class="term-prompt">$</span><input class="term-input" id="ex_cmd" autocomplete="off" spellcheck="false" placeholder="command… (Enter to run)"></div>
+                  <div class="term-line"><span class="term-prompt">$</span><input class="term-input" id="ex_cmd" autocomplete="off" spellcheck="false" disabled placeholder="Connect to start a session…"></div>
                 </div>
               </div>
             </div>

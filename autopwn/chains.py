@@ -118,7 +118,14 @@ class AdChain:
     # 1) guest/null session + RID-cycle the full user list -----------------
     def _step_guest_and_users(self) -> None:
         guest = self.run("netexec_smb", target=self.target, username="guest", password="")
-        guest_ok = bool(guest and "[+]" in _ru(guest) and "guest" in _ru(guest).lower())
+        gout = _ru(guest)
+        # Detect THIS DC's own domain from its SMB banner, so a multi-DC sweep
+        # doesn't carry the previous DC's domain into authenticated enumeration.
+        m = re.search(r"\(domain:([A-Za-z0-9.\-]+)\)", gout)
+        if m and "." in m.group(1) and m.group(1).lower() != (self.domain or "").lower():
+            self.domain = m.group(1)
+            self._log(f"target domain detected: {self.domain}")
+        guest_ok = bool(guest and "[+]" in gout and "guest" in gout.lower())
         if guest_ok:
             self._log("guest account enabled (null-ish session) — RID cycling")
             self.state["findings"].append(
