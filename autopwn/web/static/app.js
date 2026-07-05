@@ -484,6 +484,8 @@ function toolView(name) {
     `<div><code>${esc(p)}</code> <span class="text-secondary small">${esc(s.description || s.type || "")}</span>${req.includes(p) ? ` <span class="badge text-bg-light text-secondary border">required</span>` : ""}</div>`).join("") || `<span class="text-secondary">none</span>`;
   const flags = t.flags && Object.keys(t.flags).length
     ? Object.entries(t.flags).map(([v, f]) => `<code>${esc(v)}</code> → <code>${esc(f || "(bare)")}</code>`).join("<br>") : "";
+  const harvest = (t.harvest && t.harvest.length)
+    ? t.harvest.map(h => `<code>${esc(h.var)}</code>${h.multi ? "*" : ""}${h.scope === "host" ? " @host" : ""} ← <code>${esc(h.regex)}</code>`).join("<br>") : "";
   const cmd = t.programmatic
     ? `<span class="fst-italic text-secondary">${t.kind === "native" ? "native Python module" : "programmatic argument builder (built-in)"}</span>`
     : `<code>${esc(t.template || "")}</code>`;
@@ -499,6 +501,7 @@ function toolView(name) {
     (t.positional && t.positional.length ? kv("Positional", t.positional.map(x => `<code>${esc(x)}</code>`).join(" ")) : "") +
     (flags ? kv("Flags", flags) : "") +
     (t.fixed && t.fixed.length ? kv("Fixed", `<code>${t.fixed.map(esc).join(" ")}</code>`) : "") +
+    (harvest ? kv("Harvests", harvest) : "") +
     (t.install_hint ? kv("Install", esc(t.install_hint)) : "") +
     kv("Parameters", paramRows);
   _toolViewModal.show();
@@ -514,12 +517,24 @@ function _toolFieldGet() {
     if (k) flags[k] = v;
   });
   const csv = (id) => ($(id).value || "").split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+  const harvest = [];
+  ($("#t_harvest").value || "").split("\n").forEach(line => {
+    const i = line.indexOf("=");
+    if (i < 1) return;
+    let name = line.slice(0, i).trim();
+    const regex = line.slice(i + 1).trim();
+    if (!name || !regex) return;
+    let scope = "global", multi = false;
+    if (name.includes("@host")) { scope = "host"; name = name.replace("@host", "").trim(); }
+    if (name.endsWith("*")) { multi = true; name = name.slice(0, -1).trim(); }
+    if (name) harvest.push({ var: name, regex, scope, multi, group: 1 });
+  });
   return {
     name: $("#t_name").value.trim(), binary: $("#t_binary").value.trim(),
     category: $("#t_category").value.trim() || "custom",
     description: $("#t_description").value.trim(),
     subcommand: csv("#t_subcommand"), positional: csv("#t_positional"),
-    flags, fixed: csv("#t_fixed"),
+    flags, fixed: csv("#t_fixed"), harvest,
     host_from: $("#t_host_from").value, install_hint: $("#t_install_hint").value.trim(),
   };
 }
@@ -543,6 +558,10 @@ function _toolFieldSet(d) {
   $("#t_positional").value = (d.positional || []).join(", ");
   $("#t_flags").value = Object.entries(d.flags || {}).map(([k, v]) => `${k} = ${v}`).join("\n");
   $("#t_fixed").value = (d.fixed || []).join(", ");
+  $("#t_harvest").value = (d.harvest || []).map(h => {
+    const name = h.var + (h.multi ? "*" : "") + (h.scope === "host" ? "@host" : "");
+    return `${name} = ${h.regex}`;
+  }).join("\n");
   $("#t_host_from").value = d.host_from || "target";
   $("#t_install_hint").value = d.install_hint || "";
   _toolPreview();

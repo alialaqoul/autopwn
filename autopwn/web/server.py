@@ -17,7 +17,6 @@ resolve and be mistaken for query params.
 """
 import asyncio
 import json
-import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -33,48 +32,6 @@ STATIC_DIR = WEB_DIR / "static"
 
 # Report artifacts the agent auto-exports next to each session transcript.
 _REPORT_SUFFIXES = (".html", ".docx", ".md")
-
-# Result extraction from a run transcript.
-_CRED_RE = re.compile(r"\[\+\]\s*([^\\\s]+)\\([^:\s]+):([^\s(]+)")
-_CHAIN_CRED_RE = re.compile(r"valid credential:\s*([^\s:]+):(\S+?)(?:\s|$)", re.I)
-_KERBRUTE_RE = re.compile(r"VALID USERNAME:\s+([^@\s]+)@")
-_LDAP_USER_RE = re.compile(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}")
-_RID_USER_RE = re.compile(r"\\([^\\\s]+)\s+\(SidTypeUser\)", re.I)
-
-
-def _results_from_transcript(transcript: list, domain: str = "") -> tuple[list, list]:
-    """Pull the credentials and usernames a run discovered from tool output."""
-    creds: dict = {}   # (user,domain) -> {username,password,domain,note}
-    users: set = set()
-    for e in transcript or []:
-        out = e.get("output") or e.get("raw_output") or ""
-        if not out:
-            continue
-        for m in _CRED_RE.finditer(out):
-            dom, u, pw = m.group(1), m.group(2), m.group(3)
-            if u.lower() == "guest" or u.endswith("$"):
-                continue
-            creds[(u.lower(), dom.lower())] = {"username": u, "password": pw,
-                                               "domain": dom, "note": "netexec"}
-            users.add(u)
-        for m in _CHAIN_CRED_RE.finditer(out):   # ad_kill_chain summary lines
-            u, pw = m.group(1), m.group(2)
-            if u.lower() == "guest" or u.endswith("$"):
-                continue
-            creds.setdefault((u.lower(), domain.lower()),
-                             {"username": u, "password": pw, "domain": domain,
-                              "note": "kill-chain"})
-            users.add(u)
-        for m in _KERBRUTE_RE.finditer(out):
-            users.add(m.group(1))
-        for m in _LDAP_USER_RE.finditer(out):
-            u = m.group(1)
-            if u.lower() not in ("username", "guest", "krbtgt") and not u.endswith("$"):
-                users.add(u)
-        for m in _RID_USER_RE.finditer(out):
-            if not m.group(1).endswith("$"):
-                users.add(m.group(1))
-    return list(creds.values()), sorted(users)
 
 
 # --------------------------------------------------------------------------- #
@@ -480,8 +437,10 @@ def create_app(config_path: str = "config.yaml"):
                 transcript = json.loads(sess[-1].read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 transcript = []
+        from ..analysis import extract_results
         findings = build_findings(hosts, facts, transcript)
-        creds, users = _results_from_transcript(transcript, facts.get("domain", ""))
+        _res = extract_results(transcript, facts.get("domain", ""))
+        creds, users = _res["credentials"], _res["users"]
         # a credential seeded/captured into facts counts too
         if facts.get("username") and (facts.get("password") or facts.get("nthash")):
             key = facts["username"].lower()
@@ -509,15 +468,17 @@ def create_app(config_path: str = "config.yaml"):
             info["installed"] = True
         if spec is None:
             info.update(binary="(native module)", kind="native",
-                        template=None, programmatic=True)
+                        template=None, programmatic=True, harvest=[])
         else:
             programmatic = spec.build_args is not None
+            harvest = [{"var": r.var, "regex": r.regex, "scope": r.scope,
+                        "multi": r.multi} for r in (spec.harvest or [])]
             info.update(
                 binary=spec.binary, kind="custom" if info["custom"] else "catalog",
                 programmatic=programmatic,
                 template=None if programmatic else custom_tools.command_template(spec),
                 subcommand=spec.subcommand, positional=spec.positional,
-                flags=spec.flags, fixed=spec.fixed,
+                flags=spec.flags, fixed=spec.fixed, harvest=harvest,
                 install_hint=spec.install_hint)
         return info
 

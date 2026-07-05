@@ -338,6 +338,10 @@
             <div class="col-md-3"><label class="pb-lbl">Install hint</label>
               <input class="form-control form-control-sm" id="t_install_hint" placeholder="pipx install …"></div>
           </div>
+          <div class="mb-2"><label class="pb-lbl">Harvested variables
+            <span class="text-secondary">(auto-captured from output; one per line: <code>variable = regex</code>. Use <code>var*</code> to capture every match, <code>var@host</code> to attach to the host. The first capture group is the value.)</span></label>
+            <textarea class="form-control form-control-sm font-monospace" id="t_harvest" rows="3" placeholder="username = login:\s*(\S+)&#10;api_token = token=([A-Za-z0-9]+)"></textarea>
+            <div class="form-text">Captured variables are added to Engagement Variables and auto-filled into other tools that take a parameter of the same name.</div></div>
           <div class="pb-lbl">Preview</div>
           <div class="pb-match font-monospace" id="t_preview">—</div>
           <div class="text-danger small mt-2" id="toolEditorError"></div>

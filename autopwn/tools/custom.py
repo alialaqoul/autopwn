@@ -15,9 +15,11 @@ Parameters are derived automatically from the positional/flag variables.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
+from ..facts import HarvestRule
 from .command import (CommandSpec, host_from_domain, host_from_target,
                       host_from_url)
 
@@ -62,6 +64,26 @@ def _derive_params(d: dict) -> dict:
     return {"type": "object", "properties": props, "required": required}
 
 
+def _harvest_rules(d: dict) -> list:
+    """Build HarvestRules from a custom tool's declared variable extractions, so
+    any variable the tool's output matches is captured into the engagement
+    automatically (and then autofilled into later tools)."""
+    rules = []
+    for h in d.get("harvest", []) or []:
+        var, regex = (h.get("var") or "").strip(), h.get("regex") or ""
+        if not var or not regex:
+            continue
+        try:
+            re.compile(regex)
+        except re.error:
+            continue
+        rules.append(HarvestRule(var=var, regex=regex,
+                                 scope=h.get("scope", "global"),
+                                 group=int(h.get("group", 1)),
+                                 multi=bool(h.get("multi", False))))
+    return rules
+
+
 def to_spec(d: dict) -> CommandSpec:
     """Turn a stored custom-tool dict into a runnable CommandSpec."""
     host_from = d.get("host_from", "target")
@@ -80,6 +102,7 @@ def to_spec(d: dict) -> CommandSpec:
         positional=list(d.get("positional", [])),
         flags=dict(d.get("flags", {})),
         fixed=list(d.get("fixed", [])),
+        harvest=_harvest_rules(d),
     )
 
 

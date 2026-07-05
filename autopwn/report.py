@@ -93,13 +93,41 @@ def _tool_purposes():
         return {}
 
 
+# Internal signal facts used to drive logic — not shown as "variables".
+_SIGNAL_FACTS = {"smb_signing", "smb_nullauth", "smb_guest", "pwned",
+                 "has_users", "kerberoastable", "asreproastable"}
+_SECRET_FACTS = {"password", "nthash"}
+
+
+def _variables(facts: dict) -> list:
+    """Meaningful engagement variables (incl. anything a custom action harvested),
+    excluding internal signal facts; secrets are masked."""
+    rows = []
+    for k, v in (facts or {}).items():
+        if k in _SIGNAL_FACTS or not v:
+            continue
+        val = "•" * min(10, len(str(v))) if k in _SECRET_FACTS else str(v)
+        rows.append({"name": k, "value": val})
+    rows.sort(key=lambda r: r["name"])
+    return rows
+
+
 def build_model(meta: Engagement, transcript: list, hosts: dict,
                 facts: dict, final: str) -> dict:
-    from .analysis import assess, build_findings
+    from .analysis import assess, build_findings, extract_results
 
     hosts = _routable_hosts(hosts)
     analysis = assess(hosts, facts or {})
     findings = build_findings(hosts, facts or {}, transcript)
+    results = extract_results(transcript, (facts or {}).get("domain", ""))
+    # A credential captured/harvested into facts (e.g. by a custom action) counts.
+    f = facts or {}
+    if f.get("username") and (f.get("password") or f.get("nthash")):
+        u = f["username"].lower()
+        if not any(c["username"].lower() == u for c in results["credentials"]):
+            results["credentials"].insert(0, {
+                "username": f["username"], "password": f.get("password", ""),
+                "domain": f.get("domain", ""), "note": "captured"})
 
     # Severity counts.
     counts = {s: 0 for s in _SEV_ORDER}
@@ -147,6 +175,8 @@ def build_model(meta: Engagement, transcript: list, hosts: dict,
         "findings": findings, "counts": counts, "scope": scope,
         "tools_used": tools_used, "methodology": _METHODOLOGY,
         "recommendations": recs,
+        "variables": _variables(facts or {}),
+        "credentials": results["credentials"], "users": results["users"],
         "command_log": [{"tool": e.get("name", ""),
                          "command": e.get("command", "") or f"{e.get('name')} {e.get('args', {})}",
                          "ok": e.get("ok", False),
@@ -205,6 +235,25 @@ def to_markdown(m: dict) -> str:
           "| IP Address | Hostname | Role | OS |", "|---|---|---|---|"]
     for s in m["scope"]:
         o.append(f"| {s['ip']} | {s['hostname']} | {s['role']} | {s['os']} |")
+
+    # Recovered access + variables — reflects what every action (incl. custom
+    # actions/playbooks) actually harvested this engagement.
+    if m.get("credentials") or m.get("users") or m.get("variables"):
+        o += ["", "## Recovered Access & Discovered Variables", ""]
+        if m.get("credentials"):
+            o += ["**Recovered credentials**", "", "| Username | Secret | Domain | Source |",
+                  "|---|---|---|---|"]
+            for c in m["credentials"]:
+                o.append(f"| {c['username']} | {c.get('password') or '(hash)'} | "
+                         f"{c.get('domain', '')} | {c.get('note', '')} |")
+            o.append("")
+        if m.get("users"):
+            o += ["**Enumerated users**", "", ", ".join(m["users"]), ""]
+        if m.get("variables"):
+            o += ["**Captured variables**", "", "| Variable | Value |", "|---|---|"]
+            for v in m["variables"]:
+                o.append(f"| {v['name']} | {v['value']} |")
+            o.append("")
 
     o += ["", "## 4. Testing Process", "", "### 4.1 Methodology", "",
           m["methodology"], "", "### 4.2 Tools Used", "",
@@ -347,6 +396,25 @@ def to_html(m: dict) -> str:
         p.append(f"<tr><td width='20%'>{_e(s['ip'])}</td><td width='22%'>{_e(s['hostname'])}</td>"
                  f"<td width='28%'>{_e(s['role'])}</td><td width='30%'>{_e(s['os'])}</td></tr>")
     p.append("</tbody></table>")
+
+    if m.get("credentials") or m.get("users") or m.get("variables"):
+        p.append("<h2>Recovered Access &amp; Discovered Variables</h2>")
+        if m.get("credentials"):
+            p.append("<h3>Recovered credentials</h3>")
+            p.append("<table><thead><tr><th>Username</th><th>Secret</th>"
+                     "<th>Domain</th><th>Source</th></tr></thead><tbody>")
+            for c in m["credentials"]:
+                p.append(f"<tr><td>{_e(c['username'])}</td><td>{_e(c.get('password') or '(hash)')}</td>"
+                         f"<td>{_e(c.get('domain', ''))}</td><td>{_e(c.get('note', ''))}</td></tr>")
+            p.append("</tbody></table>")
+        if m.get("users"):
+            p.append("<h3>Enumerated users</h3><p>" + ", ".join(_e(u) for u in m["users"]) + "</p>")
+        if m.get("variables"):
+            p.append("<h3>Captured variables</h3>")
+            p.append("<table><thead><tr><th width='30%'>Variable</th><th>Value</th></tr></thead><tbody>")
+            for v in m["variables"]:
+                p.append(f"<tr><td width='30%'>{_e(v['name'])}</td><td>{_e(v['value'])}</td></tr>")
+            p.append("</tbody></table>")
 
     p.append("<h2>4. Testing Process</h2><h3>4.1 Methodology</h3>")
     p.append(f"<p>{_e(m['methodology'])}</p><h3>4.2 Tools Used</h3>")
@@ -512,6 +580,25 @@ def to_docx(m: dict, path: Path) -> bool:
             c = sc.add_row().cells
             _dx_cell(c[0], s["ip"]); _dx_cell(c[1], s["hostname"])
             _dx_cell(c[2], s["role"]); _dx_cell(c[3], s["os"])
+
+        if m.get("credentials") or m.get("users") or m.get("variables"):
+            doc.add_heading("Recovered Access & Discovered Variables", level=1)
+            if m.get("credentials"):
+                doc.add_heading("Recovered credentials", level=2)
+                ct = _dx_table(doc, ["Username", "Secret", "Domain", "Source"])
+                for cr in m["credentials"]:
+                    c = ct.add_row().cells
+                    _dx_cell(c[0], cr["username"]); _dx_cell(c[1], cr.get("password") or "(hash)")
+                    _dx_cell(c[2], cr.get("domain", "")); _dx_cell(c[3], cr.get("note", ""))
+            if m.get("users"):
+                doc.add_heading("Enumerated users", level=2)
+                doc.add_paragraph(", ".join(m["users"]))
+            if m.get("variables"):
+                doc.add_heading("Captured variables", level=2)
+                vt = _dx_table(doc, ["Variable", "Value"])
+                for v in m["variables"]:
+                    c = vt.add_row().cells
+                    _dx_cell(c[0], v["name"]); _dx_cell(c[1], v["value"])
 
         doc.add_heading("4. Testing Process", level=1)
         doc.add_heading("4.1 Methodology", level=2)

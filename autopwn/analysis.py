@@ -9,7 +9,54 @@ even a weak local model produces a useful deliverable. The LLM's job is then to
 """
 from __future__ import annotations
 
+import re
 from typing import Any
+
+# ---- result extraction from a run transcript (shared by report + web) ------
+_CRED_RE = re.compile(r"\[\+\]\s*([^\\\s]+)\\([^:\s]+):([^\s(]+)")
+_CHAIN_CRED_RE = re.compile(r"valid credential:\s*([^\s:]+):(\S+?)(?:\s|$)", re.I)
+_KERBRUTE_RE = re.compile(r"VALID USERNAME:\s+([^@\s]+)@")
+_LDAP_USER_RE = re.compile(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}")
+_RID_USER_RE = re.compile(r"\\([^\\\s]+)\s+\(SidTypeUser\)", re.I)
+
+
+def extract_results(transcript, domain: str = "") -> dict:
+    """Credentials and usernames a run discovered, from its tool output.
+
+    Shared by the web Findings view and the report so both reflect exactly what
+    an assessment (including custom actions/playbooks) actually recovered.
+    """
+    creds: dict = {}
+    users: set = set()
+    for e in transcript or []:
+        out = e.get("output") or e.get("raw_output") or e.get("summary") or ""
+        if not out:
+            continue
+        for m in _CRED_RE.finditer(out):
+            dom, u, pw = m.group(1), m.group(2), m.group(3)
+            if u.lower() == "guest" or u.endswith("$"):
+                continue
+            creds[(u.lower(), dom.lower())] = {"username": u, "password": pw,
+                                               "domain": dom, "note": "netexec"}
+            users.add(u)
+        for m in _CHAIN_CRED_RE.finditer(out):
+            u, pw = m.group(1), m.group(2)
+            if u.lower() == "guest" or u.endswith("$"):
+                continue
+            creds.setdefault((u.lower(), domain.lower()),
+                             {"username": u, "password": pw, "domain": domain,
+                              "note": "kill-chain"})
+            users.add(u)
+        for m in _KERBRUTE_RE.finditer(out):
+            users.add(m.group(1))
+        for m in _LDAP_USER_RE.finditer(out):
+            u = m.group(1)
+            if u.lower() not in ("username", "guest", "krbtgt") and not u.endswith("$"):
+                users.add(u)
+        for m in _RID_USER_RE.finditer(out):
+            if not m.group(1).endswith("$"):
+                users.add(m.group(1))
+    return {"credentials": list(creds.values()), "users": sorted(users)}
 
 
 def _open(entry: dict) -> dict[int, dict]:
