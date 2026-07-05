@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-bs-theme="dark">
+<html lang="en" data-bs-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,163 +8,181 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg border-bottom border-secondary-subtle sticky-top bg-body-tertiary">
-    <div class="container-fluid">
-      <span class="navbar-brand fw-bold d-flex align-items-center gap-2">
-        <span class="brand-mark">◤◢</span> Autopwn
+<div class="ap-shell">
+  <!-- SIDEBAR -->
+  <aside class="ap-sidebar">
+    <div class="ap-brand">
+      <span class="brand-mark">◤◢</span>
+      <span class="brand-name">Autopwn</span>
+    </div>
+    <nav class="ap-nav" id="mainNav">
+      <button class="ap-nav-link active" data-view="dashboard"><span class="ico">▩</span> Dashboard</button>
+      <button class="ap-nav-link" data-view="launch"><span class="ico">▶</span> Launch Assessment</button>
+      <button class="ap-nav-link" data-view="playbooks"><span class="ico">⑃</span> Playbooks</button>
+      <button class="ap-nav-link" data-view="jobs"><span class="ico">≣</span> Jobs</button>
+      <button class="ap-nav-link" data-view="reports"><span class="ico">▤</span> Reports</button>
+      <button class="ap-nav-link" data-view="scope"><span class="ico">⚙</span> Scope &amp; Vars</button>
+    </nav>
+    <div class="ap-sidebar-foot">
+      <a href="https://www.linkedin.com/in/alialaqoul/" target="_blank" rel="noopener">Ali Alaqoul</a>
+      <div class="text-secondary small mt-1">Authorized testing only</div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="ap-main">
+    <header class="ap-topbar">
+      <div class="d-flex align-items-center gap-2">
+        <span class="fw-semibold" id="viewTitle">Dashboard</span>
         <span class="badge text-bg-secondary fw-normal" id="engagementLabel">—</span>
-      </span>
-      <div class="d-flex align-items-center gap-3">
+      </div>
+      <div class="d-flex align-items-center gap-2">
         <span class="badge rounded-pill text-bg-success d-none" id="runningBadge">0 running</span>
         <button class="btn btn-sm btn-outline-secondary" id="refreshBtn" title="Refresh">↻</button>
       </div>
-    </div>
-  </nav>
+    </header>
 
-  <div class="container-fluid py-3">
-    <ul class="nav nav-pills mb-3 gap-1" id="mainTabs" role="tablist">
-      <li class="nav-item"><button class="nav-link active" data-view="dashboard">Dashboard</button></li>
-      <li class="nav-item"><button class="nav-link" data-view="launch">Launch Assessment</button></li>
-      <li class="nav-item"><button class="nav-link" data-view="jobs">Jobs</button></li>
-      <li class="nav-item"><button class="nav-link" data-view="reports">Reports</button></li>
-      <li class="nav-item"><button class="nav-link" data-view="scope">Scope &amp; Vars</button></li>
-    </ul>
-
-    <!-- DASHBOARD -->
-    <section data-panel="dashboard">
-      <div class="row g-3 mb-3" id="statCards"></div>
-      <div class="row g-3">
-        <div class="col-lg-6">
-          <div class="card h-100">
-            <div class="card-header fw-semibold">Hosts</div>
-            <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="hostsTable">
-              <thead><tr><th>Host</th><th>Name</th><th>Open ports</th><th>Services</th></tr></thead>
-              <tbody></tbody></table></div></div>
+    <div class="ap-content">
+      <!-- DASHBOARD -->
+      <section data-panel="dashboard">
+        <div class="row g-3 mb-3" id="statCards"></div>
+        <div class="row g-3">
+          <div class="col-xl-6">
+            <div class="card h-100">
+              <div class="card-header fw-semibold">Hosts</div>
+              <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="hostsTable">
+                <thead><tr><th>Host</th><th>Name</th><th>Open ports</th><th>Services</th></tr></thead>
+                <tbody></tbody></table></div></div>
+            </div>
+          </div>
+          <div class="col-xl-6">
+            <div class="card h-100">
+              <div class="card-header fw-semibold">Service matrix</div>
+              <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="servicesTable">
+                <thead><tr><th>Service</th><th>Ports</th><th>Hosts</th></tr></thead>
+                <tbody></tbody></table></div></div>
+            </div>
           </div>
         </div>
-        <div class="col-lg-6">
-          <div class="card h-100">
-            <div class="card-header fw-semibold">Service matrix</div>
-            <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="servicesTable">
-              <thead><tr><th>Service</th><th>Ports</th><th>Hosts</th></tr></thead>
-              <tbody></tbody></table></div></div>
+      </section>
+
+      <!-- LAUNCH -->
+      <section data-panel="launch" hidden>
+        <div class="row"><div class="col-xxl-9">
+          <div class="card">
+            <div class="card-header fw-semibold">Launch AI assessment</div>
+            <div class="card-body">
+              <form id="launchForm">
+                <div class="mb-3">
+                  <label class="form-label">Target host / range</label>
+                  <input class="form-control" name="target" placeholder="192.168.140.11">
+                  <div class="form-text">With no objective, Autopwn runs a full adaptive autopilot on this target.</div>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Custom objective <span class="text-secondary">(optional)</span></label>
+                  <textarea class="form-control" name="objective" rows="2" placeholder="e.g. Assess the DC and attempt to reach Domain Admin."></textarea>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#credsBox">Starting credentials (assumed breach)</button>
+                <div class="collapse mb-3" id="credsBox"><div class="row g-2">
+                  <div class="col-md-6"><input class="form-control" name="username" placeholder="username"></div>
+                  <div class="col-md-6"><input class="form-control" name="password" placeholder="password"></div>
+                  <div class="col-md-6"><input class="form-control" name="domain" placeholder="domain (corp.local)"></div>
+                  <div class="col-md-6"><input class="form-control" name="nt_hash" placeholder="NTLM hash (pass-the-hash)"></div>
+                </div></div>
+                <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#metaBox">Engagement metadata (for the report)</button>
+                <div class="collapse mb-3" id="metaBox"><div class="row g-2">
+                  <div class="col-md-6"><input class="form-control" name="engagement" placeholder="engagement name"></div>
+                  <div class="col-md-6"><input class="form-control" name="client" placeholder="client / org"></div>
+                  <div class="col-md-6"><input class="form-control" name="assessor" placeholder="assessor"></div>
+                  <div class="col-md-6"><input class="form-control" name="authorized_by" placeholder="authorized by"></div>
+                </div></div>
+                <div class="d-flex align-items-center gap-3">
+                  <button class="btn btn-danger" type="submit" id="launchBtn">▶ Launch</button>
+                  <span class="text-secondary small">Runs detached; the live log opens in Jobs.</span>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- PLAYBOOKS -->
+      <section data-panel="playbooks" hidden>
+        <p class="text-secondary">The attack paths Autopwn follows. Each step forks on real evidence — highlighted playbooks match services discovered in this engagement.</p>
+        <div id="playbooksList" class="d-flex flex-column gap-3"></div>
+      </section>
+
+      <!-- JOBS -->
+      <section data-panel="jobs" hidden>
+        <div class="row g-3">
+          <div class="col-xl-5">
+            <div class="card">
+              <div class="card-header fw-semibold">Jobs</div>
+              <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="jobsTable">
+                <thead><tr><th>Started</th><th>Label</th><th>Status</th><th></th></tr></thead>
+                <tbody></tbody></table></div></div>
+            </div>
+          </div>
+          <div class="col-xl-7">
+            <div class="card">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Live log <span class="text-secondary small" id="logJobId"></span></span>
+                <span class="badge text-bg-secondary" id="logStatus">idle</span>
+              </div>
+              <div class="card-body p-0"><pre class="console-log mb-0" id="logView">Select a job to watch its output…</pre></div>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- LAUNCH -->
-    <section data-panel="launch" hidden>
-      <div class="row justify-content-center"><div class="col-lg-8">
+      <!-- REPORTS -->
+      <section data-panel="reports" hidden>
         <div class="card">
-          <div class="card-header fw-semibold">Launch AI assessment</div>
-          <div class="card-body">
-            <form id="launchForm">
-              <div class="mb-3">
-                <label class="form-label">Target host / range</label>
-                <input class="form-control" name="target" placeholder="192.168.140.11">
-                <div class="form-text">With no objective, Autopwn runs a full adaptive autopilot on this target.</div>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">Custom objective <span class="text-secondary">(optional)</span></label>
-                <textarea class="form-control" name="objective" rows="2" placeholder="e.g. Assess the DC and attempt to reach Domain Admin."></textarea>
-              </div>
-
-              <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#credsBox">Starting credentials (assumed breach)</button>
-              <div class="collapse mb-3" id="credsBox"><div class="row g-2">
-                <div class="col-md-6"><input class="form-control" name="username" placeholder="username"></div>
-                <div class="col-md-6"><input class="form-control" name="password" placeholder="password"></div>
-                <div class="col-md-6"><input class="form-control" name="domain" placeholder="domain (corp.local)"></div>
-                <div class="col-md-6"><input class="form-control" name="nt_hash" placeholder="NTLM hash (pass-the-hash)"></div>
-              </div></div>
-
-              <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#metaBox">Engagement metadata (for the report)</button>
-              <div class="collapse mb-3" id="metaBox"><div class="row g-2">
-                <div class="col-md-6"><input class="form-control" name="engagement" placeholder="engagement name"></div>
-                <div class="col-md-6"><input class="form-control" name="client" placeholder="client / org"></div>
-                <div class="col-md-6"><input class="form-control" name="assessor" placeholder="assessor"></div>
-                <div class="col-md-6"><input class="form-control" name="authorized_by" placeholder="authorized by"></div>
-              </div></div>
-
-              <div class="d-flex align-items-center gap-3">
-                <button class="btn btn-danger" type="submit" id="launchBtn">▶ Launch</button>
-                <span class="text-secondary small">Runs detached; the live log opens in Jobs.</span>
-              </div>
-            </form>
-          </div>
+          <div class="card-header fw-semibold">Generated reports</div>
+          <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="reportsTable">
+            <thead><tr><th>Report</th><th>Format</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+            <tbody></tbody></table></div></div>
         </div>
-      </div></div>
-    </section>
+      </section>
 
-    <!-- JOBS -->
-    <section data-panel="jobs" hidden>
-      <div class="row g-3">
-        <div class="col-lg-5">
-          <div class="card">
-            <div class="card-header fw-semibold">Jobs</div>
-            <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="jobsTable">
-              <thead><tr><th>Started</th><th>Label</th><th>Status</th><th></th></tr></thead>
-              <tbody></tbody></table></div></div>
-          </div>
-        </div>
-        <div class="col-lg-7">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <span class="fw-semibold">Live log <span class="text-secondary small" id="logJobId"></span></span>
-              <span class="badge text-bg-secondary" id="logStatus">idle</span>
+      <!-- SCOPE & VARS -->
+      <section data-panel="scope" hidden>
+        <div class="row g-3">
+          <div class="col-xl-5">
+            <div class="card">
+              <div class="card-header fw-semibold">Authorized scope</div>
+              <div class="card-body">
+                <form id="scopeForm" class="input-group input-group-sm mb-3">
+                  <input class="form-control" name="entry" placeholder="host / CIDR to allow">
+                  <button class="btn btn-outline-success" type="submit">Add allow</button>
+                </form>
+                <div id="scopeList"></div>
+              </div>
             </div>
-            <div class="card-body p-0"><pre class="console-log mb-0" id="logView">Select a job to watch its output…</pre></div>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- REPORTS -->
-    <section data-panel="reports" hidden>
-      <div class="card">
-        <div class="card-header fw-semibold">Generated reports</div>
-        <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="reportsTable">
-          <thead><tr><th>Report</th><th>Format</th><th>Size</th><th>Modified</th><th></th></tr></thead>
-          <tbody></tbody></table></div></div>
-      </div>
-    </section>
-
-    <!-- SCOPE & VARS -->
-    <section data-panel="scope" hidden>
-      <div class="row g-3">
-        <div class="col-lg-6">
-          <div class="card">
-            <div class="card-header fw-semibold">Authorized scope</div>
-            <div class="card-body">
-              <form id="scopeForm" class="input-group input-group-sm mb-3">
-                <input class="form-control" name="entry" placeholder="host / CIDR to allow">
-                <button class="btn btn-outline-success" type="submit">Add allow</button>
-              </form>
-              <div id="scopeList"></div>
+          <div class="col-xl-7">
+            <div class="card">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Engagement variables</span>
+                <span class="badge text-bg-secondary" id="varsSetCount">0 set</span>
+              </div>
+              <div class="card-body">
+                <form id="factForm" class="input-group input-group-sm mb-3">
+                  <input class="form-control" name="key" placeholder="key (e.g. domain)">
+                  <input class="form-control" name="value" placeholder="value">
+                  <button class="btn btn-outline-primary" type="submit">Set</button>
+                </form>
+                <div class="table-responsive"><table class="table table-sm mb-0" id="varsTable">
+                  <thead><tr><th>Variable</th><th>Value</th><th>Description</th><th></th></tr></thead>
+                  <tbody></tbody></table></div>
+              </div>
             </div>
           </div>
         </div>
-        <div class="col-lg-6">
-          <div class="card">
-            <div class="card-header fw-semibold">Engagement variables (facts)</div>
-            <div class="card-body">
-              <form id="factForm" class="input-group input-group-sm mb-3">
-                <input class="form-control" name="key" placeholder="key (e.g. domain)">
-                <input class="form-control" name="value" placeholder="value">
-                <button class="btn btn-outline-primary" type="submit">Set</button>
-              </form>
-              <div id="factsList"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  </div>
-
-  <footer class="text-center text-secondary small py-3">
-    Autopwn — authorized security testing only ·
-    <a href="https://www.linkedin.com/in/alialaqoul/" target="_blank" rel="noopener">Ali Alaqoul</a>
-  </footer>
+      </section>
+    </div>
+  </main>
+</div>
 
   <script src="/static/vendor/bootstrap.bundle.min.js"></script>
   <script src="/static/app.js"></script>

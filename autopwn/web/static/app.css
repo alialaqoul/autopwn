@@ -1,22 +1,73 @@
-/* Autopwn console — small overrides on top of vendored Bootstrap. */
-:root { --ap-accent: #dc3545; }
+/* Autopwn console — light theme, sidebar layout. Author: Ali Alaqoul */
+:root {
+  --ap-accent: #dc3545;
+  --ap-sidebar-bg: #1f2937;   /* dark sidebar rail against a light workspace */
+  --ap-sidebar-fg: #cbd5e1;
+  --ap-sidebar-active: #dc3545;
+  --ap-content-bg: #f5f6f8;
+}
 
-body { font-size: .925rem; }
+body { font-size: .925rem; background: var(--ap-content-bg); }
 
+/* ---- shell ---------------------------------------------------------- */
+.ap-shell { display: flex; min-height: 100vh; }
+
+.ap-sidebar {
+  width: 232px; flex: 0 0 232px; position: sticky; top: 0; height: 100vh;
+  background: var(--ap-sidebar-bg); color: var(--ap-sidebar-fg);
+  display: flex; flex-direction: column; padding: 1rem .75rem;
+}
+.ap-brand { display: flex; align-items: center; gap: .55rem; padding: .35rem .5rem 1.1rem;
+  font-size: 1.35rem; font-weight: 700; color: #fff; }
 .brand-mark { color: var(--ap-accent); letter-spacing: -2px; }
+.brand-name { letter-spacing: .01em; }
 
-.nav-pills .nav-link { cursor: pointer; }
-.nav-pills .nav-link.active { background-color: var(--ap-accent); }
+.ap-nav { display: flex; flex-direction: column; gap: .15rem; }
+.ap-nav-link {
+  display: flex; align-items: center; gap: .6rem; width: 100%;
+  border: 0; background: transparent; color: var(--ap-sidebar-fg);
+  padding: .55rem .7rem; border-radius: .5rem; text-align: left;
+  font-size: .92rem; cursor: pointer; transition: background .12s, color .12s;
+}
+.ap-nav-link .ico { width: 1.1rem; text-align: center; opacity: .85; }
+.ap-nav-link:hover { background: rgba(255,255,255,.07); color: #fff; }
+.ap-nav-link.active { background: var(--ap-sidebar-active); color: #fff; }
 
+.ap-sidebar-foot { margin-top: auto; padding: .75rem .6rem 0; font-size: .82rem;
+  border-top: 1px solid rgba(255,255,255,.08); }
+.ap-sidebar-foot a { color: #fff; text-decoration: none; }
+.ap-sidebar-foot a:hover { text-decoration: underline; }
+
+/* ---- main ----------------------------------------------------------- */
+.ap-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.ap-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .7rem 1.25rem; background: #fff;
+  border-bottom: 1px solid var(--bs-border-color); position: sticky; top: 0; z-index: 5;
+}
+.ap-content { padding: 1.25rem; }
+
+/* ---- widgets -------------------------------------------------------- */
 .stat-card .display-6 { font-weight: 600; line-height: 1; }
 .stat-card .stat-label { text-transform: uppercase; letter-spacing: .04em;
   font-size: .72rem; color: var(--bs-secondary-color); }
 
+.card { box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+
+.badge-port { font-family: ui-monospace, monospace; }
+
+.chip { display: inline-flex; align-items: center; gap: .35rem;
+  padding: .12rem .55rem; margin: .15rem; border-radius: 1rem;
+  background: var(--bs-secondary-bg); font-size: .8rem; border: 1px solid var(--bs-border-color); }
+.chip button { border: 0; background: transparent; color: var(--bs-danger);
+  line-height: 1; cursor: pointer; padding: 0; }
+
+/* ---- live log stays a dark terminal (readable for streaming output) -- */
 .console-log {
   height: 62vh; overflow-y: auto; margin: 0; padding: .85rem 1rem;
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
   font-size: .8rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
-  background: #0b0e11; color: #d6d9dc;
+  background: #0b0e11; color: #d6d9dc; border-radius: 0 0 .375rem .375rem;
 }
 .console-log .l-think  { color: #6ea8fe; }
 .console-log .l-run    { color: #ffd666; }
@@ -24,12 +75,39 @@ body { font-size: .925rem; }
 .console-log .l-warn   { color: #ff7b7b; }
 .console-log .l-final  { color: #fff; font-weight: 600; }
 
-.badge-port { font-family: ui-monospace, monospace; }
+/* ---- playbooks ------------------------------------------------------ */
+.pb-card.inactive { opacity: .62; }
+.pb-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.pb-flow { display: flex; flex-direction: column; }
+.pb-step { display: flex; gap: .75rem; padding: .1rem 0; }
+.pb-step-num {
+  flex: 0 0 1.7rem; height: 1.7rem; border-radius: 50%;
+  background: var(--ap-accent); color: #fff; display: flex; align-items: center;
+  justify-content: center; font-weight: 600; font-size: .8rem;
+}
+.pb-step-body { padding-bottom: .9rem; border-left: 2px solid var(--bs-border-color);
+  margin-left: .84rem; padding-left: 1.35rem; margin-top: -.15rem; }
+.pb-step:last-child .pb-step-body { border-left-color: transparent; }
+.pb-step-title { font-weight: 600; }
+.pb-step-detail { font-size: .84rem; color: var(--bs-secondary-color); }
+.pb-branch { font-size: .82rem; margin-top: .3rem; }
+.pb-branch .cond { display: inline-block; background: var(--bs-secondary-bg);
+  border: 1px solid var(--bs-border-color); border-radius: .35rem;
+  padding: 0 .4rem; font-weight: 600; }
+.pb-branch .then { color: var(--bs-body-color); }
+
+/* offset the negative margin so the first number lines up with the connector */
+.pb-step { position: relative; }
+.pb-step .pb-step-num { z-index: 1; }
+
+/* ---- responsive: collapse sidebar to a top strip on small screens --- */
+@media (max-width: 768px) {
+  .ap-shell { flex-direction: column; }
+  .ap-sidebar { width: 100%; flex-basis: auto; height: auto; position: static;
+    flex-direction: row; flex-wrap: wrap; align-items: center; gap: .25rem; }
+  .ap-brand { padding: .25rem .5rem; }
+  .ap-nav { flex-direction: row; flex-wrap: wrap; }
+  .ap-sidebar-foot { display: none; }
+}
 
 table td, table th { vertical-align: middle; }
-
-.chip { display: inline-flex; align-items: center; gap: .35rem;
-  padding: .1rem .5rem; margin: .15rem; border-radius: 1rem;
-  background: var(--bs-secondary-bg); font-size: .8rem; }
-.chip button { border: 0; background: transparent; color: var(--bs-danger);
-  line-height: 1; cursor: pointer; padding: 0; }

@@ -123,6 +123,33 @@ def create_app(config_path: str = "config.yaml"):
     def get_facts():
         return store.facts()
 
+    @app.get("/api/vars")
+    def get_vars():
+        """Full canonical variable set (mirrors the CLI `vars` view): every known
+        variable with its description and current value, base_dn derived from the
+        domain, plus any extra harvested facts outside the canonical set."""
+        from ..facts import CANONICAL, base_dn_from_domain
+        f = store.facts()
+        rows = []
+        for name, desc in CANONICAL.items():
+            val = f.get(name, "")
+            derived = False
+            if not val and name == "base_dn" and f.get("domain"):
+                val = base_dn_from_domain(f["domain"])
+                derived = True
+            secret = name in ("password", "nthash")
+            rows.append({"name": name, "description": desc, "value": val,
+                         "set": bool(f.get(name)), "derived": derived,
+                         "secret": secret})
+        extra = [{"name": k, "value": v} for k, v in f.items()
+                 if k not in CANONICAL]
+        return {"canonical": rows, "extra": extra}
+
+    @app.get("/api/playbooks")
+    def get_playbooks():
+        from .playbooks import annotate
+        return annotate(store.host_summary(), store.service_matrix(), store.facts())
+
     @app.post("/api/facts")
     def set_fact(f: Fact):
         if not f.key:
