@@ -71,6 +71,9 @@ class AdChainTool(Tool):
 
         state = run_ad_chain(target, domain, runner, report=None,
                              workdir=f"{log_dir}/chain", max_rid=max_rid)
+        # The chain detects the DC's real domain from its SMB banner — use that
+        # (not the possibly-stale passed domain) to label credentials.
+        domain = state.get("domain") or domain
 
         # Persist discovered credentials + flags into the shared store/facts.
         creds = state.get("creds", [])

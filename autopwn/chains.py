@@ -124,6 +124,7 @@ class AdChain:
         m = re.search(r"\(domain:([A-Za-z0-9.\-]+)\)", gout)
         if m and "." in m.group(1) and m.group(1).lower() != (self.domain or "").lower():
             self.domain = m.group(1)
+            self.state["domain"] = self.domain   # so callers label creds correctly
             self._log(f"target domain detected: {self.domain}")
         guest_ok = bool(guest and "[+]" in gout and "guest" in gout.lower())
         if guest_ok:
