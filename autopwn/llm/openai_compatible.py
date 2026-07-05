@@ -59,13 +59,25 @@ class OpenAICompatibleProvider(LLMProvider):
 
         t0 = time.monotonic()
         prompt_chars = sum(len(m.content or "") for m in messages)
+        # Full request captured for the Settings log (content capped so the log
+        # file can't run away on very long conversations).
+        _CAP = 12000
+        req_msgs = []
+        for m in messages:
+            row = {"role": m.role, "content": (m.content or "")[:_CAP]}
+            if m.tool_calls:
+                row["tool_calls"] = [{"name": tc.name, "arguments": tc.arguments}
+                                     for tc in m.tool_calls]
+            req_msgs.append(row)
 
         def _log(ok, **extra):
             calllog.record({"kind": "chat", "model": self.model,
                             "base_url": self.base_url, "ok": ok,
                             "duration_ms": int((time.monotonic() - t0) * 1000),
                             "prompt_chars": prompt_chars,
-                            "with_tools": bool(tools), **extra})
+                            "with_tools": bool(tools),
+                            "tool_count": len(tools) if tools else 0,
+                            "request": req_msgs, **extra})
 
         try:
             resp = self._client.post(
@@ -102,7 +114,10 @@ class OpenAICompatibleProvider(LLMProvider):
             )
         content = choice.get("content") or ""
         _log(True, completion_chars=len(content), tool_calls=len(tool_calls),
-             usage=data.get("usage"))
+             usage=data.get("usage"),
+             response={"content": content[:12000],
+                       "tool_calls": [{"name": tc.name, "arguments": tc.arguments}
+                                      for tc in tool_calls]})
         return Completion(content=content, tool_calls=tool_calls)
 
     def embed(self, texts: list[str]) -> list[list[float]]:

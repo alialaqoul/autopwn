@@ -201,6 +201,16 @@ textarea::placeholder, input::placeholder {
 .console-log .l-warn   { color: #ff7b7b; }
 .console-log .l-final  { color: #fff; font-weight: 600; }
 
+/* ---- AI call log ---------------------------------------------------- */
+.ai-row:hover { background: var(--bs-tertiary-bg); }
+.ai-io { padding: .25rem .25rem .5rem; }
+.ai-body {
+  background: #0b0e11; color: #d6d9dc; border-radius: .4rem;
+  padding: .6rem .8rem; margin: .25rem 0 0; font-size: .78rem;
+  max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
 /* ---- findings ------------------------------------------------------- */
 .finding-item { padding: .8rem 0; border-bottom: 1px solid var(--bs-border-color); }
 .finding-item:last-child { border-bottom: 0; }

@@ -823,28 +823,51 @@ async function loadSettings() {
   loadAiLog();
 }
 
+function fmtMsgs(msgs) {
+  return (msgs || []).map(m => {
+    let s = `[${(m.role || "").toUpperCase()}]\n${m.content || ""}`;
+    (m.tool_calls || []).forEach(tc =>
+      s += `\n  → tool_call ${tc.name}(${JSON.stringify(tc.arguments)})`);
+    return s;
+  }).join("\n\n");
+}
+
 async function loadAiLog() {
   let rows;
   try { rows = await api("/api/ai-log"); } catch { return; }
-  $("#aiLogTable tbody").innerHTML = rows.length ? rows.map(r => {
+  $("#aiLogTable tbody").innerHTML = rows.length ? rows.map((r, i) => {
     const t = new Date((r.ts || 0) * 1000).toLocaleTimeString();
     const ok = r.ok ? `<span class="badge text-bg-success">ok</span>`
       : `<span class="badge text-bg-danger">error</span>`;
-    const lat = r.duration_ms != null ? `${r.duration_ms} ms` : "";
-    let detail = "";
+    const lat = r.duration_ms != null ? `${(r.duration_ms / 1000).toFixed(1)}s` : "";
+    let summary = "";
     if (r.ok) {
       const bits = [];
       if (r.completion_chars != null) bits.push(`${r.completion_chars} chars`);
       if (r.tool_calls) bits.push(`${r.tool_calls} tool-calls`);
       if (r.usage && r.usage.total_tokens) bits.push(`${r.usage.total_tokens} tok`);
-      detail = `<span class="text-secondary small">${esc(bits.join(" · "))}</span>`;
+      summary = `<span class="text-secondary small">${esc(bits.join(" · "))}</span>`;
     } else {
-      detail = `<span class="text-danger small">${esc(r.error || "")}</span>`;
+      summary = `<span class="text-danger small">${esc((r.error || "").slice(0, 80))}</span>`;
     }
-    return `<tr><td class="small">${esc(t)}</td><td class="small">${esc(r.kind || "")}</td>
-      <td class="small font-monospace">${esc(r.model || "")}</td><td>${ok}</td>
-      <td class="small">${esc(lat)}</td><td>${detail}</td></tr>`;
+    const req = r.request ? fmtMsgs(r.request) : "(not recorded)";
+    const resp = r.ok ? fmtMsgs([{ role: "assistant", content: (r.response || {}).content, tool_calls: (r.response || {}).tool_calls }])
+      : (r.error || "");
+    const detail = `<tr class="ai-detail d-none" data-detail="${i}"><td colspan="6">
+        <div class="ai-io"><div class="pb-section-label">Sent to AI${r.tool_count ? ` · ${r.tool_count} tools` : ""}</div>
+          <pre class="ai-body">${esc(req)}</pre>
+          <div class="pb-section-label mt-2">Received</div>
+          <pre class="ai-body">${esc(resp)}</pre></div></td></tr>`;
+    return `<tr class="ai-row" data-row="${i}" style="cursor:pointer">
+        <td class="small">${esc(t)}</td><td class="small">${esc(r.kind || "")}</td>
+        <td class="small font-monospace">${esc(r.model || "")}</td><td>${ok}</td>
+        <td class="small">${esc(lat)}</td><td>${summary} <span class="text-secondary">▾</span></td></tr>${detail}`;
   }).join("") : `<tr><td colspan="6" class="text-center text-secondary py-3">No AI calls yet in this session.</td></tr>`;
+
+  $$("#aiLogTable .ai-row").forEach(row => row.onclick = () => {
+    const d = $(`#aiLogTable [data-detail="${row.dataset.row}"]`);
+    if (d) d.classList.toggle("d-none");
+  });
 }
 
 async function testAi() {
