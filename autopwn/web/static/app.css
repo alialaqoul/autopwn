@@ -118,6 +118,13 @@ code, pre, kbd, samp, .font-monospace { font-family: var(--ap-font) !important; 
   box-shadow: 0 0 0 .2rem rgba(220,53,69,.18);
 }
 
+/* placeholder hints in a lighter, softer color across all inputs */
+.form-control::placeholder, .form-select::placeholder,
+textarea::placeholder, input::placeholder {
+  color: #aab2bd !important;
+  opacity: 1;               /* Firefox lowers placeholder opacity by default */
+}
+
 /* ---- shell ---------------------------------------------------------- */
 .ap-shell { display: flex; min-height: 100vh; }
 

@@ -45,6 +45,8 @@ def _load(args) -> tuple[Config, Scope]:
     jobs.configure(cfg.log_dir)
     from .tools import custom as _custom
     _custom.configure(cfg.log_dir)
+    from .llm import calllog as _calllog
+    _calllog.configure(f"{cfg.log_dir}/ai_calls.jsonl")
     return cfg, scope
 
 

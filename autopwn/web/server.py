@@ -84,6 +84,8 @@ def create_app(config_path: str = "config.yaml"):
         store.configure(f"{s['dir']}/results.json")
         jobs.configure(s["dir"])
         custom_tools.configure(s["dir"])
+        from ..llm import calllog
+        calllog.configure(f"{s['dir']}/ai_calls.jsonl")
         return s["dir"]
 
     def _scope() -> Scope:
@@ -195,6 +197,33 @@ def create_app(config_path: str = "config.yaml"):
                 setattr(c.agent, k, bool(ag[k]))
         c.save(config_path)
         return get_settings()
+
+    @app.post("/api/settings/test-ai")
+    def test_ai():
+        """Ping the configured LLM with a tiny request; report status + latency."""
+        from ..llm.factory import build_provider
+        from ..llm.base import Message
+        c = Config.load(config_path)
+        c.llm.request_timeout = min(float(c.llm.request_timeout or 30), 30)
+        info = {"model": c.llm.model, "provider": c.llm.provider}
+        t0 = time.monotonic()
+        try:
+            provider = build_provider(c.llm)
+            info["base_url"] = provider.base_url
+            provider.max_tokens = 8
+            comp = provider.chat([Message(role="user",
+                                          content="Reply with the single word: pong")])
+            info.update(ok=True, latency_ms=int((time.monotonic() - t0) * 1000),
+                        reply=(comp.content or "").strip()[:120])
+        except Exception as e:
+            info.update(ok=False, latency_ms=int((time.monotonic() - t0) * 1000),
+                        error=str(e)[:400])
+        return info
+
+    @app.get("/api/ai-log")
+    def ai_log():
+        from ..llm import calllog
+        return calllog.tail(f"{_ld()}/ai_calls.jsonl", n=200)
 
     # ---- engagement snapshot --------------------------------------------- #
     @app.get("/api/summary")

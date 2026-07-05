@@ -820,6 +820,52 @@ async function loadSettings() {
   $("#s_confirm_active_actions").checked = !!A.confirm_active_actions;
   _aiEnabled = !!s.ai_enabled;
   reflectAi();
+  loadAiLog();
+}
+
+async function loadAiLog() {
+  let rows;
+  try { rows = await api("/api/ai-log"); } catch { return; }
+  $("#aiLogTable tbody").innerHTML = rows.length ? rows.map(r => {
+    const t = new Date((r.ts || 0) * 1000).toLocaleTimeString();
+    const ok = r.ok ? `<span class="badge text-bg-success">ok</span>`
+      : `<span class="badge text-bg-danger">error</span>`;
+    const lat = r.duration_ms != null ? `${r.duration_ms} ms` : "";
+    let detail = "";
+    if (r.ok) {
+      const bits = [];
+      if (r.completion_chars != null) bits.push(`${r.completion_chars} chars`);
+      if (r.tool_calls) bits.push(`${r.tool_calls} tool-calls`);
+      if (r.usage && r.usage.total_tokens) bits.push(`${r.usage.total_tokens} tok`);
+      detail = `<span class="text-secondary small">${esc(bits.join(" · "))}</span>`;
+    } else {
+      detail = `<span class="text-danger small">${esc(r.error || "")}</span>`;
+    }
+    return `<tr><td class="small">${esc(t)}</td><td class="small">${esc(r.kind || "")}</td>
+      <td class="small font-monospace">${esc(r.model || "")}</td><td>${ok}</td>
+      <td class="small">${esc(lat)}</td><td>${detail}</td></tr>`;
+  }).join("") : `<tr><td colspan="6" class="text-center text-secondary py-3">No AI calls yet in this session.</td></tr>`;
+}
+
+async function testAi() {
+  const btn = $("#testAiBtn"), status = $("#testAiStatus");
+  btn.disabled = true; status.className = "small text-secondary";
+  status.textContent = "Testing…";
+  try {
+    const r = await api("/api/settings/test-ai", { method: "POST" });
+    if (r.ok) {
+      status.className = "small text-success";
+      status.textContent = `✓ Connected to ${r.model} in ${r.latency_ms} ms — reply: “${r.reply || ""}”`;
+    } else {
+      status.className = "small text-danger";
+      status.textContent = `✗ ${r.error || "failed"} (${r.latency_ms} ms)`;
+    }
+  } catch (e) {
+    status.className = "small text-danger"; status.textContent = "✗ " + e.message;
+  } finally {
+    btn.disabled = false;
+    loadAiLog();
+  }
 }
 
 $("#settingsForm").addEventListener("submit", async (e) => {
@@ -901,6 +947,8 @@ $("#toolSearch").addEventListener("input", renderTools);
 
 $("#sessionSelect").addEventListener("change", (e) => selectSession(e.target.value));
 $("#sessionNewBtn").addEventListener("click", newSession);
+$("#testAiBtn").addEventListener("click", testAi);
+$("#aiLogRefresh").addEventListener("click", loadAiLog);
 
 $("#refreshBtn").addEventListener("click", () => {
   loadSessions();

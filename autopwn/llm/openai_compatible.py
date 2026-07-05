@@ -9,10 +9,12 @@ also has a text-based fallback for models that don't.
 from __future__ import annotations
 
 import json
+import time
 from typing import Optional
 
 import httpx
 
+from . import calllog
 from .base import Completion, LLMProvider, Message, ToolCall
 
 
@@ -55,6 +57,16 @@ class OpenAICompatibleProvider(LLMProvider):
             # can't emit prose/tutorials instead of an action.
             payload["response_format"] = response_format
 
+        t0 = time.monotonic()
+        prompt_chars = sum(len(m.content or "") for m in messages)
+
+        def _log(ok, **extra):
+            calllog.record({"kind": "chat", "model": self.model,
+                            "base_url": self.base_url, "ok": ok,
+                            "duration_ms": int((time.monotonic() - t0) * 1000),
+                            "prompt_chars": prompt_chars,
+                            "with_tools": bool(tools), **extra})
+
         try:
             resp = self._client.post(
                 f"{self.base_url}/chat/completions",
@@ -62,11 +74,13 @@ class OpenAICompatibleProvider(LLMProvider):
             )
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
+            _log(False, error=f"HTTP {e.response.status_code}: {e.response.text[:200]}")
             raise RuntimeError(
                 f"LLM request failed ({e.response.status_code}): "
                 f"{e.response.text[:500]}"
             ) from e
         except httpx.RequestError as e:
+            _log(False, error=f"connection: {e}")
             raise RuntimeError(
                 f"Could not reach LLM at {self.base_url}: {e}. "
                 "Is the model server running?"
@@ -86,8 +100,10 @@ class OpenAICompatibleProvider(LLMProvider):
                 ToolCall(id=tc.get("id", ""), name=fn.get("name", ""),
                          arguments=parsed)
             )
-        return Completion(content=choice.get("content") or "",
-                          tool_calls=tool_calls)
+        content = choice.get("content") or ""
+        _log(True, completion_chars=len(content), tool_calls=len(tool_calls),
+             usage=data.get("usage"))
+        return Completion(content=content, tool_calls=tool_calls)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Return embedding vectors for texts (OpenAI-compatible /embeddings)."""

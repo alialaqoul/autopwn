@@ -329,11 +329,23 @@
               </div>
             </div>
 
-            <div class="d-flex align-items-center gap-3">
+            <div class="d-flex align-items-center gap-3 flex-wrap">
               <button class="btn btn-danger" type="submit">Save settings</button>
+              <button class="btn btn-outline-secondary" type="button" id="testAiBtn">Test connection</button>
               <span class="text-success small d-none" id="settingsSaved">Saved.</span>
+              <span class="small" id="testAiStatus"></span>
             </div>
           </form>
+
+          <div class="card mt-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span class="fw-semibold">AI API call log</span>
+              <button class="btn btn-sm btn-outline-secondary py-0" id="aiLogRefresh">Refresh</button>
+            </div>
+            <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="aiLogTable">
+              <thead><tr><th>Time</th><th>Kind</th><th>Model</th><th>Status</th><th>Latency</th><th>Detail</th></tr></thead>
+              <tbody></tbody></table></div></div>
+          </div>
         </div></div>
       </section>
     </div>
