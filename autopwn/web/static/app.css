@@ -10,6 +10,100 @@
 
 body { font-size: .925rem; background: var(--ap-content-bg); }
 
+/* ===================================================================== */
+/*  Buttons — a cohesive, tactile system across every view               */
+/* ===================================================================== */
+.btn {
+  --bs-btn-border-radius: .55rem;
+  --bs-btn-font-weight: 600;
+  --bs-btn-padding-y: .4rem;
+  --bs-btn-padding-x: .9rem;
+  letter-spacing: .01em;
+  transition: background-color .15s ease, border-color .15s ease,
+              color .15s ease, box-shadow .15s ease, transform .06s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { box-shadow: 0 0 0 .2rem rgba(220,53,69,.28); outline: 0; }
+
+.btn-sm {
+  --bs-btn-border-radius: .45rem;
+  --bs-btn-font-size: .8rem;
+  --bs-btn-padding-y: .28rem;
+  --bs-btn-padding-x: .6rem;
+}
+/* action buttons in tables use .py-0 — give them a little breathing room */
+.btn.py-0 { padding-top: .22rem !important; padding-bottom: .22rem !important; }
+
+/* Solid accent — the strong actions (Launch / Run / Save) */
+.btn-danger {
+  --bs-btn-bg: #dc3545;       --bs-btn-border-color: #dc3545;
+  --bs-btn-hover-bg: #c32b3b; --bs-btn-hover-border-color: #c32b3b;
+  --bs-btn-active-bg: #a8232f; --bs-btn-active-border-color: #a8232f;
+  box-shadow: 0 1px 2px rgba(220,53,69,.22);
+}
+.btn-danger:hover { box-shadow: 0 4px 12px rgba(220,53,69,.30); transform: translateY(-1px); }
+.btn-danger:active { transform: translateY(0); }
+
+.btn-primary {
+  --bs-btn-bg: #2b6cff;       --bs-btn-border-color: #2b6cff;
+  --bs-btn-hover-bg: #1f5ae0; --bs-btn-hover-border-color: #1f5ae0;
+  --bs-btn-active-bg: #1a4fc4;
+  box-shadow: 0 1px 2px rgba(43,108,255,.22);
+}
+.btn-primary:hover { box-shadow: 0 4px 12px rgba(43,108,255,.28); transform: translateY(-1px); }
+
+/* Neutral outline — the workhorse (View / Edit / watch / add…) */
+.btn-outline-secondary {
+  --bs-btn-color: #5b6470;         --bs-btn-border-color: #d5dae1;
+  --bs-btn-bg: #fff;
+  --bs-btn-hover-bg: #eef1f5;       --bs-btn-hover-color: #1f2937;
+  --bs-btn-hover-border-color: #c3cbd4;
+  --bs-btn-active-bg: #e6eaef;      --bs-btn-active-color: #1f2937;
+  --bs-btn-active-border-color: #c3cbd4;
+}
+.btn-outline-secondary:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(16,24,40,.08); }
+
+.btn-outline-primary {
+  --bs-btn-color: #2b6cff;   --bs-btn-border-color: #bcd0ff;
+  --bs-btn-hover-bg: #2b6cff; --bs-btn-hover-border-color: #2b6cff;
+  --bs-btn-active-bg: #1f5ae0;
+}
+.btn-outline-primary:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(43,108,255,.22); }
+
+.btn-outline-success {
+  --bs-btn-color: #157347;   --bs-btn-border-color: #a9d5bd;
+  --bs-btn-hover-bg: #198754; --bs-btn-hover-border-color: #198754;
+  --bs-btn-active-bg: #146c43;
+}
+.btn-outline-success:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(25,135,84,.20); }
+
+.btn-outline-danger {
+  --bs-btn-color: #dc3545;   --bs-btn-border-color: #f0b6bc;
+  --bs-btn-hover-bg: #dc3545; --bs-btn-hover-border-color: #dc3545;
+  --bs-btn-active-bg: #c32b3b;
+}
+.btn-outline-danger:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(220,53,69,.22); }
+
+.btn-link { --bs-btn-color: #dc3545; --bs-btn-hover-color: #a8232f;
+  text-decoration: none; font-weight: 600; }
+.btn-link:hover { text-decoration: underline; }
+
+/* segmented action groups (playbook / job row buttons) */
+.btn-group-sm > .btn, .btn-group > .btn { box-shadow: none !important; transform: none !important; }
+.btn-group > .btn:hover { z-index: 2; }
+
+/* icon buttons in the top bar / sidebar (refresh, new-session) */
+#refreshBtn, #sessionNewBtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2rem; font-size: 1rem; line-height: 1;
+}
+
+/* inputs pick up the accent focus ring to match the buttons */
+.form-control:focus, .form-select:focus {
+  border-color: #f1a7ad;
+  box-shadow: 0 0 0 .2rem rgba(220,53,69,.18);
+}
+
 /* ---- shell ---------------------------------------------------------- */
 .ap-shell { display: flex; min-height: 100vh; }
 
