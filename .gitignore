@@ -39,3 +39,4 @@ Thumbs.db
 # Sample/exported reports at repo root (real reports go to logs/, already ignored)
 /*.docx
 /*.pdf
+.claude/

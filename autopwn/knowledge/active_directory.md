@@ -69,10 +69,37 @@ SAM/secrets dump. Enumerate relay targets with
 `netexec smb <range> --gen-relay-list targets.txt`.
 
 ## Step 3 — AS-REP roasting (no creds needed)
+<!-- when: port:88, fact:has_users -->
 - `asrep_roast` (impacket GetNPUsers) requests tickets for accounts that have
   "Do not require Kerberos pre-authentication" set. It needs the domain and a
   usernames file. Output hashes are crackable offline with `hashcat` (mode 18200)
-  or `john`. This is a top no-credential AD attack path.
+  or `john --format=krb5asrep`. This is a top no-credential AD attack path — and
+  the FALLBACK FOOTHOLD when guest is disabled and RID cycling is blocked.
+- The cracked AS-REP password is a real domain credential — use it to Kerberoast,
+  spray, and enumerate further. `ad_kill_chain` does this automatically.
+
+## Hardened DC: guest disabled — how to still get in
+<!-- when: port:88, port:445 -->
+Many real/CTF DCs disable `guest` (STATUS_ACCOUNT_DISABLED) and restrict
+anonymous LDAP, so null-session RID cycling returns nothing. Get a user list
+another way, then roast:
+1. `kerbrute_userenum` with a names wordlist (first.last, service-account names)
+   — Kerberos pre-auth validation, no lockout, no creds needed.
+2. AS-REP roast the discovered users (`asrep_roast`) → crack → foothold.
+3. With any foothold cred, do an authenticated `netexec_ldap --users` to get the
+   COMPLETE user list, then Kerberoast and re-roast for more creds.
+
+## Multi-domain / multi-forest (e.g. a parent + child + a trusted forest)
+Enumerate and roast EACH domain separately — users, SPNs, and AS-REP flags differ
+per domain, and each has its own DC. AS-REP/Kerberoast against domain A's DC with
+domain B's user list returns nothing. After compromising one domain, pivot across
+the trust (SID history / cross-forest Kerberoast / delegation) to the others.
+
+## Constrained/unconstrained delegation → escalation
+If a Kerberoastable (or otherwise owned) account shows `constrained` or
+`unconstrained` delegation, that is a privilege-escalation path: crack/own the
+account, then `get_st -spn <target> -impersonate Administrator` (S4U2Proxy) to
+mint a ticket as a privileged user to the delegated service, and use it with `-k`.
 
 ## Step 4 — with any valid credential
 - `kerberoast` (impacket GetUserSPNs) requests service-ticket hashes for accounts
