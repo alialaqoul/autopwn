@@ -76,8 +76,12 @@ body { font-size: .925rem; background: var(--ap-content-bg); }
 .console-log .l-final  { color: #fff; font-weight: 600; }
 
 /* ---- playbooks ------------------------------------------------------ */
-.pb-card.inactive { opacity: .62; }
 .pb-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.pb-section-label { text-transform: uppercase; letter-spacing: .04em;
+  font-size: .7rem; font-weight: 700; color: var(--bs-secondary-color); margin-bottom: .35rem; }
+.pb-match { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color);
+  border-radius: .5rem; padding: .55rem .75rem; }
+.pb-match code { color: var(--bs-body-color); }
 .pb-flow { display: flex; flex-direction: column; }
 .pb-step { display: flex; gap: .75rem; padding: .1rem 0; }
 .pb-step-num {

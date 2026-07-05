@@ -62,39 +62,135 @@ async function loadDashboard() {
 }
 
 /* ---- playbooks -------------------------------------------------------- */
+let _pbEditorId = null;   // id being edited; null = create-new
+let _pbModal = null;
+
+function pbMatchPanel(ev) {
+  if (!ev || !ev.reasons || !ev.reasons.length)
+    return `<div class="pb-match"><span class="text-secondary small">No match rules — always applicable.</span></div>`;
+  const rows = ev.reasons.map(r => {
+    const icon = r.matched ? `<span class="text-success">✓</span>` : `<span class="text-secondary">✗</span>`;
+    const hits = (r.hits && r.hits.length)
+      ? `<span class="text-secondary small ms-1">→ ${r.hits.map(esc).join(", ")}</span>` : "";
+    return `<div>${icon} <code class="small">${esc(r.rule)}</code>${hits}</div>`;
+  }).join("");
+  return `<div class="pb-match">${rows}</div>`;
+}
+
 async function loadPlaybooks() {
   let pbs;
   try { pbs = await api("/api/playbooks"); } catch { return; }
   $("#playbooksList").innerHTML = pbs.map(pb => {
+    const ev = pb.evaluation || {};
     const steps = pb.steps.map(st => {
       const branches = (st.branches || []).map(b =>
         `<div class="pb-branch"><span class="cond">${esc(b.cond)}</span>
          <span class="mx-1 text-secondary">→</span><span class="then">${esc(b.then)}</span></div>`).join("");
+      const tool = st.tool ? `<span class="badge text-bg-light text-secondary border ms-2">${esc(st.tool)}</span>` : "";
       return `<div class="pb-step">
-        <div class="pb-step-num">${st.n}</div>
+        <div class="pb-step-num">${esc(st.n)}</div>
         <div class="pb-step-body">
-          <div class="pb-step-title">${esc(st.title)}</div>
+          <div class="pb-step-title">${esc(st.title)}${tool}</div>
           <div class="pb-step-detail">${esc(st.detail || "")}</div>
           ${branches}
         </div></div>`;
     }).join("");
-    const badge = pb.active
-      ? `<span class="badge text-bg-success">applies here</span>`
-      : `<span class="badge text-bg-light text-secondary border">not matched yet</span>`;
-    return `<div class="card pb-card ${pb.active ? "" : "inactive"}">
+    const badge = ev.matched
+      ? `<span class="badge text-bg-success">matches scan</span>`
+      : `<span class="badge text-bg-light text-secondary border">no match yet</span>`;
+    const runTool = (pb.run || {}).tool;
+    const runBtn = runTool
+      ? `<button class="btn btn-sm btn-outline-danger py-0" data-pb-run="${esc(pb.id)}" title="Run ${esc(runTool)}">▶ Run</button>` : "";
+    return `<div class="card pb-card">
       <div class="card-body">
         <div class="pb-head mb-2">
           <div>
-            <div class="h6 mb-1">${esc(pb.name)}</div>
-            <div class="text-secondary small">${esc(pb.summary)}</div>
-            ${pb.tool ? `<div class="small mt-1"><span class="text-secondary">tool:</span>
-              <code>${esc(pb.tool)}</code></div>` : ""}
+            <div class="h6 mb-1">${esc(pb.name)} <span class="text-secondary small">(${esc(pb.id)})</span></div>
+            <div class="text-secondary small">${esc(pb.summary || "")}</div>
           </div>
-          <div class="text-end text-nowrap">${badge}</div>
+          <div class="text-end text-nowrap">
+            ${badge}
+            <div class="btn-group btn-group-sm mt-2">
+              ${runBtn}
+              <button class="btn btn-outline-secondary py-0" data-pb-edit="${esc(pb.id)}">Edit</button>
+              <button class="btn btn-outline-secondary py-0" data-pb-del="${esc(pb.id)}">Delete</button>
+            </div>
+          </div>
         </div>
+        <div class="pb-section-label">Matching against scan results</div>
+        ${pbMatchPanel(ev)}
+        <div class="pb-section-label mt-3">Execution</div>
+        ${runTool ? `<div class="small mb-1"><span class="text-secondary">launches:</span> <code>${esc(runTool)}</code></div>` : ""}
         <div class="pb-flow">${steps}</div>
       </div></div>`;
   }).join("");
+
+  $$("#playbooksList [data-pb-edit]").forEach(b => b.onclick = () => pbEdit(b.dataset.pbEdit));
+  $$("#playbooksList [data-pb-del]").forEach(b => b.onclick = () => pbDelete(b.dataset.pbDel));
+  $$("#playbooksList [data-pb-run]").forEach(b => b.onclick = () => pbRun(b.dataset.pbRun));
+}
+
+async function pbEdit(id) {
+  _pbEditorId = id;
+  let pb;
+  try { pb = await api(`/api/playbooks/${encodeURIComponent(id)}`); } catch (e) { return alert(e.message); }
+  $("#pbEditorTitle").textContent = "Edit playbook — " + id;
+  $("#pbEditorText").value = JSON.stringify(pb, null, 2);
+  $("#pbEditorError").textContent = "";
+  _pbModal.show();
+}
+
+function pbNew() {
+  _pbEditorId = null;
+  const tpl = {
+    id: "my-playbook", name: "New playbook", summary: "",
+    match: { any_ports: [445], signals: [] }, run: { tool: "" },
+    steps: [{ n: 1, title: "First step", tool: "", detail: "", branches: [] }],
+  };
+  $("#pbEditorTitle").textContent = "New playbook";
+  $("#pbEditorText").value = JSON.stringify(tpl, null, 2);
+  $("#pbEditorError").textContent = "";
+  _pbModal.show();
+}
+
+async function pbSave() {
+  let body;
+  try { body = JSON.parse($("#pbEditorText").value); }
+  catch (e) { $("#pbEditorError").textContent = "Invalid JSON: " + e.message; return; }
+  try {
+    if (_pbEditorId === null) {
+      await api("/api/playbooks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    } else {
+      await api(`/api/playbooks/${encodeURIComponent(_pbEditorId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    }
+  } catch (e) { $("#pbEditorError").textContent = e.message; return; }
+  _pbModal.hide();
+  loadPlaybooks();
+}
+
+async function pbDelete(id) {
+  if (!confirm(`Delete playbook "${id}"?`)) return;
+  try { await api(`/api/playbooks/${encodeURIComponent(id)}`, { method: "DELETE" }); } catch (e) { return alert(e.message); }
+  loadPlaybooks();
+}
+
+async function pbRun(id) {
+  const target = prompt(`Run playbook "${id}" against which target?`);
+  if (!target) return;
+  try {
+    const res = await api(`/api/playbooks/${encodeURIComponent(id)}/run`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: target.trim() }),
+    });
+    show("jobs");
+    setTimeout(() => watch(res.id), 300);
+  } catch (e) { alert(e.message); }
+}
+
+async function pbReset() {
+  if (!confirm("Restore the default playbooks? Your edits will be replaced.")) return;
+  try { await api("/api/playbooks/reset", { method: "POST" }); } catch (e) { return alert(e.message); }
+  loadPlaybooks();
 }
 
 /* ---- launch ----------------------------------------------------------- */
@@ -254,6 +350,11 @@ $("#factForm").addEventListener("submit", async (e) => {
 });
 
 /* ---- boot ------------------------------------------------------------- */
+_pbModal = new bootstrap.Modal($("#pbEditor"));
+$("#pbNewBtn").addEventListener("click", pbNew);
+$("#pbResetBtn").addEventListener("click", pbReset);
+$("#pbEditorSave").addEventListener("click", pbSave);
+
 $("#refreshBtn").addEventListener("click", () => {
   show($("#mainNav .ap-nav-link.active").dataset.view);
 });

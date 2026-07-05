@@ -108,7 +108,13 @@
 
       <!-- PLAYBOOKS -->
       <section data-panel="playbooks" hidden>
-        <p class="text-secondary">The attack paths Autopwn follows. Each step forks on real evidence — highlighted playbooks match services discovered in this engagement.</p>
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+          <p class="text-secondary mb-0">All attack paths Autopwn follows. Each shows how it is <b>matched</b> against the scan results and how each step <b>executes</b>. Playbooks are editable.</p>
+          <div class="text-nowrap">
+            <button class="btn btn-sm btn-outline-primary" id="pbNewBtn">+ New</button>
+            <button class="btn btn-sm btn-outline-secondary" id="pbResetBtn">Restore defaults</button>
+          </div>
+        </div>
         <div id="playbooksList" class="d-flex flex-column gap-3"></div>
       </section>
 
@@ -183,6 +189,35 @@
     </div>
   </main>
 </div>
+
+  <!-- PLAYBOOK EDITOR MODAL -->
+  <div class="modal fade" id="pbEditor" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="pbEditorTitle">Edit playbook</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-secondary">
+            Edit the playbook as JSON. Keys:
+            <code>id</code>, <code>name</code>, <code>summary</code>,
+            <code>match</code> {<code>any_ports</code>: [..], <code>signals</code>: [..]},
+            <code>run</code> {<code>tool</code>}, and
+            <code>steps</code> [{<code>n</code>, <code>title</code>, <code>tool</code>, <code>detail</code>,
+            <code>branches</code>: [{<code>cond</code>, <code>then</code>}]}].
+            <br><b>match.any_ports</b> is how it is selected: it matches when any of those ports is open in the scan results.
+          </p>
+          <textarea class="form-control font-monospace" id="pbEditorText" rows="20" spellcheck="false" style="font-size:.82rem"></textarea>
+          <div class="text-danger small mt-2" id="pbEditorError"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-danger" id="pbEditorSave">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/vendor/bootstrap.bundle.min.js"></script>
   <script src="/static/app.js"></script>

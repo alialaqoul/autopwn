@@ -147,8 +147,82 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.get("/api/playbooks")
     def get_playbooks():
-        from .playbooks import annotate
-        return annotate(store.host_summary(), store.service_matrix(), store.facts())
+        from . import playbooks as pb
+        return pb.annotate(store.host_summary(), store.service_matrix(),
+                           store.facts(), cfg.log_dir)
+
+    @app.get("/api/playbooks/{pb_id}")
+    def get_playbook(pb_id: str):
+        from . import playbooks as pb
+        for p in pb.load(cfg.log_dir):
+            if p.get("id") == pb_id:
+                return p
+        raise HTTPException(404, "Playbook not found.")
+
+    @app.put("/api/playbooks/{pb_id}")
+    def put_playbook(pb_id: str, body: dict):
+        from . import playbooks as pb
+        if not isinstance(body, dict) or not body.get("id"):
+            raise HTTPException(400, "Playbook must be an object with an 'id'.")
+        books = pb.load(cfg.log_dir)
+        idx = next((i for i, p in enumerate(books) if p.get("id") == pb_id), None)
+        if idx is None:
+            raise HTTPException(404, "Playbook not found.")
+        # a rename must not collide with another playbook's id
+        if body["id"] != pb_id and any(p.get("id") == body["id"] for p in books):
+            raise HTTPException(409, f"Another playbook already uses id '{body['id']}'.")
+        books[idx] = body
+        pb.save(cfg.log_dir, books)
+        return body
+
+    @app.post("/api/playbooks")
+    def create_playbook(body: dict):
+        from . import playbooks as pb
+        if not isinstance(body, dict) or not body.get("id"):
+            raise HTTPException(400, "Playbook must be an object with an 'id'.")
+        books = pb.load(cfg.log_dir)
+        if any(p.get("id") == body["id"] for p in books):
+            raise HTTPException(409, f"Playbook id '{body['id']}' already exists.")
+        books.append(body)
+        pb.save(cfg.log_dir, books)
+        return body
+
+    @app.delete("/api/playbooks/{pb_id}")
+    def delete_playbook(pb_id: str):
+        from . import playbooks as pb
+        books = pb.load(cfg.log_dir)
+        kept = [p for p in books if p.get("id") != pb_id]
+        if len(kept) == len(books):
+            raise HTTPException(404, "Playbook not found.")
+        pb.save(cfg.log_dir, kept)
+        return {"deleted": pb_id}
+
+    @app.post("/api/playbooks/reset")
+    def reset_playbooks():
+        from . import playbooks as pb
+        return pb.reset(cfg.log_dir)
+
+    @app.post("/api/playbooks/{pb_id}/run")
+    def run_playbook(pb_id: str, body: dict):
+        """Launch the playbook's macro tool as a detached job against a target."""
+        from . import playbooks as pb
+        target = (body or {}).get("target", "").strip()
+        if not target:
+            raise HTTPException(400, "A target is required to run a playbook.")
+        book = next((p for p in pb.load(cfg.log_dir) if p.get("id") == pb_id), None)
+        if not book:
+            raise HTTPException(404, "Playbook not found.")
+        tool = (book.get("run") or {}).get("tool", "").strip()
+        if not tool:
+            raise HTTPException(400, "This playbook has no runnable macro tool.")
+        sc = _scope()
+        if sc.is_denied(target):
+            raise HTTPException(403, f"'{target}' is on the deny list.")
+        if not sc.is_allowed(target):
+            sc.add_allow(target)
+        argv = ["run", "--tool", tool, "--set", f"target={target}"]
+        job_id = jobs.start(argv, label=f"{pb_id} {target}", log_dir=cfg.log_dir)
+        return {"id": job_id, "status": "running", "tool": tool, "args": argv}
 
     @app.post("/api/facts")
     def set_fact(f: Fact):
