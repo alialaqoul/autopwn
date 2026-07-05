@@ -35,7 +35,6 @@ $$("#mainNav .ap-nav-link").forEach(b => b.addEventListener("click", () => show(
 async function loadDashboard() {
   let d;
   try { d = await api("/api/summary"); } catch (e) { return; }
-  $("#engagementLabel").textContent = d.engagement || "no engagement";
   const rb = $("#runningBadge"), n = d.counts.running_jobs;
   rb.textContent = `${n} running`;
   rb.classList.toggle("d-none", n === 0);
