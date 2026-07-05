@@ -6,9 +6,23 @@
   --ap-sidebar-border: #dfe3e8;
   --ap-sidebar-active: #dc3545;
   --ap-content-bg: #f5f6f8;
+
+  /* Arial across the whole UI (incl. code/monospace utilities) — the only
+     exception is the job-watch log, which is pinned to a monospace stack below. */
+  --ap-font: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  --bs-font-sans-serif: var(--ap-font);
+  --bs-font-monospace: var(--ap-font);
+  --bs-body-font-family: var(--ap-font);
 }
 
-body { font-size: .925rem; background: var(--ap-content-bg); }
+body { font-size: .925rem; background: var(--ap-content-bg);
+  font-family: var(--ap-font); }
+code, pre, kbd, samp, .font-monospace { font-family: var(--ap-font) !important; }
+
+/* the job-watch (live log) window stays monospace */
+.console-log, .console-log * {
+  font-family: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace !important;
+}
 
 /* ===================================================================== */
 /*  Buttons — a cohesive, tactile system across every view               */
