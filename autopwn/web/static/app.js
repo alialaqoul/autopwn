@@ -87,10 +87,17 @@ async function loadPlaybooks() {
         `<div class="pb-branch"><span class="cond">${esc(b.cond)}</span>
          <span class="mx-1 text-secondary">→</span><span class="then">${esc(b.then)}</span></div>`).join("");
       const tool = st.tool ? `<span class="badge text-bg-light text-secondary border ms-2">${esc(st.tool)}</span>` : "";
+      const flow = [];
+      if (st.trigger) flow.push(`<span class="pb-flow-tag trig" title="trigger">⚡ ${esc(st.trigger)}</span>`);
+      (st.consumes || []).forEach(c => flow.push(`<span class="pb-flow-tag cons" title="consumes">↤ ${esc(c)}</span>`));
+      (st.produces || []).forEach(p => flow.push(`<span class="pb-flow-tag prod" title="produces">↦ ${esc(p)}</span>`));
+      if (st.next) flow.push(`<span class="pb-flow-tag nxt" title="next">▸ ${esc(st.next)}</span>`);
+      const flowRow = flow.length ? `<div class="pb-flow-row">${flow.join("")}</div>` : "";
       return `<div class="pb-step">
         <div class="pb-step-num">${esc(st.n)}</div>
         <div class="pb-step-body">
           <div class="pb-step-title">${esc(st.title)}${tool}</div>
+          ${flowRow}
           <div class="pb-step-detail">${esc(st.detail || "")}</div>
           ${branches}
         </div></div>`;
@@ -130,33 +137,145 @@ async function loadPlaybooks() {
   $$("#playbooksList [data-pb-run]").forEach(b => b.onclick = () => pbRun(b.dataset.pbRun));
 }
 
+/* ---- structured playbook builder ------------------------------------- */
+let _pbDraft = null;
+let _pbSchema = { artifacts: [], triggers: [], signals: [], next: ["next", "final"] };
+
+async function ensureSchema() {
+  if (_pbSchema.artifacts.length) return;
+  try { _pbSchema = await api("/api/playbook-schema"); } catch { }
+}
+
+function blankStep(n) {
+  return { n, title: "", trigger: "start", tool: "", consumes: [], produces: [],
+    detail: "", next: "next", branches: [] };
+}
+function blankPlaybook() {
+  return { id: "my-playbook", name: "New playbook", summary: "",
+    match: { any_ports: [445], signals: [] }, run: { tool: "" },
+    steps: [blankStep(1)] };
+}
+
+function chipRow(group, selected, stepIdx, options) {
+  return options.map(a => {
+    const on = (selected || []).includes(a);
+    const step = stepIdx !== undefined ? `data-step="${stepIdx}"` : "";
+    return `<button type="button" class="pb-chip ${on ? "on" : ""}" data-act="chip"
+      data-group="${group}" data-val="${esc(a)}" ${step}>${esc(a)}</button>`;
+  }).join("");
+}
+
+function renderBuilder() {
+  const d = _pbDraft;
+  const triggerOpts = _pbSchema.triggers.map(t => `<option value="${esc(t)}">`).join("");
+  const nextOpts = _pbSchema.next.concat(d.steps.map(s => s.title).filter(Boolean))
+    .map(t => `<option value="${esc(t)}">`).join("");
+
+  const steps = d.steps.map((st, i) => {
+    const branches = (st.branches || []).map((b, j) => `
+      <div class="input-group input-group-sm mb-1">
+        <span class="input-group-text">if</span>
+        <input class="form-control" placeholder="condition" value="${esc(b.cond)}" data-step="${i}" data-branch="${j}" data-field="cond">
+        <span class="input-group-text">→</span>
+        <input class="form-control" placeholder="route / result" value="${esc(b.then)}" data-step="${i}" data-branch="${j}" data-field="then">
+        <button class="btn btn-outline-danger" type="button" data-act="delBranch" data-step="${i}" data-branch="${j}">✕</button>
+      </div>`).join("");
+    return `<div class="pb-build-step">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span class="fw-semibold">Step ${st.n}</span>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary py-0" type="button" data-act="upStep" data-step="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button class="btn btn-outline-secondary py-0" type="button" data-act="downStep" data-step="${i}" ${i === d.steps.length - 1 ? "disabled" : ""}>↓</button>
+          <button class="btn btn-outline-danger py-0" type="button" data-act="delStep" data-step="${i}">Remove</button>
+        </div>
+      </div>
+      <div class="row g-2 mb-2">
+        <div class="col-md-7"><label class="pb-lbl">Title</label>
+          <input class="form-control form-control-sm" value="${esc(st.title)}" data-step="${i}" data-field="title"></div>
+        <div class="col-md-5"><label class="pb-lbl">Action / tool</label>
+          <input class="form-control form-control-sm" value="${esc(st.tool)}" data-step="${i}" data-field="tool" placeholder="e.g. netexec_spray"></div>
+      </div>
+      <div class="row g-2 mb-2">
+        <div class="col-md-7"><label class="pb-lbl">Trigger <span class="text-secondary">(when this step fires)</span></label>
+          <input class="form-control form-control-sm" list="dlTriggers" value="${esc(st.trigger || "")}" data-step="${i}" data-field="trigger"></div>
+        <div class="col-md-5"><label class="pb-lbl">Next on success</label>
+          <input class="form-control form-control-sm" list="dlNext" value="${esc(st.next || "next")}" data-step="${i}" data-field="next"></div>
+      </div>
+      <div class="mb-2"><label class="pb-lbl">Consumes <span class="text-secondary">(needs from earlier steps)</span></label>
+        <div class="pb-chips">${chipRow("consumes", st.consumes, i, _pbSchema.artifacts)}</div></div>
+      <div class="mb-2"><label class="pb-lbl">Produces <span class="text-secondary">(passes to next / final)</span></label>
+        <div class="pb-chips">${chipRow("produces", st.produces, i, _pbSchema.artifacts)}</div></div>
+      <div class="mb-2"><label class="pb-lbl">Detail</label>
+        <textarea class="form-control form-control-sm" rows="2" data-step="${i}" data-field="detail">${esc(st.detail || "")}</textarea></div>
+      <div><label class="pb-lbl">Branches <span class="text-secondary">(conditional re-routes)</span></label>
+        ${branches}
+        <button class="btn btn-sm btn-outline-secondary py-0" type="button" data-act="addBranch" data-step="${i}">+ branch</button></div>
+    </div>`;
+  }).join("");
+
+  $("#pbBuilder").innerHTML = `
+    <datalist id="dlTriggers">${triggerOpts}</datalist>
+    <datalist id="dlNext">${nextOpts}</datalist>
+    <div class="row g-2 mb-2">
+      <div class="col-md-4"><label class="pb-lbl">ID</label>
+        <input class="form-control form-control-sm" value="${esc(d.id)}" data-field="id"></div>
+      <div class="col-md-8"><label class="pb-lbl">Name</label>
+        <input class="form-control form-control-sm" value="${esc(d.name)}" data-field="name"></div>
+    </div>
+    <div class="mb-2"><label class="pb-lbl">Summary</label>
+      <textarea class="form-control form-control-sm" rows="2" data-field="summary">${esc(d.summary || "")}</textarea></div>
+    <div class="row g-2 mb-2">
+      <div class="col-md-7"><label class="pb-lbl">Match — any of these open ports</label>
+        <input class="form-control form-control-sm" value="${(d.match.any_ports || []).join(", ")}" data-field="ports" placeholder="88, 445, 389"></div>
+      <div class="col-md-5"><label class="pb-lbl">Run — macro tool <span class="text-secondary">(optional)</span></label>
+        <input class="form-control form-control-sm" value="${esc((d.run || {}).tool || "")}" data-field="tool" placeholder="ad_kill_chain"></div>
+    </div>
+    <div class="mb-3"><label class="pb-lbl">Match — fact signals</label>
+      <div class="pb-chips">${chipRow("signals", d.match.signals, undefined, _pbSchema.signals)}</div></div>
+    <hr>
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span class="pb-section-label mb-0">Steps</span>
+      <button class="btn btn-sm btn-outline-primary py-0" type="button" data-act="addStep">+ Add step</button>
+    </div>
+    <div class="d-flex flex-column gap-2">${steps}</div>`;
+  syncJsonFromDraft();
+}
+
+function syncJsonFromDraft() {
+  const t = $("#pbEditorText");
+  if (t) t.value = JSON.stringify(_pbDraft, null, 2);
+}
+
+function parsePorts(s) {
+  return String(s).split(",").map(x => parseInt(x.trim(), 10)).filter(n => !isNaN(n));
+}
+
 async function pbEdit(id) {
+  await ensureSchema();
   _pbEditorId = id;
-  let pb;
-  try { pb = await api(`/api/playbooks/${encodeURIComponent(id)}`); } catch (e) { return alert(e.message); }
+  try { _pbDraft = await api(`/api/playbooks/${encodeURIComponent(id)}`); } catch (e) { return alert(e.message); }
+  _pbDraft.match = _pbDraft.match || { any_ports: [], signals: [] };
+  _pbDraft.run = _pbDraft.run || { tool: "" };
+  _pbDraft.steps = _pbDraft.steps || [];
   $("#pbEditorTitle").textContent = "Edit playbook — " + id;
-  $("#pbEditorText").value = JSON.stringify(pb, null, 2);
   $("#pbEditorError").textContent = "";
+  renderBuilder();
   _pbModal.show();
 }
 
-function pbNew() {
+async function pbNew() {
+  await ensureSchema();
   _pbEditorId = null;
-  const tpl = {
-    id: "my-playbook", name: "New playbook", summary: "",
-    match: { any_ports: [445], signals: [] }, run: { tool: "" },
-    steps: [{ n: 1, title: "First step", tool: "", detail: "", branches: [] }],
-  };
+  _pbDraft = blankPlaybook();
   $("#pbEditorTitle").textContent = "New playbook";
-  $("#pbEditorText").value = JSON.stringify(tpl, null, 2);
   $("#pbEditorError").textContent = "";
+  renderBuilder();
   _pbModal.show();
 }
 
 async function pbSave() {
-  let body;
-  try { body = JSON.parse($("#pbEditorText").value); }
-  catch (e) { $("#pbEditorError").textContent = "Invalid JSON: " + e.message; return; }
+  _pbDraft.steps.forEach((s, i) => (s.n = i + 1));   // renumber
+  const body = _pbDraft;
   try {
     if (_pbEditorId === null) {
       await api("/api/playbooks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -166,6 +285,53 @@ async function pbSave() {
   } catch (e) { $("#pbEditorError").textContent = e.message; return; }
   _pbModal.hide();
   loadPlaybooks();
+}
+
+/* builder event delegation (bound once at boot) */
+function bindBuilder() {
+  const root = $("#pbBuilder");
+  root.addEventListener("input", (e) => {
+    const t = e.target, f = t.dataset.field;
+    if (!f || !_pbDraft) return;
+    if (t.dataset.branch !== undefined) {
+      _pbDraft.steps[+t.dataset.step].branches[+t.dataset.branch][f] = t.value;
+    } else if (t.dataset.step !== undefined) {
+      _pbDraft.steps[+t.dataset.step][f] = t.value;
+    } else if (f === "ports") {
+      _pbDraft.match.any_ports = parsePorts(t.value);
+    } else if (f === "tool") {
+      _pbDraft.run.tool = t.value;
+    } else {
+      _pbDraft[f] = t.value;
+    }
+    syncJsonFromDraft();
+  });
+  root.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act]");
+    if (!b || !_pbDraft) return;
+    const act = b.dataset.act, si = +b.dataset.step;
+    if (act === "addStep") _pbDraft.steps.push(blankStep(_pbDraft.steps.length + 1));
+    else if (act === "delStep") _pbDraft.steps.splice(si, 1);
+    else if (act === "upStep" && si > 0) [_pbDraft.steps[si - 1], _pbDraft.steps[si]] = [_pbDraft.steps[si], _pbDraft.steps[si - 1]];
+    else if (act === "downStep" && si < _pbDraft.steps.length - 1) [_pbDraft.steps[si + 1], _pbDraft.steps[si]] = [_pbDraft.steps[si], _pbDraft.steps[si + 1]];
+    else if (act === "addBranch") _pbDraft.steps[si].branches.push({ cond: "", then: "" });
+    else if (act === "delBranch") _pbDraft.steps[si].branches.splice(+b.dataset.branch, 1);
+    else if (act === "chip") {
+      const g = b.dataset.group, v = b.dataset.val;
+      const arr = g === "signals" ? _pbDraft.match.signals : _pbDraft.steps[si][g];
+      const at = arr.indexOf(v);
+      at === -1 ? arr.push(v) : arr.splice(at, 1);
+    } else return;
+    _pbDraft.steps.forEach((s, i) => (s.n = i + 1));
+    renderBuilder();
+  });
+}
+
+function applyJsonToDraft() {
+  try { _pbDraft = JSON.parse($("#pbEditorText").value); }
+  catch (e) { $("#pbEditorError").textContent = "Invalid JSON: " + e.message; return; }
+  $("#pbEditorError").textContent = "";
+  renderBuilder();
 }
 
 async function pbDelete(id) {
@@ -351,9 +517,11 @@ $("#factForm").addEventListener("submit", async (e) => {
 
 /* ---- boot ------------------------------------------------------------- */
 _pbModal = new bootstrap.Modal($("#pbEditor"));
+bindBuilder();
 $("#pbNewBtn").addEventListener("click", pbNew);
 $("#pbResetBtn").addEventListener("click", pbReset);
 $("#pbEditorSave").addEventListener("click", pbSave);
+$("#pbApplyJson").addEventListener("click", applyJsonToDraft);
 
 $("#refreshBtn").addEventListener("click", () => {
   show($("#mainNav .ap-nav-link.active").dataset.view);

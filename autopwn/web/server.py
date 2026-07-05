@@ -145,6 +145,11 @@ def create_app(config_path: str = "config.yaml"):
                  if k not in CANONICAL]
         return {"canonical": rows, "extra": extra}
 
+    @app.get("/api/playbook-schema")
+    def playbook_schema():
+        from . import playbooks as pb
+        return pb.SCHEMA
+
     @app.get("/api/playbooks")
     def get_playbooks():
         from . import playbooks as pb

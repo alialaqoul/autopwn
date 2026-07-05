@@ -199,16 +199,17 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p class="small text-secondary">
-            Edit the playbook as JSON. Keys:
-            <code>id</code>, <code>name</code>, <code>summary</code>,
-            <code>match</code> {<code>any_ports</code>: [..], <code>signals</code>: [..]},
-            <code>run</code> {<code>tool</code>}, and
-            <code>steps</code> [{<code>n</code>, <code>title</code>, <code>tool</code>, <code>detail</code>,
-            <code>branches</code>: [{<code>cond</code>, <code>then</code>}]}].
-            <br><b>match.any_ports</b> is how it is selected: it matches when any of those ports is open in the scan results.
-          </p>
-          <textarea class="form-control font-monospace" id="pbEditorText" rows="20" spellcheck="false" style="font-size:.82rem"></textarea>
+          <!-- structured builder -->
+          <div id="pbBuilder"></div>
+
+          <!-- advanced raw-JSON fallback -->
+          <div class="mt-3">
+            <button class="btn btn-sm btn-link px-0" type="button" data-bs-toggle="collapse" data-bs-target="#pbJsonBox">Advanced — edit raw JSON</button>
+            <div class="collapse" id="pbJsonBox">
+              <textarea class="form-control font-monospace" id="pbEditorText" rows="14" spellcheck="false" style="font-size:.8rem"></textarea>
+              <button class="btn btn-sm btn-outline-secondary mt-2" type="button" id="pbApplyJson">Apply JSON to builder</button>
+            </div>
+          </div>
           <div class="text-danger small mt-2" id="pbEditorError"></div>
         </div>
         <div class="modal-footer">
