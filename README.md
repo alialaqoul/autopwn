@@ -8,18 +8,41 @@ Autopwn does not reinvent scanners. It *orchestrates* the industry-standard
 ones — nmap, netexec, nuclei, impacket, ffuf, and more — the way a human operator
 does: it plans a methodology, picks the right tool, reads the raw output,
 correlates findings, and decides the next step. You can point it at a target and
-let it run on **autopilot**, or drive individual tools yourself.
+let it run on **autopilot** — with **or without AI** — or drive individual tools
+yourself, from a **web console** or the CLI.
 
 - **Author:** Ali Alaqoul — <alialaqoul@gmail.com>
 - **License:** MIT
 
-## Screenshots
+## Web console
 
-Interactive menu and the service→hosts matrix (real output against a lab range):
+A Bootstrap single-page console served by uvicorn (`autopwn web`). Everything is
+vendored, so it runs fully offline on an isolated lab network. Launch an
+assessment (AI **or** deterministic no-AI mode), watch findings build in real
+time, drive playbooks/tools, open interactive sessions, and export reports.
+
+<p align="center"><img src="assets/dashboard.png" alt="Dashboard — host inventory and service matrix" width="90%"></p>
+
+**Findings** — recovered credentials (with their domain), enumerated users, and
+severity-rated security findings with CVSS and evidence:
+
+<p align="center"><img src="assets/findings.png" alt="Findings — credentials, users, and CVSS-rated findings" width="90%"></p>
+
+**Console (C2)** — open an interactive session from a recovered credential
+(evil-winrm / impacket over password or pass-the-hash, with a persistent shell
+where `cd`/state carry), and a netcat-style reverse-shell listener:
+
+<p align="center"><img src="assets/console.png" alt="Console — credentialed sessions and reverse-shell listener" width="90%"></p>
+
+**Playbooks** — the attack paths *and* the report findings, unified and editable:
+each shows how it matches the scan and how each step executes; finding playbooks
+carry the severity/CVSS/impact that lands in the report:
+
+<p align="center"><img src="assets/playbooks.png" alt="Playbooks — editable attack paths and findings" width="90%"></p>
 
 <p align="center">
-  <img src="assets/menu.png" alt="Autopwn interactive menu" width="49%">
-  <img src="assets/matrix.png" alt="Service to hosts matrix" width="49%">
+  <img src="assets/tools.png" alt="Tools library — every action and how it runs" width="49%">
+  <img src="assets/settings.png" alt="Settings — AI model config, connection test, and AI call log" width="49%">
 </p>
 
 ---
@@ -37,8 +60,21 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
 
 ## Features
 
+- **Web console** (`autopwn web`) — an offline Bootstrap SPA over the engine:
+  dashboard, launch, findings, an interactive **C2 Console**, editable
+  playbooks/tools, jobs with live logs, reports, scope/vars, and settings.
+- **AI is optional — your choice** — a master switch (and a per-launch **mode**
+  toggle) picks the **AI autopilot** (LLM agent) or the **Playbook autopilot
+  (no AI)**: recon a target/range, run every matching playbook deterministically,
+  and report. Reliable and reproducible without any model.
+- **Interactive credentialed sessions (C2)** — from a recovered credential, open
+  a **persistent** shell over WinRM (evil-winrm) or SMB (impacket) with a password
+  or **pass-the-hash**; `cd` and state persist. Plus a reverse-shell **listener**.
+- **Isolated sessions** — each engagement is a self-contained data directory,
+  switchable from the console; launched jobs stay scoped to it.
 - **Pluggable AI backends** — OpenAI, Ollama, AnythingLLM, LM Studio, or any
-  OpenAI-compatible endpoint. Local models run fully offline.
+  OpenAI-compatible endpoint. Local models run fully offline. Test the connection
+  and audit every LLM request/response from the **Settings** page.
 - **Authorization gate** — every tool call is checked against your scope
   (allow/deny CIDRs, hostnames, and an expiry date) before any packet is sent.
 - **Full tool coverage** — 47+ tools across recon, web, SMB/Active Directory
@@ -103,10 +139,16 @@ cd autopwn
 python3 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -e .                     # installs deps + the `autopwn` command
+pip install -e '.[web]'              # optional: the web console (FastAPI + uvicorn)
 ```
 
 After `pip install -e .` you can run **`autopwn`** directly. If you'd rather not
 install, use `python -m autopwn` in place of `autopwn` everywhere below.
+
+**Web console:** `autopwn web` (add `--host 0.0.0.0 --port 8777` to expose it),
+then browse to the URL. Bootstrap is vendored, so it works with no internet.
+For interactive C2 sessions install `evil-winrm` and `impacket` (both ship with
+Kali). The console launches the same jobs the CLI does and shares the results.
 
 ### 2. Install the security tools (Kali Linux)
 
@@ -277,9 +319,7 @@ python -m autopwn services --hosts    # also show a per-host table
 
 All scans (sweep, recon, and the agent's own scans) feed one shared results
 store, so the matrix always reflects everything discovered so far. In the menu,
-**Results** gives a numbered host list you drill into for each host's detail:
-
-<p align="center"><img src="assets/hosts.png" alt="Discovered hosts list" width="70%"></p>
+**Results** gives a numbered host list you drill into for each host's detail.
 
 ### Run the agent in the background + watch it
 
@@ -427,12 +467,7 @@ The menu is grouped into **Manual**, **AI-Assisted**, **Configuration**, and
 | 🧹 **Maintenance** | **9** | Clear ALL | Reset results + variables and delete saved reports & finished jobs (running jobs kept) |
 
 **Pick a tool by number, then fire it at every applicable host** — and **drill
-into a single host** for its ports and services:
-
-<p align="center">
-  <img src="assets/run_tool.png" alt="Run a tool, by category" width="49%">
-  <img src="assets/host_detail.png" alt="Host detail drill-down" width="49%">
-</p>
+into a single host** for its ports and services.
 
 ---
 
@@ -489,9 +524,7 @@ every tool that uses it**:
   etc. get them filled in without you re-typing.
 
 See and manage them with `autopwn vars` (or menu → **Variables**), which also
-shows which tool uses each variable and via which flag:
-
-<p align="center"><img src="assets/variables.png" alt="Discovered variables and tool flag mapping" width="70%"></p>
+shows which tool uses each variable and via which flag.
 
 ## Extending: add your own tool
 
