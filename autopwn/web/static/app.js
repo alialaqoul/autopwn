@@ -55,10 +55,12 @@ async function loadDashboard() {
     <td class="small text-secondary">${esc(h.services.join(", "))}</td></tr>`).join("")
     : `<tr><td colspan="4" class="text-center text-secondary py-3">No hosts yet — launch an assessment.</td></tr>`;
 
-  $("#servicesTable tbody").innerHTML = d.services.length ? d.services.map(s => `
-    <tr><td>${esc(s.service)}</td>
+  $("#servicesTable tbody").innerHTML = d.services.length ? d.services.map(s => {
+    const uniqHosts = [...new Set(s.hosts.map(h => h.host))];
+    return `<tr><td>${esc(s.service)}</td>
     <td>${s.ports.map(p => `<span class="badge text-bg-secondary badge-port">${p}</span>`).join(" ")}</td>
-    <td class="small text-secondary">${s.hosts.map(h => esc(h.host)).join(", ")}</td></tr>`).join("")
+    <td class="small text-secondary">${uniqHosts.map(esc).join(", ")} <span class="text-secondary">(${uniqHosts.length})</span></td></tr>`;
+  }).join("")
     : `<tr><td colspan="3" class="text-center text-secondary py-3">No services discovered.</td></tr>`;
 }
 
@@ -367,6 +369,7 @@ async function pbReset() {
 
 /* ---- tools (actions) -------------------------------------------------- */
 let _toolModal = null;
+let _toolViewModal = null;
 let _toolEditName = null;   // null = create
 let _allTools = [];
 
@@ -390,22 +393,21 @@ function renderTools() {
     const custom = t.custom ? `<span class="badge text-bg-success">custom</span>`
       : (t.kind === "native" ? `<span class="badge text-bg-light text-secondary border">native</span>`
         : `<span class="badge text-bg-light text-secondary border">built-in</span>`);
-    const inst = t.installed ? `<span class="badge rounded-pill text-bg-success" title="binary found">●</span>`
-      : `<span class="badge rounded-pill text-bg-secondary" title="binary not installed">○</span>`;
     const cmd = t.programmatic
       ? `<span class="text-secondary fst-italic">${t.kind === "native" ? "native module" : "programmatic argument builder"}</span>`
       : `<code>${esc(t.template || "")}</code>`;
     const params = Object.keys((t.parameters || {}).properties || {});
     const paramBadges = params.map(p => `<span class="badge text-bg-light text-secondary border">${esc(p)}</span>`).join(" ");
     const actions = t.custom
-      ? `<button class="btn btn-sm btn-outline-secondary py-0 me-1" data-tool-edit="${esc(t.name)}">Edit</button>
+      ? `<button class="btn btn-sm btn-outline-secondary py-0 me-1" data-tool-view="${esc(t.name)}">View</button>
+         <button class="btn btn-sm btn-outline-secondary py-0 me-1" data-tool-edit="${esc(t.name)}">Edit</button>
          <button class="btn btn-sm btn-outline-danger py-0" data-tool-del="${esc(t.name)}">Delete</button>`
-      : `<span class="text-secondary small">read-only</span>`;
+      : `<button class="btn btn-sm btn-outline-secondary py-0" data-tool-view="${esc(t.name)}">View</button>`;
     return `<div class="card mb-2"><div class="card-body py-2">
       <div class="d-flex justify-content-between align-items-start gap-2">
         <div class="flex-grow-1">
           <div class="d-flex align-items-center gap-2 flex-wrap">
-            ${inst} <span class="fw-semibold font-monospace">${esc(t.name)}</span> ${cat} ${custom}
+            <span class="fw-semibold font-monospace">${esc(t.name)}</span> ${cat} ${custom}
             ${t.binary && t.kind !== "native" ? `<span class="text-secondary small">binary: <code>${esc(t.binary)}</code></span>` : ""}
           </div>
           <div class="text-secondary small mt-1">${esc(t.description || "")}</div>
@@ -417,8 +419,39 @@ function renderTools() {
   }).join("");
   $("#toolsList").innerHTML = rows || `<div class="text-secondary py-3">No tools match.</div>`;
 
+  $$("#toolsList [data-tool-view]").forEach(b => b.onclick = () => toolView(b.dataset.toolView));
   $$("#toolsList [data-tool-edit]").forEach(b => b.onclick = () => toolEdit(b.dataset.toolEdit));
   $$("#toolsList [data-tool-del]").forEach(b => b.onclick = () => toolDelete(b.dataset.toolDel));
+}
+
+function toolView(name) {
+  const t = _allTools.find(x => x.name === name);
+  if (!t) return;
+  const kv = (k, v) => v ? `<div class="row g-0 mb-1"><div class="col-4 text-secondary small">${esc(k)}</div><div class="col-8">${v}</div></div>` : "";
+  const params = (t.parameters || {}).properties || {};
+  const req = (t.parameters || {}).required || [];
+  const paramRows = Object.entries(params).map(([p, s]) =>
+    `<div><code>${esc(p)}</code> <span class="text-secondary small">${esc(s.description || s.type || "")}</span>${req.includes(p) ? ` <span class="badge text-bg-light text-secondary border">required</span>` : ""}</div>`).join("") || `<span class="text-secondary">none</span>`;
+  const flags = t.flags && Object.keys(t.flags).length
+    ? Object.entries(t.flags).map(([v, f]) => `<code>${esc(v)}</code> → <code>${esc(f || "(bare)")}</code>`).join("<br>") : "";
+  const cmd = t.programmatic
+    ? `<span class="fst-italic text-secondary">${t.kind === "native" ? "native Python module" : "programmatic argument builder (built-in)"}</span>`
+    : `<code>${esc(t.template || "")}</code>`;
+  $("#toolViewTitle").textContent = t.name;
+  $("#toolViewBody").innerHTML =
+    kv("Category", `<span class="badge ${CAT_CLASS[t.category] || "text-bg-secondary"}">${esc(t.category)}</span>`) +
+    kv("Kind", esc(t.kind) + (t.custom ? " (editable)" : " (read-only)")) +
+    kv("Binary", t.kind === "native" ? "<span class='text-secondary'>native module</span>" : `<code>${esc(t.binary)}</code>`) +
+    kv("Installed", t.installed ? "yes" : "no") +
+    kv("Description", esc(t.description || "")) +
+    kv("Command", cmd) +
+    (t.subcommand && t.subcommand.length ? kv("Subcommand", `<code>${t.subcommand.map(esc).join(" ")}</code>`) : "") +
+    (t.positional && t.positional.length ? kv("Positional", t.positional.map(x => `<code>${esc(x)}</code>`).join(" ")) : "") +
+    (flags ? kv("Flags", flags) : "") +
+    (t.fixed && t.fixed.length ? kv("Fixed", `<code>${t.fixed.map(esc).join(" ")}</code>`) : "") +
+    (t.install_hint ? kv("Install", esc(t.install_hint)) : "") +
+    kv("Parameters", paramRows);
+  _toolViewModal.show();
 }
 
 function _toolFieldGet() {
@@ -658,6 +691,36 @@ $("#factForm").addEventListener("submit", async (e) => {
   e.target.reset(); loadScope();
 });
 
+/* ---- sessions --------------------------------------------------------- */
+async function loadSessions() {
+  let data;
+  try { data = await api("/api/sessions"); } catch { return; }
+  $("#sessionSelect").innerHTML = data.sessions.map(s =>
+    `<option value="${esc(s.name)}" ${s.current ? "selected" : ""}>${esc(s.name)} · ${s.hosts} host${s.hosts === 1 ? "" : "s"}</option>`).join("");
+}
+
+async function selectSession(name) {
+  try { await api("/api/sessions/select", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); }
+  catch (e) { return alert(e.message); }
+  _allTools = []; _pbToolNames = [];   // caches are per-session
+  refreshCurrentView();
+}
+
+async function newSession() {
+  const name = prompt("New session name (letters, digits, _ . -):");
+  if (!name) return;
+  try { await api("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }) }); }
+  catch (e) { return alert(e.message); }
+  await loadSessions();
+  _allTools = []; _pbToolNames = [];
+  refreshCurrentView();
+}
+
+function refreshCurrentView() {
+  loadDashboard();
+  show($("#mainNav .ap-nav-link.active").dataset.view);
+}
+
 /* ---- boot ------------------------------------------------------------- */
 _pbModal = new bootstrap.Modal($("#pbEditor"));
 bindBuilder();
@@ -667,15 +730,21 @@ $("#pbEditorSave").addEventListener("click", pbSave);
 $("#pbApplyJson").addEventListener("click", applyJsonToDraft);
 
 _toolModal = new bootstrap.Modal($("#toolEditor"));
+_toolViewModal = new bootstrap.Modal($("#toolViewer"));
 $("#toolNewBtn").addEventListener("click", toolNew);
 $("#toolEditorSave").addEventListener("click", toolSave);
 $("#toolSearch").addEventListener("input", renderTools);
 ["t_binary", "t_subcommand", "t_positional", "t_flags", "t_fixed"].forEach(id =>
   $("#" + id).addEventListener("input", _toolPreview));
 
+$("#sessionSelect").addEventListener("change", (e) => selectSession(e.target.value));
+$("#sessionNewBtn").addEventListener("click", newSession);
+
 $("#refreshBtn").addEventListener("click", () => {
+  loadSessions();
   show($("#mainNav .ap-nav-link.active").dataset.view);
 });
+loadSessions();
 loadDashboard();
 setInterval(() => { if (!$('section[data-panel="dashboard"]').hidden) loadDashboard(); }, 8000);
 setInterval(() => { if (!$('section[data-panel="jobs"]').hidden) loadJobs(); }, 5000);

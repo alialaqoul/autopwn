@@ -1,8 +1,9 @@
 /* Autopwn console — light theme, sidebar layout. Author: Ali Alaqoul */
 :root {
   --ap-accent: #dc3545;
-  --ap-sidebar-bg: #1f2937;   /* dark sidebar rail against a light workspace */
-  --ap-sidebar-fg: #cbd5e1;
+  --ap-sidebar-bg: #eef1f5;   /* light sidebar rail */
+  --ap-sidebar-fg: #48505b;
+  --ap-sidebar-border: #dfe3e8;
   --ap-sidebar-active: #dc3545;
   --ap-content-bg: #f5f6f8;
 }
@@ -13,29 +14,39 @@ body { font-size: .925rem; background: var(--ap-content-bg); }
 .ap-shell { display: flex; min-height: 100vh; }
 
 .ap-sidebar {
-  width: 232px; flex: 0 0 232px; position: sticky; top: 0; height: 100vh;
+  width: 236px; flex: 0 0 236px; position: sticky; top: 0; height: 100vh;
   background: var(--ap-sidebar-bg); color: var(--ap-sidebar-fg);
+  border-right: 1px solid var(--ap-sidebar-border);
   display: flex; flex-direction: column; padding: 1rem .75rem;
 }
-.ap-brand { display: flex; align-items: center; gap: .55rem; padding: .35rem .5rem 1.1rem;
-  font-size: 1.35rem; font-weight: 700; color: #fff; }
-.brand-mark { color: var(--ap-accent); letter-spacing: -2px; }
+.ap-brand { display: flex; align-items: center; gap: .5rem; padding: .25rem .4rem .9rem;
+  font-size: 1.35rem; font-weight: 700; color: #1f2937; }
+.brand-svg { flex: 0 0 auto; }
 .brand-name { letter-spacing: .01em; }
+
+.ap-session { padding: 0 .35rem .75rem; margin-bottom: .5rem;
+  border-bottom: 1px solid var(--ap-sidebar-border); }
+.ap-session-lbl { text-transform: uppercase; letter-spacing: .05em; font-size: .66rem;
+  font-weight: 700; color: var(--bs-secondary-color); margin-bottom: .2rem; display: block; }
 
 .ap-nav { display: flex; flex-direction: column; gap: .15rem; }
 .ap-nav-link {
-  display: flex; align-items: center; gap: .6rem; width: 100%;
+  display: flex; align-items: center; gap: .65rem; width: 100%;
   border: 0; background: transparent; color: var(--ap-sidebar-fg);
   padding: .55rem .7rem; border-radius: .5rem; text-align: left;
   font-size: .92rem; cursor: pointer; transition: background .12s, color .12s;
 }
-.ap-nav-link .ico { width: 1.1rem; text-align: center; opacity: .85; }
-.ap-nav-link:hover { background: rgba(255,255,255,.07); color: #fff; }
+.ap-nav-link .ico { width: 18px; height: 18px; flex: 0 0 18px;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+.ap-nav-link[data-view="launch"] .ico { fill: currentColor; stroke: none; }
+.ap-nav-link:hover { background: rgba(0,0,0,.05); color: #1f2937; }
 .ap-nav-link.active { background: var(--ap-sidebar-active); color: #fff; }
+.ap-nav-link.active .ico { opacity: 1; }
 
 .ap-sidebar-foot { margin-top: auto; padding: .75rem .6rem 0; font-size: .82rem;
-  border-top: 1px solid rgba(255,255,255,.08); }
-.ap-sidebar-foot a { color: #fff; text-decoration: none; }
+  border-top: 1px solid var(--ap-sidebar-border); }
+.ap-sidebar-foot a { color: #1f2937; text-decoration: none; font-weight: 600; }
 .ap-sidebar-foot a:hover { text-decoration: underline; }
 
 /* ---- main ----------------------------------------------------------- */

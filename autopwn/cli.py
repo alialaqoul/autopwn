@@ -34,6 +34,11 @@ console = Console()
 
 def _load(args) -> tuple[Config, Scope]:
     cfg = Config.load(args.config)
+    # Session overrides win over the config file (set by the web console).
+    if getattr(args, "log_dir_override", None):
+        cfg.log_dir = args.log_dir_override
+    if getattr(args, "scope_file_override", None):
+        cfg.scope_file = args.scope_file_override
     scope = Scope.load(cfg.scope_file)
     # Point the shared store and job manager at this engagement's log dir.
     store.configure(f"{cfg.log_dir}/results.json")
@@ -1078,6 +1083,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Autopwn — AI-orchestrated authorized security testing.")
     p.add_argument("--config", default="config.yaml",
                    help="Path to config file (default config.yaml).")
+    # Session overrides (used by the web console to scope a run to a session).
+    p.add_argument("--log-dir", dest="log_dir_override",
+                   help="Override the results/jobs/reports directory.")
+    p.add_argument("--scope-file", dest="scope_file_override",
+                   help="Override the scope file.")
     # Not required: no subcommand launches the interactive menu.
     sub = p.add_subparsers(dest="command")
 

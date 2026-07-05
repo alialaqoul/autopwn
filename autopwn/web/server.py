@@ -70,22 +70,78 @@ def create_app(config_path: str = "config.yaml"):
     from fastapi.staticfiles import StaticFiles
 
     cfg = Config.load(config_path)
-    log_dir = Path(cfg.log_dir)
-    store.configure(f"{cfg.log_dir}/results.json")
-    jobs.configure(cfg.log_dir)
     from ..tools import custom as custom_tools
-    custom_tools.configure(cfg.log_dir)
+    from . import sessions
+    sessions.configure(cfg.log_dir, cfg.scope_file)
+
+    def _sess() -> dict:
+        return sessions.current()
+
+    def _ld() -> str:
+        """Point the shared store/jobs/tools at the current session and return
+        its directory. Cheap + idempotent — safe to call per request."""
+        s = _sess()
+        store.configure(f"{s['dir']}/results.json")
+        jobs.configure(s["dir"])
+        custom_tools.configure(s["dir"])
+        return s["dir"]
+
+    def _scope() -> Scope:
+        return Scope.load(_sess()["scope"])
+
+    def _session_args() -> list:
+        """Global CLI overrides so a launched job writes into the current session."""
+        s = _sess()
+        return ["--log-dir", s["dir"], "--scope-file", s["scope"]]
+
+    _ld()  # activate the current session at startup
 
     app = FastAPI(title="Autopwn Console", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-    def _scope() -> Scope:
-        return Scope.load(cfg.scope_file)
+    @app.middleware("http")
+    async def _session_context(request, call_next):
+        _ld()  # every request sees the currently-selected session's data
+        return await call_next(request)
 
     # ---- page ------------------------------------------------------------- #
     @app.get("/", response_class=HTMLResponse)
     def index():
         return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    # ---- sessions --------------------------------------------------------- #
+    @app.get("/api/sessions")
+    def get_sessions():
+        return {"current": _sess()["name"], "sessions": sessions.list_sessions()}
+
+    @app.post("/api/sessions")
+    def create_session(body: dict):
+        try:
+            s = sessions.create((body or {}).get("name", ""))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except FileExistsError:
+            raise HTTPException(409, "A session with that name already exists.")
+        sessions.set_current(s["name"])
+        return {"current": s["name"], "sessions": sessions.list_sessions()}
+
+    @app.post("/api/sessions/select")
+    def select_session(body: dict):
+        try:
+            sessions.set_current((body or {}).get("name", ""))
+        except KeyError:
+            raise HTTPException(404, "Session not found.")
+        return {"current": _sess()["name"], "sessions": sessions.list_sessions()}
+
+    @app.delete("/api/sessions/{name}")
+    def remove_session(name: str):
+        try:
+            sessions.delete(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except KeyError:
+            raise HTTPException(404, "Session not found.")
+        return {"current": _sess()["name"], "sessions": sessions.list_sessions()}
 
     # ---- engagement snapshot --------------------------------------------- #
     @app.get("/api/summary")
@@ -94,7 +150,7 @@ def create_app(config_path: str = "config.yaml"):
         hosts = store.host_summary()
         services = store.service_matrix()
         facts = store.facts()
-        running = sum(1 for j in jobs.list_jobs(cfg.log_dir)
+        running = sum(1 for j in jobs.list_jobs(_ld())
                       if j.get("status") == "running")
         return {
             "engagement": sc.engagement,
@@ -156,12 +212,12 @@ def create_app(config_path: str = "config.yaml"):
     def get_playbooks():
         from . import playbooks as pb
         return pb.annotate(store.host_summary(), store.service_matrix(),
-                           store.facts(), cfg.log_dir)
+                           store.facts(), _ld())
 
     @app.get("/api/playbooks/{pb_id}")
     def get_playbook(pb_id: str):
         from . import playbooks as pb
-        for p in pb.load(cfg.log_dir):
+        for p in pb.load(_ld()):
             if p.get("id") == pb_id:
                 return p
         raise HTTPException(404, "Playbook not found.")
@@ -171,7 +227,7 @@ def create_app(config_path: str = "config.yaml"):
         from . import playbooks as pb
         if not isinstance(body, dict) or not body.get("id"):
             raise HTTPException(400, "Playbook must be an object with an 'id'.")
-        books = pb.load(cfg.log_dir)
+        books = pb.load(_ld())
         idx = next((i for i, p in enumerate(books) if p.get("id") == pb_id), None)
         if idx is None:
             raise HTTPException(404, "Playbook not found.")
@@ -179,7 +235,7 @@ def create_app(config_path: str = "config.yaml"):
         if body["id"] != pb_id and any(p.get("id") == body["id"] for p in books):
             raise HTTPException(409, f"Another playbook already uses id '{body['id']}'.")
         books[idx] = body
-        pb.save(cfg.log_dir, books)
+        pb.save(_ld(), books)
         return body
 
     @app.post("/api/playbooks")
@@ -187,27 +243,27 @@ def create_app(config_path: str = "config.yaml"):
         from . import playbooks as pb
         if not isinstance(body, dict) or not body.get("id"):
             raise HTTPException(400, "Playbook must be an object with an 'id'.")
-        books = pb.load(cfg.log_dir)
+        books = pb.load(_ld())
         if any(p.get("id") == body["id"] for p in books):
             raise HTTPException(409, f"Playbook id '{body['id']}' already exists.")
         books.append(body)
-        pb.save(cfg.log_dir, books)
+        pb.save(_ld(), books)
         return body
 
     @app.delete("/api/playbooks/{pb_id}")
     def delete_playbook(pb_id: str):
         from . import playbooks as pb
-        books = pb.load(cfg.log_dir)
+        books = pb.load(_ld())
         kept = [p for p in books if p.get("id") != pb_id]
         if len(kept) == len(books):
             raise HTTPException(404, "Playbook not found.")
-        pb.save(cfg.log_dir, kept)
+        pb.save(_ld(), kept)
         return {"deleted": pb_id}
 
     @app.post("/api/playbooks/reset")
     def reset_playbooks():
         from . import playbooks as pb
-        return pb.reset(cfg.log_dir)
+        return pb.reset(_ld())
 
     @app.post("/api/playbooks/{pb_id}/run")
     def run_playbook(pb_id: str, body: dict):
@@ -216,7 +272,7 @@ def create_app(config_path: str = "config.yaml"):
         target = (body or {}).get("target", "").strip()
         if not target:
             raise HTTPException(400, "A target is required to run a playbook.")
-        book = next((p for p in pb.load(cfg.log_dir) if p.get("id") == pb_id), None)
+        book = next((p for p in pb.load(_ld()) if p.get("id") == pb_id), None)
         if not book:
             raise HTTPException(404, "Playbook not found.")
         tool = (book.get("run") or {}).get("tool", "").strip()
@@ -227,8 +283,8 @@ def create_app(config_path: str = "config.yaml"):
             raise HTTPException(403, f"'{target}' is on the deny list.")
         if not sc.is_allowed(target):
             sc.add_allow(target)
-        argv = ["run", "--tool", tool, "--set", f"target={target}"]
-        job_id = jobs.start(argv, label=f"{pb_id} {target}", log_dir=cfg.log_dir)
+        argv = _session_args() + ["run", "--tool", tool, "--set", f"target={target}"]
+        job_id = jobs.start(argv, label=f"{pb_id} {target}", log_dir=_ld())
         return {"id": job_id, "status": "running", "tool": tool, "args": argv}
 
     @app.post("/api/facts")
@@ -271,7 +327,7 @@ def create_app(config_path: str = "config.yaml"):
     # ---- jobs ------------------------------------------------------------- #
     @app.get("/api/jobs")
     def list_jobs():
-        return jobs.list_jobs(cfg.log_dir)
+        return jobs.list_jobs(_ld())
 
     @app.post("/api/jobs/agent")
     def launch_agent(body: AgentLaunch):
@@ -289,8 +345,9 @@ def create_app(config_path: str = "config.yaml"):
                 sc.add_allow(target)
 
         # Build the detached `autopwn agent ...` argv, carrying creds + metadata
-        # so authenticated / assumed-breach runs work from step one.
-        argv = ["agent"]
+        # so authenticated / assumed-breach runs work from step one. The session
+        # overrides make the run read/write the currently-selected session.
+        argv = _session_args() + ["agent"]
         pairs = [
             ("--target", target), ("--objective", objective),
             ("--username", body.username), ("--password", body.password),
@@ -304,12 +361,12 @@ def create_app(config_path: str = "config.yaml"):
                 argv += [flag, val]
 
         job_id = jobs.start(argv, label=f"agent {target or objective[:24]}",
-                            log_dir=cfg.log_dir)
+                            log_dir=_ld())
         return {"id": job_id, "status": "running", "args": argv}
 
     @app.post("/api/jobs/{job_id}/stop")
     def stop_job(job_id: str):
-        ok = jobs.stop(job_id, cfg.log_dir)
+        ok = jobs.stop(job_id, _ld())
         if not ok:
             raise HTTPException(404, "Job not running or not found.")
         return {"id": job_id, "status": "stopped"}
@@ -350,10 +407,10 @@ def create_app(config_path: str = "config.yaml"):
                         yield f"data: {line}\n\n"
                 else:
                     idle += 1
-                running = jobs.is_running(job_id, cfg.log_dir)
+                running = jobs.is_running(job_id, _ld())
                 if not running and not chunk and idle >= 2:
                     status = "finished"
-                    meta = _job_meta(cfg.log_dir, job_id)
+                    meta = _job_meta(_ld(), job_id)
                     if meta:
                         status = meta.get("status", "finished")
                     yield f"event: end\ndata: {status}\n\n"
@@ -455,6 +512,7 @@ def create_app(config_path: str = "config.yaml"):
     @app.get("/api/reports")
     def list_reports():
         out = []
+        log_dir = Path(_ld())
         if log_dir.exists():
             for p in sorted(log_dir.glob("session-*"), reverse=True):
                 if p.suffix in _REPORT_SUFFIXES:
@@ -465,7 +523,8 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.get("/reports/{name}")
     def get_report(name: str, download: bool = False):
-        # prevent path traversal: only serve files directly in log_dir
+        # prevent path traversal: only serve files directly in the session dir
+        log_dir = Path(_ld())
         p = (log_dir / name).resolve()
         if p.parent != log_dir.resolve() or not p.exists():
             raise HTTPException(404, "Report not found.")
