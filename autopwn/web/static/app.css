@@ -194,6 +194,14 @@ code, pre, kbd, samp, .font-monospace { font-family: var(--ap-font) !important; 
 .console-log .l-warn   { color: #ff7b7b; }
 .console-log .l-final  { color: #fff; font-weight: 600; }
 
+/* ---- findings ------------------------------------------------------- */
+.finding-item { padding: .8rem 0; border-bottom: 1px solid var(--bs-border-color); }
+.finding-item:last-child { border-bottom: 0; }
+.finding-ev { background: #0b0e11; color: #d6d9dc; border-radius: .4rem;
+  padding: .6rem .8rem; margin: .35rem 0 0; font-size: .78rem; max-height: 240px;
+  overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+
 /* ---- playbooks ------------------------------------------------------ */
 .pb-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .pb-section-label { text-transform: uppercase; letter-spacing: .04em;

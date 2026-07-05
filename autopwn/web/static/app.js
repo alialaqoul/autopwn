@@ -18,15 +18,16 @@ async function api(path, opts) {
 
 /* ---- view switching --------------------------------------------------- */
 const TITLES = { dashboard: "Dashboard", launch: "Launch Assessment",
-  playbooks: "Playbooks", tools: "Tools", jobs: "Jobs", reports: "Reports",
-  scope: "Scope & Vars" };
+  findings: "Findings", playbooks: "Playbooks", tools: "Tools", jobs: "Jobs",
+  reports: "Reports", scope: "Scope & Vars" };
 
 function show(view) {
   $$("#mainNav .ap-nav-link").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   $$("section[data-panel]").forEach(s => (s.hidden = s.dataset.panel !== view));
   $("#viewTitle").textContent = TITLES[view] || view;
-  const loaders = { dashboard: loadDashboard, playbooks: loadPlaybooks,
-    tools: loadTools, jobs: loadJobs, reports: loadReports, scope: loadScope };
+  const loaders = { dashboard: loadDashboard, findings: loadFindings,
+    playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
+    reports: loadReports, scope: loadScope };
   loaders[view]?.();
 }
 $$("#mainNav .ap-nav-link").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
@@ -58,7 +59,7 @@ async function loadDashboard() {
     const uniqHosts = [...new Set(s.hosts.map(h => h.host))];
     return `<tr><td>${esc(s.service)}</td>
     <td>${s.ports.map(p => `<span class="badge text-bg-secondary badge-port">${p}</span>`).join(" ")}</td>
-    <td class="small text-secondary">${uniqHosts.map(esc).join(", ")} <span class="text-secondary">(${uniqHosts.length})</span></td></tr>`;
+    <td class="small text-secondary">${uniqHosts.map(esc).join(", ")}</td></tr>`;
   }).join("")
     : `<tr><td colspan="3" class="text-center text-secondary py-3">No services discovered.</td></tr>`;
 }
@@ -364,6 +365,56 @@ async function pbReset() {
   if (!confirm("Restore the default playbooks? Your edits will be replaced.")) return;
   try { await api("/api/playbooks/reset", { method: "POST" }); } catch (e) { return alert(e.message); }
   loadPlaybooks();
+}
+
+/* ---- findings / results ----------------------------------------------- */
+const SEV_CLASS = { Critical: "text-bg-dark", High: "text-bg-danger",
+  Medium: "text-bg-warning", Low: "text-bg-secondary", Info: "text-bg-light" };
+const SEV_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
+
+async function loadFindings() {
+  let d;
+  try { d = await api("/api/findings"); } catch { return; }
+
+  // credentials
+  $("#credCount").textContent = d.credentials.length;
+  $("#credsTable tbody").innerHTML = d.credentials.length ? d.credentials.map(c => {
+    const secret = c.password ? esc(c.password) : "(hash)";
+    return `<tr><td class="font-monospace">${esc(c.username)}</td>
+      <td class="font-monospace">${secret}</td><td class="small">${esc(c.domain || "")}</td>
+      <td><span class="badge text-bg-light text-secondary border">${esc(c.note || "")}</span></td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="text-center text-secondary py-3">No credentials recovered yet.</td></tr>`;
+
+  // users
+  $("#userCount").textContent = d.users.length;
+  $("#usersBox").innerHTML = d.users.length
+    ? d.users.map(u => `<span class="chip font-monospace">${esc(u)}</span>`).join("")
+    : `<div class="text-secondary small">No usernames enumerated yet.</div>`;
+
+  // findings
+  const fs = [...d.findings].sort((a, b) => (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9));
+  $("#findingCount").textContent = fs.length;
+  $("#findingsList").innerHTML = fs.length ? fs.map(f => {
+    const sev = `<span class="badge ${SEV_CLASS[f.severity] || "text-bg-secondary"}">${esc(f.severity)}</span>`;
+    const hosts = (f.hosts || []).map(h => `<span class="badge text-bg-light text-secondary border font-monospace">${esc(h)}</span>`).join(" ");
+    const ev = f.evidence_out ? `<div class="pb-section-label mt-2">Evidence${f.evidence_cmd ? " — <code>" + esc(f.evidence_cmd) + "</code>" : ""}</div>
+      <pre class="finding-ev">${esc(f.evidence_out)}</pre>` : "";
+    return `<div class="finding-item">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div class="fw-semibold">${esc(f.title)}</div>
+        <div class="text-nowrap">${sev}${f.cvss ? ` <span class="badge text-bg-light text-secondary border">CVSS ${esc(f.cvss)}</span>` : ""}</div>
+      </div>
+      ${hosts ? `<div class="mt-1">${hosts}</div>` : ""}
+      <div class="text-secondary small mt-1">${esc(f.description || "")}</div>
+      ${f.impact ? `<div class="small mt-1"><b>Impact:</b> ${esc(f.impact)}</div>` : ""}
+      ${f.recommendation ? `<div class="small mt-1"><b>Recommendation:</b> ${esc(f.recommendation)}</div>` : ""}
+      ${ev}
+    </div>`;
+  }).join("") : `<div class="text-secondary py-3 text-center">No findings yet — run an assessment.</div>`;
+
+  $("#findingsSource").textContent = d.transcript
+    ? `Derived from the latest run (${d.transcript}) and the results store.`
+    : "Derived from the results store (no run transcript in this session yet).";
 }
 
 /* ---- tools (actions) -------------------------------------------------- */

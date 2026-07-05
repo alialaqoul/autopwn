@@ -38,6 +38,9 @@
       <button class="ap-nav-link" data-view="launch">
         <svg class="ico" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></svg>
         Launch Assessment</button>
+      <button class="ap-nav-link" data-view="findings">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+        Findings</button>
       <button class="ap-nav-link" data-view="playbooks">
         <svg class="ico" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
         Playbooks</button>
@@ -135,6 +138,40 @@
             </div>
           </div>
         </div></div>
+      </section>
+
+      <!-- FINDINGS -->
+      <section data-panel="findings" hidden>
+        <div class="row g-3 mb-3">
+          <div class="col-lg-7">
+            <div class="card h-100">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Recovered credentials</span>
+                <span class="badge text-bg-secondary" id="credCount">0</span>
+              </div>
+              <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0" id="credsTable">
+                <thead><tr><th>Username</th><th>Secret</th><th>Domain</th><th>Source</th></tr></thead>
+                <tbody></tbody></table></div></div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="card h-100">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Enumerated users</span>
+                <span class="badge text-bg-secondary" id="userCount">0</span>
+              </div>
+              <div class="card-body" id="usersBox"></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Security findings</span>
+            <span class="badge text-bg-secondary" id="findingCount">0</span>
+          </div>
+          <div class="card-body" id="findingsList"></div>
+        </div>
+        <p class="text-secondary small mt-2" id="findingsSource"></p>
       </section>
 
       <!-- PLAYBOOKS -->

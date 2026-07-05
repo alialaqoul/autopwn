@@ -188,7 +188,10 @@ def host_summary() -> list[dict]:
                  if p.get("state") == "open"]
         out.append({
             "host": host,
-            "hostname": entry.get("hostname") or "",
+            # top-level hostname (from scans that resolve it) or the AD/NetBIOS
+            # name harvested from tool output into the host's facts.
+            "hostname": (entry.get("hostname")
+                         or entry.get("facts", {}).get("hostname") or ""),
             "open_ports": sorted(p["port"] for p in ports),
             "services": sorted({p["service"] for p in ports if p["service"]}),
         })

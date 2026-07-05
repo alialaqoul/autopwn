@@ -17,6 +17,7 @@ resolve and be mistaken for query params.
 """
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -32,6 +33,48 @@ STATIC_DIR = WEB_DIR / "static"
 
 # Report artifacts the agent auto-exports next to each session transcript.
 _REPORT_SUFFIXES = (".html", ".docx", ".md")
+
+# Result extraction from a run transcript.
+_CRED_RE = re.compile(r"\[\+\]\s*([^\\\s]+)\\([^:\s]+):([^\s(]+)")
+_CHAIN_CRED_RE = re.compile(r"valid credential:\s*([^\s:]+):(\S+?)(?:\s|$)", re.I)
+_KERBRUTE_RE = re.compile(r"VALID USERNAME:\s+([^@\s]+)@")
+_LDAP_USER_RE = re.compile(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}")
+_RID_USER_RE = re.compile(r"\\([^\\\s]+)\s+\(SidTypeUser\)", re.I)
+
+
+def _results_from_transcript(transcript: list, domain: str = "") -> tuple[list, list]:
+    """Pull the credentials and usernames a run discovered from tool output."""
+    creds: dict = {}   # (user,domain) -> {username,password,domain,note}
+    users: set = set()
+    for e in transcript or []:
+        out = e.get("output") or e.get("raw_output") or ""
+        if not out:
+            continue
+        for m in _CRED_RE.finditer(out):
+            dom, u, pw = m.group(1), m.group(2), m.group(3)
+            if u.lower() == "guest" or u.endswith("$"):
+                continue
+            creds[(u.lower(), dom.lower())] = {"username": u, "password": pw,
+                                               "domain": dom, "note": "netexec"}
+            users.add(u)
+        for m in _CHAIN_CRED_RE.finditer(out):   # ad_kill_chain summary lines
+            u, pw = m.group(1), m.group(2)
+            if u.lower() == "guest" or u.endswith("$"):
+                continue
+            creds.setdefault((u.lower(), domain.lower()),
+                             {"username": u, "password": pw, "domain": domain,
+                              "note": "kill-chain"})
+            users.add(u)
+        for m in _KERBRUTE_RE.finditer(out):
+            users.add(m.group(1))
+        for m in _LDAP_USER_RE.finditer(out):
+            u = m.group(1)
+            if u.lower() not in ("username", "guest", "krbtgt") and not u.endswith("$"):
+                users.add(u)
+        for m in _RID_USER_RE.finditer(out):
+            if not m.group(1).endswith("$"):
+                users.add(m.group(1))
+    return list(creds.values()), sorted(users)
 
 
 # --------------------------------------------------------------------------- #
@@ -420,6 +463,34 @@ def create_app(config_path: str = "config.yaml"):
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
                                           "X-Accel-Buffering": "no"})
+
+    # ---- findings / results ---------------------------------------------- #
+    @app.get("/api/findings")
+    def get_findings():
+        """Surface what runs discovered: security findings, recovered credentials,
+        and enumerated usernames — built from the store plus the latest transcript."""
+        from ..analysis import build_findings
+        ld = Path(_ld())
+        hosts = store.all_hosts()
+        facts = store.facts()
+        sess = sorted(ld.glob("session-*.json"))
+        transcript = []
+        if sess:
+            try:
+                transcript = json.loads(sess[-1].read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                transcript = []
+        findings = build_findings(hosts, facts, transcript)
+        creds, users = _results_from_transcript(transcript, facts.get("domain", ""))
+        # a credential seeded/captured into facts counts too
+        if facts.get("username") and (facts.get("password") or facts.get("nthash")):
+            key = facts["username"].lower()
+            if not any(c["username"].lower() == key for c in creds):
+                creds.insert(0, {"username": facts["username"],
+                                 "password": facts.get("password", ""),
+                                 "domain": facts.get("domain", ""), "note": "facts"})
+        return {"findings": findings, "credentials": creds, "users": users,
+                "transcript": sess[-1].name if sess else None}
 
     # ---- tools (actions) -------------------------------------------------- #
     def _introspect_tool(tool, custom_names) -> dict:
