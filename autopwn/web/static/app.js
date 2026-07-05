@@ -412,7 +412,10 @@ async function pbReset() {
 async function loadConsole() {
   try {
     const hosts = await api("/api/hosts");
-    $("#dlHosts").innerHTML = hosts.map(h => `<option value="${esc(h.host)}">${esc(h.hostname || "")}</option>`).join("");
+    const sel = $("#ex_host"), keep = sel.value;
+    sel.innerHTML = `<option value="">— select a discovered host —</option>` +
+      hosts.map(h => `<option value="${esc(h.host)}">${esc(h.host)}${h.hostname ? " (" + esc(h.hostname) + ")" : ""}</option>`).join("");
+    if (keep) sel.value = keep;
   } catch { }
   loadListeners();
 }

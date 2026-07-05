@@ -213,13 +213,12 @@
               <div class="card-body">
                 <div class="row g-2 mb-2">
                   <div class="col-md-6"><label class="pb-lbl">Target host</label>
-                    <input class="form-control form-control-sm" id="ex_host" list="dlHosts" placeholder="192.168.140.11"></div>
+                    <select class="form-select form-select-sm" id="ex_host"><option value="">— select a discovered host —</option></select></div>
                   <div class="col-md-3"><label class="pb-lbl">Protocol</label>
                     <select class="form-select form-select-sm" id="ex_proto"><option value="smb">SMB (admin exec)</option><option value="winrm">WinRM</option></select></div>
                   <div class="col-md-3"><label class="pb-lbl">Auth</label>
                     <select class="form-select form-select-sm" id="ex_auth"><option value="password">Password</option><option value="hash">Pass-the-hash</option></select></div>
                 </div>
-                <datalist id="dlHosts"></datalist>
                 <div class="row g-2 mb-2">
                   <div class="col-md-4"><label class="pb-lbl">Username</label>
                     <input class="form-control form-control-sm" id="ex_user" placeholder="administrator"></div>
