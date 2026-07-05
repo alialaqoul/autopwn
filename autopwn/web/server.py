@@ -87,8 +87,9 @@ def create_app(config_path: str = "config.yaml"):
         custom_tools.configure(s["dir"])
         from ..llm import calllog
         calllog.configure(f"{s['dir']}/ai_calls.jsonl")
-        from . import listeners
+        from . import listeners, shells
         listeners.configure(s["dir"])
+        shells.configure(s["dir"])
         return s["dir"]
 
     def _scope() -> Scope:
@@ -676,6 +677,67 @@ def create_app(config_path: str = "config.yaml"):
         r = tool.run(ctx, **kw)
         out = r.raw_output or r.summary or ""
         return {"ok": r.ok, "pwned": "Pwn3d!" in out, "protocol": proto, "output": out}
+
+    @app.post("/api/shells")
+    def start_shell(body: dict):
+        """Open a persistent interactive session (evil-winrm / wmiexec) with a
+        compromised credential — stateful, so cd/env persist."""
+        from . import shells
+        host = (body.get("host") or "").strip()
+        username = (body.get("username") or "").strip()
+        if not host or not username:
+            raise HTTPException(400, "host and username are required.")
+        sc = _scope()
+        if sc.is_denied(host):
+            raise HTTPException(403, f"'{host}' is on the deny list.")
+        if not sc.is_allowed(host):
+            sc.add_allow(host)
+        return shells.start(host, "winrm" if body.get("protocol") == "winrm" else "smb",
+                            username, body.get("secret") or "",
+                            "hash" if body.get("auth") == "hash" else "password",
+                            (body.get("domain") or "").strip())
+
+    @app.post("/api/shells/{sid}/send")
+    def send_shell(sid: str, body: dict):
+        from . import shells
+        if not shells.send(sid, body.get("command", "")):
+            raise HTTPException(404, "Session not found.")
+        return {"ok": True}
+
+    @app.post("/api/shells/{sid}/stop")
+    def stop_shell(sid: str):
+        from . import shells
+        shells.stop(sid)
+        return {"ok": True}
+
+    @app.get("/api/shells/{sid}/stream")
+    async def shell_stream(sid: str, request: Request):
+        from . import shells
+        lp = shells.log_path(sid)
+
+        async def gen():
+            pos = 0
+            for _ in range(60):
+                if lp.exists():
+                    break
+                await asyncio.sleep(0.1)
+            while True:
+                if await request.is_disconnected():
+                    break
+                chunk = ""
+                if lp.exists():
+                    with open(lp, "r", encoding="utf-8", errors="replace") as f:
+                        f.seek(pos)
+                        chunk = f.read()
+                        pos = f.tell()
+                if chunk:
+                    for line in chunk.split("\n"):
+                        yield f"data: {line}\n\n"
+                await asyncio.sleep(0.4)
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
 
     @app.get("/api/listeners")
     def get_listeners():

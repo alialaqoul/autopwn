@@ -444,74 +444,60 @@ function execSetStatus(text, cls) {
 function execFields() {
   return ["ex_host", "ex_proto", "ex_auth", "ex_user", "ex_secret", "ex_domain"];
 }
+let _shellId = null, _shellES = null;
+const _ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;   // strip terminal colour/control codes
+
 async function execConnect() {
   const host = $("#ex_host").value.trim();
-  if (!host) { alert("Set a target host first."); return; }
-  const btn = $("#ex_connect");
+  if (!host) { alert("Select a target host first."); return; }
+  const btn = $("#ex_connect"), out = $("#ex_out"), term = $("#exTerm");
   btn.disabled = true; execSetStatus("connecting…", "text-bg-secondary");
-  const out = $("#ex_out");
-  out.insertAdjacentHTML("beforeend", `<span class="l-run">[*] connecting to ${esc(host)} as ${esc($("#ex_user").value || "?")}…</span>\n`);
+  out.insertAdjacentHTML("beforeend", `<span class="l-run">[*] opening ${$("#ex_proto").value.toUpperCase()} session to ${esc(host)} as ${esc($("#ex_user").value || "?")}…</span>\n`);
   try {
-    const r = await api("/api/exec", {
+    const r = await api("/api/shells", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ host, command: "whoami", protocol: $("#ex_proto").value,
-        auth: $("#ex_auth").value, username: $("#ex_user").value.trim(),
-        secret: $("#ex_secret").value, domain: $("#ex_domain").value.trim() }),
+      body: JSON.stringify({ host, protocol: $("#ex_proto").value, auth: $("#ex_auth").value,
+        username: $("#ex_user").value.trim(), secret: $("#ex_secret").value,
+        domain: $("#ex_domain").value.trim() }),
     });
-    const authed = /\[\+\]/.test(r.output || "");
-    if (!authed) {
-      out.insertAdjacentHTML("beforeend", `<span class="l-warn">[!] authentication failed\n${esc(r.output || "")}</span>\n`);
-      execSetStatus("auth failed", "text-bg-danger"); btn.disabled = false; return;
-    }
-    _execConnected = true;
-    execSetStatus(r.pwned ? "connected · admin (Pwn3d!)" : "connected · no admin", r.pwned ? "text-bg-success" : "text-bg-warning");
-    out.insertAdjacentHTML("beforeend", `<span class="l-result">[+] session established${r.pwned ? " (local admin — SMB exec works)" : " (not admin — SMB -x won't run; try WinRM)"}</span>\n`);
+    _shellId = r.id; _execConnected = true;
+    execSetStatus("connected", "text-bg-success");
     execFields().forEach(id => $("#" + id).disabled = true);
     $("#ex_disconnect").disabled = false;
-    $("#ex_cmd").disabled = false; $("#ex_cmd").placeholder = "command… (Enter to run)";
-    $("#ex_cmd").focus();
+    const cmd = $("#ex_cmd"); cmd.disabled = false; cmd.placeholder = "type into the session (Enter)"; cmd.focus();
+    if (_shellES) _shellES.close();
+    const es = new EventSource(`/api/shells/${_shellId}/stream`); _shellES = es;
+    es.onmessage = (ev) => { out.insertAdjacentHTML("beforeend", esc(ev.data.replace(_ANSI, "")) + "\n"); term.scrollTop = term.scrollHeight; };
+    es.onerror = () => { if (_execConnected) execSetStatus("stream lost", "text-bg-warning"); };
   } catch (e) {
     out.insertAdjacentHTML("beforeend", `<span class="l-warn">[!] ${esc(e.message)}</span>\n`);
     execSetStatus("error", "text-bg-danger"); btn.disabled = false;
   } finally {
-    $("#exTerm").scrollTop = $("#exTerm").scrollHeight;
+    term.scrollTop = term.scrollHeight;
   }
 }
-function execDisconnect() {
-  _execConnected = false;
+
+async function execDisconnect() {
+  if (_shellES) { _shellES.close(); _shellES = null; }
+  if (_shellId) { try { await api(`/api/shells/${_shellId}/stop`, { method: "POST" }); } catch { } }
+  _shellId = null; _execConnected = false;
   execSetStatus("disconnected", "text-bg-secondary");
   $("#ex_connect").disabled = false; $("#ex_disconnect").disabled = true;
   execFields().forEach(id => $("#" + id).disabled = false);
   const c = $("#ex_cmd"); c.disabled = true; c.value = ""; c.placeholder = "Connect to start a session…";
-  $("#ex_out").insertAdjacentHTML("beforeend", `<span class="text-secondary">[*] disconnected</span>\n`);
+  $("#ex_out").insertAdjacentHTML("beforeend", `<span class="text-secondary">[*] session closed</span>\n`);
 }
 
-let _execBusy = false;
-async function execRun() {
-  const host = $("#ex_host").value.trim(), cmd = $("#ex_cmd").value.trim();
-  if (!_execConnected || _execBusy) return;
-  if (!host) { alert("Set a target host first."); return; }
-  if (!cmd) return;
-  const out = $("#ex_out"), term = $("#exTerm"), input = $("#ex_cmd");
-  out.insertAdjacentHTML("beforeend", `<span class="l-run">$ ${esc(cmd)}</span>\n`);
-  input.value = ""; input.placeholder = "running…"; _execBusy = true;
-  term.scrollTop = term.scrollHeight;
-  try {
-    const r = await api("/api/exec", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ host, command: cmd, protocol: $("#ex_proto").value,
-        auth: $("#ex_auth").value, username: $("#ex_user").value.trim(),
-        secret: $("#ex_secret").value, domain: $("#ex_domain").value.trim() }),
-    });
-    const cls = r.pwned ? "l-result" : (r.ok ? "" : "l-warn");
-    out.insertAdjacentHTML("beforeend", `<span class="${cls}">${esc(r.output || "(no output)")}</span>\n`);
-  } catch (e) {
-    out.insertAdjacentHTML("beforeend", `<span class="l-warn">error: ${esc(e.message)}</span>\n`);
-  } finally {
-    _execBusy = false; input.placeholder = "command… (Enter to run)";
-    term.scrollTop = term.scrollHeight; input.focus();
-  }
+async function execRun() {   // send a command into the persistent session
+  const input = $("#ex_cmd"), cmd = input.value;
+  if (!_execConnected || !_shellId || !cmd) return;
+  input.value = "";
+  try { await api(`/api/shells/${_shellId}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: cmd }) }); }
+  catch (e) { alert(e.message); }
+  input.focus();
 }
+
+function execClear() { $("#ex_out").innerHTML = ""; }
 
 let _lstES = null, _lstActive = null;
 async function loadListeners() {
@@ -1186,6 +1172,7 @@ $("#exTerm").addEventListener("mouseup", () => { if (!getSelection().toString() 
 $("#ex_auth").addEventListener("change", updateSecretLabel);
 $("#ex_connect").addEventListener("click", execConnect);
 $("#ex_disconnect").addEventListener("click", execDisconnect);
+$("#ex_clear").addEventListener("click", execClear);
 $("#listenerForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const port = new FormData(e.target).get("port");
