@@ -103,22 +103,31 @@ def assess_host(host: str, entry: dict) -> dict:
 def _evidence(transcript, tool_names, hosts=None):
     """Command + output of a matching tool run.
 
-    Prefer a run that actually targeted one of the finding's hosts (so the
-    evidence isn't, say, a loopback probe); fall back to the first match.
+    `tool_names` is a PREFERENCE order — earlier tools win (e.g. prefer an
+    anonymous share listing over a plain banner). Within a tool, prefer a run
+    that actually targeted one of the finding's hosts (so the evidence isn't,
+    say, a loopback probe). Falls back to the first match overall.
     """
     hosts = hosts or []
-    fallback = None
-    for e in transcript or []:
-        if e.get("kind") != "tool_result" or e.get("name") not in tool_names:
-            continue
-        cmd = e.get("command") or f"{e.get('name')} {e.get('args', {})}"
-        out = (e.get("output") or e.get("summary") or "").strip()
-        ctx = f"{cmd} {e.get('args', {})} {out}"
-        if hosts and any(h in ctx for h in hosts):
-            return cmd, out[:1500]
-        if fallback is None:
-            fallback = (cmd, out[:1500])
-    return fallback or ("", "")
+    overall = None
+    for tool in tool_names:
+        any_match = None
+        for e in transcript or []:
+            if e.get("kind") != "tool_result" or e.get("name") != tool:
+                continue
+            cmd = e.get("command") or f"{e.get('name')} {e.get('args', {})}"
+            out = (e.get("output") or e.get("summary") or "").strip()
+            blob = f"{cmd} {e.get('args', {})} {out}"
+            pick = (cmd, out[:1500])
+            if hosts and any(h in blob for h in hosts):
+                return pick                # best: this tool, on a finding host
+            if any_match is None:
+                any_match = pick
+        if any_match:
+            return any_match               # this preferred tool, any host
+        if overall is None:
+            overall = None
+    return overall or ("", "")
 
 
 # Generic finding rules. Each: predicate over a host's open ports + facts =>
@@ -154,13 +163,17 @@ def build_findings(hosts: dict, facts: dict, transcript=None) -> list[dict]:
         dict(title="SMB Null / Anonymous Authentication Permitted", severity="Medium",
              cvss="5.3",
              pred=lambda h, e, p: host_facts(e).get("smb_nullauth") == "True" and 445 in p,
-             desc="The host accepts an anonymous (null) SMB session.",
-             impact="Depending on configuration, anonymous users may enumerate "
-                    "shares, users, or policy — useful reconnaissance for an "
-                    "unauthenticated attacker.",
+             desc="The host accepts an anonymous (null) SMB session. The evidence "
+                  "below shows what an unauthenticated attacker can enumerate over "
+                  "that session (e.g. shares) — confirming real, not just theoretical, "
+                  "exposure.",
+             impact="Anonymous users can enumerate shares, and depending on "
+                    "configuration also users (RID cycling) and password policy — "
+                    "valuable reconnaissance for an unauthenticated attacker and a "
+                    "starting point for further access.",
              rec="Restrict anonymous access (RestrictNullSessAccess=1, "
                  "RestrictAnonymous=1); review share and RID enumeration exposure.",
-             tools=("netexec_smb", "smbclient_shares")),
+             tools=("smbclient_shares", "netexec_smb")),
         dict(title="WSUS Served Over HTTP", severity="High", cvss="8.1",
              pred=lambda h, e, p: 8530 in p,
              desc="A WSUS update service is reachable over cleartext HTTP (8530).",

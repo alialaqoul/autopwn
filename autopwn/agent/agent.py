@@ -434,6 +434,28 @@ class Agent:
                 except Exception:
                     pass
 
+        # For hosts that allow an anonymous (null) SMB session, demonstrate the
+        # impact: list the shares a null session can actually see. This gives the
+        # "SMB Null Auth" finding concrete evidence (accessible shares) instead of
+        # just the banner flag.
+        null_hosts = [h for h, e in store.all_hosts().items()
+                      if e.get("facts", {}).get("smb_nullauth") == "True"]
+        if null_hosts:
+            share_tool = ("smbclient_shares" if self.registry.get("smbclient_shares")
+                          else "netexec_smb" if self.registry.get("netexec_smb") else None)
+            if share_tool:
+                self.report("action", f"priming: anonymous share enumeration on "
+                            f"{len(null_hosts)} null-auth host(s)")
+                for h in null_hosts[:16]:
+                    try:
+                        if share_tool == "smbclient_shares":
+                            self._execute(ctx, "smbclient_shares", {"target": h})
+                        else:
+                            self._execute(ctx, "netexec_smb",
+                                          {"target": h, "enumerate": "shares"})
+                    except Exception:
+                        pass
+
         # Build the observation from whatever is now in the store for the target.
         e2 = store.all_hosts().get(target)
         if e2 and any(p.get("state") == "open" for p in e2.get("ports", {}).values()):
