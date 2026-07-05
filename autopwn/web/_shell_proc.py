@@ -2,10 +2,10 @@
 # Author: Ali Alaqoul <alialaqoul@gmail.com>
 """Persistent interactive-session wrapper (authorized testing only).
 
-Spawns a real interactive client (evil-winrm / impacket-wmiexec), captures its
-output to a log, and feeds it commands appended to a .cmd file — so the web
-console gets a stateful shell (cd, env and drive changes persist), unlike a
-stateless per-command exec. argv: <client-argv-json> <logfile> <cmdfile>.
+Runs a real interactive client (evil-winrm / impacket-wmiexec), captures its
+output to a log, and feeds it commands appended to a .cmd file — giving the web
+console a stateful shell (cd/env persist), unlike a stateless per-command exec.
+argv: <client-argv-json> <logfile> <cmdfile>.
 """
 import json
 import os
@@ -26,9 +26,13 @@ def main():
     argv = json.loads(sys.argv[1])
     logf, cmdf = sys.argv[2], sys.argv[3]
     _log(logf, f"[*] opening session: {argv[0]} → {argv[-1] if argv else ''}\n")
+    env = dict(os.environ, TERM="dumb")   # discourage colour/interactive prompts
     try:
         p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, bufsize=1, text=True)
+                             stderr=subprocess.STDOUT, bufsize=1, text=True, env=env)
+    except FileNotFoundError as e:
+        _log(logf, f"[!] client not found: {e}\n")
+        return 1
     except OSError as e:
         _log(logf, f"[!] cannot start client: {e}\n")
         return 1

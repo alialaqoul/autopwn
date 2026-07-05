@@ -445,7 +445,16 @@ function execFields() {
   return ["ex_host", "ex_proto", "ex_auth", "ex_user", "ex_secret", "ex_domain"];
 }
 let _shellId = null, _shellES = null;
-const _ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;   // strip terminal colour/control codes
+// strip terminal control/colour codes and evil-winrm noise; collapse repeated prompts
+function cleanShell(line) {
+  let s = line
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")   // OSC
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")               // CSI (colours, cursor)
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");        // stray control chars
+  // keep only the last of several repeated "*Evil-WinRM* PS …>" prompts on a line
+  s = s.replace(/(?:\*Evil-WinRM\*\s+PS\s+[^>\n]*>\s*)+(?=\*Evil-WinRM\*\s+PS)/g, "");
+  return s.replace(/\s+$/, "");
+}
 
 async function execConnect() {
   const host = $("#ex_host").value.trim();
@@ -467,7 +476,7 @@ async function execConnect() {
     const cmd = $("#ex_cmd"); cmd.disabled = false; cmd.placeholder = "type into the session (Enter)"; cmd.focus();
     if (_shellES) _shellES.close();
     const es = new EventSource(`/api/shells/${_shellId}/stream`); _shellES = es;
-    es.onmessage = (ev) => { out.insertAdjacentHTML("beforeend", esc(ev.data.replace(_ANSI, "")) + "\n"); term.scrollTop = term.scrollHeight; };
+    es.onmessage = (ev) => { out.insertAdjacentHTML("beforeend", esc(cleanShell(ev.data)) + "\n"); term.scrollTop = term.scrollHeight; };
     es.onerror = () => { if (_execConnected) execSetStatus("stream lost", "text-bg-warning"); };
   } catch (e) {
     out.insertAdjacentHTML("beforeend", `<span class="l-warn">[!] ${esc(e.message)}</span>\n`);
