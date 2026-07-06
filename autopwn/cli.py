@@ -999,18 +999,35 @@ def cmd_autorun(args) -> int:
         if {80, 8080, 8000} & ports:
             _run("http_probe", url=f"http://{host}")
 
-    # 3) Run every playbook whose match fires and that has a runnable macro tool.
+    # 3) Run every playbook whose match fires — either a built-in tool SEQUENCE
+    #    (the AD kill chain and friends) or a single macro tool.
+    from .sequence import run_sequence
+
+    def _record_seq(name, r):
+        transcript.append({"kind": "tool_result", "name": name,
+                           "command": (getattr(r, "data", None) or {}).get("command", name),
+                           "ok": getattr(r, "ok", False),
+                           "output": getattr(r, "raw_output", "") or getattr(r, "summary", "")})
+        _save()
+
     hosts = _store.all_hosts()
     ran = 0
     for pb in pb_mod.load(cfg.log_dir):
-        tool_name = (pb.get("run") or {}).get("tool", "").strip()
-        if not tool_name:
-            continue
-        tool = registry.get(tool_name)
-        if tool is None:
-            continue
+        run = pb.get("run") or {}
+        sequence = run.get("sequence") or []
+        tool_name = (run.get("tool") or "").strip()
         matched = pb_mod.matching_hosts(pb, hosts)
         for host in matched:
+            if sequence:
+                console.print(f"[cyan]▶ {pb.get('id')} (built-in sequence)[/] on {host}")
+                run_sequence(pb, host, ctx, registry,
+                             lambda k, m: console.print(f"[dim]{m}[/]"),
+                             cfg.log_dir, record=_record_seq)
+                ran += 1
+                continue
+            tool = registry.get(tool_name) if tool_name else None
+            if tool is None:
+                continue
             console.print(f"[cyan]▶ {pb.get('id')} → {tool_name}[/] on {host}")
             kw = autofill(set(tool.parameters.get("properties", {})))
             kw["target"] = host
@@ -1033,6 +1050,94 @@ def cmd_autorun(args) -> int:
     if written:
         console.print("[green]Report:[/] " + ", ".join(str(w) for w in written))
     console.print("[bold green]══ playbook autopilot complete ══[/]")
+    return 0
+
+
+def cmd_playbook(args) -> int:
+    """Run one playbook's built-in tool sequence against a target, streaming
+    each step and saving a transcript so the Findings view picks up the results."""
+    import json as _json
+    from . import playbooks as pb_mod, report, store as _store
+    from .sequence import run_sequence
+    cfg, scope = _load(args)
+    _seed_creds(args)
+    kwargs = _parse_sets(args.set)
+    target = (args.target or kwargs.get("target") or "").strip()
+    if not target:
+        console.print("[red]A target is required (--target or --set target=…).[/]")
+        return 2
+    if not _ensure_in_scope(scope, target):
+        return 2
+
+    book = next((p for p in pb_mod.load(cfg.log_dir) if p.get("id") == args.id), None)
+    if not book:
+        console.print(f"[red]No playbook with id '{args.id}'.[/]")
+        return 1
+    seq = ((book.get("run") or {}).get("sequence")) or []
+    if not seq:
+        console.print(f"[red]Playbook '{args.id}' has no built-in sequence.[/]")
+        return 1
+
+    # Seed any operator-supplied variables (domain, creds) before the run.
+    for k, v in kwargs.items():
+        if k != "target" and v:
+            _store.set_fact(k, v)
+
+    registry = default_registry(cfg.tools)
+    ctx = ToolContext(scope=scope, confirm_active_actions=False)
+    transcript: list = []
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    tpath = Path(cfg.log_dir) / f"session-{ts}.json"
+    tpath.parent.mkdir(parents=True, exist_ok=True)
+
+    def _record(tool_name, r):
+        transcript.append({"kind": "tool_result", "name": tool_name,
+                           "command": (getattr(r, "data", None) or {}).get("command", tool_name),
+                           "ok": getattr(r, "ok", False),
+                           "output": getattr(r, "raw_output", "") or getattr(r, "summary", "")})
+        tpath.write_text(_json.dumps(transcript, indent=2), encoding="utf-8")
+
+    # Stream each step to stdout (the job log the console watches live).
+    def _report(kind, msg):
+        try:
+            console.print(msg if kind in ("head", "done") else f"[dim]{msg}[/]")
+        except Exception:
+            print(msg, flush=True)
+
+    console.print(Panel(f"[bold]Built-in sequence[/] — {book.get('name')}\n{target}",
+                        title="Autopwn", border_style="cyan"))
+    summary = run_sequence(book, target, ctx, registry, _report, cfg.log_dir, record=_record)
+
+    # A consolidated credential/users entry (authoritative "Credential: u:p @ dom"
+    # + "Users (N): …" lines) so extract_results labels creds with the real domain.
+    f = _store.facts()
+    lines = [f"Playbook {args.id} against {target}"]
+    users = []
+    ulist = f.get("userlist")
+    if ulist and Path(ulist).exists():
+        users = [u.strip() for u in Path(ulist).read_text(encoding="utf-8",
+                 errors="ignore").splitlines() if u.strip()]
+    if users:
+        lines.append(f"Users ({len(users)}): " + ", ".join(users))
+    if f.get("username") and f.get("password"):
+        lines.append(f"Credential: {f['username']}:{f['password']} "
+                     f"@ {f.get('domain') or 'unknown'}")
+    transcript.append({"kind": "tool_result", "name": f"playbook:{args.id}",
+                       "command": f"playbook {args.id} {target}", "ok": True,
+                       "output": "\n".join(lines)})
+    tpath.write_text(_json.dumps(transcript, indent=2), encoding="utf-8")
+
+    # Export a report alongside the transcript, like autorun does.
+    from .report import Engagement
+    meta = Engagement(engagement=scope.engagement or "Security assessment",
+                      client="", assessor="", authorized_by=scope.authorized_by or "",
+                      target=target, objective=f"Built-in playbook '{args.id}' vs {target}")
+    model = report.build_model(meta, transcript, _store.all_hosts(), _store.facts(),
+                               f"Built-in sequence '{args.id}' complete.", log_dir=cfg.log_dir)
+    report.export(model, tpath.with_suffix(""), ["html", "md"])
+    console.print(f"[green]Done.[/] {summary.get('ran', 0)} step(s) | "
+                  f"credentials: {len(model.get('credentials', []))} | "
+                  f"users: {len(model.get('users', []))}")
     return 0
 
 
@@ -1254,6 +1359,17 @@ def build_parser() -> argparse.ArgumentParser:
     ar.add_argument("--authorized-by", dest="authorized_by", help="Who authorized it.")
     ar.add_argument("--report-format", default="html,docx,md", help="html,docx,md")
     ar.set_defaults(func=cmd_autorun)
+
+    pbc = sub.add_parser("playbook", help="Run one playbook's built-in tool sequence.")
+    pbc.add_argument("--id", required=True, help="Playbook id (e.g. ad-kill-chain).")
+    pbc.add_argument("--target", help="Target host/IP (or use --set target=…).")
+    pbc.add_argument("--set", action="append", metavar="key=value",
+                     help="Seed a variable, repeatable. e.g. --set domain=corp.local")
+    pbc.add_argument("--username", help="Starting username (assumed-breach).")
+    pbc.add_argument("--password", help="Starting password.")
+    pbc.add_argument("--domain", help="AD domain.")
+    pbc.add_argument("--hash", dest="nt_hash", help="Starting NTLM hash.")
+    pbc.set_defaults(func=cmd_playbook)
 
     a = sub.add_parser("agent", help="Run the AI agent (autopilot with --target).")
     a.add_argument("--target", help="Target host/IP. With no --objective, runs "

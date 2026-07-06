@@ -96,6 +96,40 @@ def _step(n, title, trigger, tool, consumes, produces, detail, nxt="next",
             "next": nxt, "branches": branches or []}
 
 
+# The AD kill chain as a flat sequence of BUILT-IN tools. Each entry names a
+# tool, a lightweight ``when`` trigger (evaluated against the current variables),
+# an optional ``args`` (fixed arguments), and a human ``label``. Autopwn parses
+# each tool's output into variables (userlist / hashfile / username / password /
+# domain) that auto-fill the next step — so this stays as effective as the macro
+# while being transparent and editable.
+AD_KILL_CHAIN_SEQUENCE = [
+    {"tool": "netexec_smb", "when": "start",
+     "label": "Fingerprint + null session (domain, signing)"},
+    {"tool": "netexec_rid_brute", "when": "start",
+     "label": "RID-cycle the domain user list (guest/null)"},
+    {"tool": "kerbrute_userenum", "when": "no userlist",
+     "label": "User-enum fallback (Kerberos pre-auth, no lockout)"},
+    {"tool": "asrep_roast", "when": "have userlist",
+     "label": "AS-REP roast pre-auth-less accounts"},
+    {"tool": "crack_hashes", "when": "have hashes",
+     "label": "Crack AS-REP hashes (john + rockyou)"},
+    {"tool": "netexec_spray", "when": "have userlist", "args": {"userpass": "true"},
+     "label": "Password spray username == password"},
+    {"tool": "netexec_ldap", "when": "have credential", "args": {"action": "--users"},
+     "label": "Authenticated LDAP dump — full user list"},
+    {"tool": "kerberoast", "when": "have credential",
+     "label": "Kerberoast SPN accounts"},
+    {"tool": "crack_hashes", "when": "have hashes",
+     "label": "Crack Kerberoast hashes (john + rockyou)"},
+    {"tool": "spray_cracked", "when": "have password",
+     "label": "Spray the cracked password for reuse"},
+    {"tool": "smb_loot", "when": "have credential",
+     "label": "Loot readable non-default SMB shares"},
+    {"tool": "netexec_smb", "when": "have credential", "args": {"command": "whoami"},
+     "label": "Confirm access / admin (watch for Pwn3d!)"},
+]
+
+
 DEFAULT_PLAYBOOKS = [
     {
         "id": "ad-kill-chain",
@@ -103,7 +137,10 @@ DEFAULT_PLAYBOOKS = [
         "summary": "Guest/RID → spray → AS-REP → Kerberoast → loot → pass-the-hash. "
                    "Re-routes on what each step actually finds.",
         "match": {"any_ports": [88, 389, 445, 636, 3268], "signals": []},
-        "run": {"tool": "ad_kill_chain"},
+        # Runs as a flat, editable SEQUENCE of built-in tools (Autopwn parses the
+        # output of each and feeds the variables into the next). This is the
+        # transparent alternative to the ad_kill_chain macro.
+        "run": {"sequence": AD_KILL_CHAIN_SEQUENCE},
         "steps": [
             _step(1, "Guest / null session + RID cycle", "start",
                   "netexec_smb / netexec_rid_brute", [], ["userlist"],
@@ -274,11 +311,31 @@ def load(log_dir) -> list:
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         if isinstance(data, list) and data:
-            return data
+            return _migrate(log_dir, data)
     except (FileNotFoundError, json.JSONDecodeError):
         pass
     save(log_dir, copy.deepcopy(DEFAULT_PLAYBOOKS))
     return copy.deepcopy(DEFAULT_PLAYBOOKS)
+
+
+def _migrate(log_dir, data: list) -> list:
+    """Upgrade older stored playbooks in place.
+
+    The AD kill chain used to run the ``ad_kill_chain`` macro; it now runs a
+    built-in tool sequence. Give any stored copy that still lacks a sequence the
+    default one so existing installs get the built-in path without a reset.
+    """
+    changed = False
+    for pb in data:
+        if pb.get("id") == "ad-kill-chain":
+            run = pb.setdefault("run", {})
+            if not run.get("sequence"):
+                run["sequence"] = copy.deepcopy(AD_KILL_CHAIN_SEQUENCE)
+                run.pop("tool", None)
+                changed = True
+    if changed:
+        save(log_dir, data)
+    return data
 
 
 def save(log_dir, playbooks: list) -> None:

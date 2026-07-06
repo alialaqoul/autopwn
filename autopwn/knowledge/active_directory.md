@@ -46,9 +46,11 @@ service, phishing) before AD attacks become productive.
 
 ## Step 2b — password spraying (batch, never one-by-one)
 <!-- when: port:445, fact:has_users -->
-The single fastest way to root an AD lab: call `ad_kill_chain` with the DC target
-to run guest -> RID -> spray -> Kerberoast -> crack -> loot -> pass-the-hash end
-to end. Use the individual tools below when you need finer control.
+The single fastest way to root an AD lab: run the **ad-kill-chain playbook**
+against the DC. It executes a built-in tool sequence — guest -> RID -> spray ->
+AS-REP/Kerberoast -> crack -> loot -> pass-the-hash — parsing each tool's output
+into variables that feed the next. Use the individual tools below when you need
+finer control (they are the same tools the sequence runs).
 - With a real user list, `netexec_spray` tests many accounts in ONE server-side
   batch with `--no-bruteforce` (one attempt per user → no lockout). Do NOT guess
   passwords one at a time in the agent loop.
@@ -76,7 +78,8 @@ SAM/secrets dump. Enumerate relay targets with
   or `john --format=krb5asrep`. This is a top no-credential AD attack path — and
   the FALLBACK FOOTHOLD when guest is disabled and RID cycling is blocked.
 - The cracked AS-REP password is a real domain credential — use it to Kerberoast,
-  spray, and enumerate further. `ad_kill_chain` does this automatically.
+  spray, and enumerate further. The ad-kill-chain playbook does this automatically
+  (`crack_hashes` then `spray_cracked`).
 
 ## Hardened DC: guest disabled — how to still get in
 <!-- when: port:88, port:445 -->
@@ -132,8 +135,10 @@ mint a ticket as a privileged user to the delegated service, and use it with `-k
 
 ## Worked chain (no creds → Domain Admin) — reference
 <!-- when: port:88, port:445 -->
-Shortcut: `ad_kill_chain target=<DC>` performs all of the following automatically
-and returns the credentials, admin access, and any flags it captured.
+Shortcut: run the **ad-kill-chain playbook** against the DC — its built-in tool
+sequence performs all of the following automatically, parsing each step's output
+into variables (userlist, hashfile, credential) that feed the next, and returns
+the credentials, admin access, and any flags it captured.
 1. `netexec_smb -u guest -p ''` → guest enabled.
 2. `netexec_rid_brute` (guest) → full user list (save to users.txt).
 3. `netexec_spray userfile=users.txt userpass=true` → foothold user==password.

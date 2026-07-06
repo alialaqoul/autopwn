@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..config import ToolsConfig
-from .ad_chain import AdChainTool
 from .base import Tool
 from .catalog import CATALOG
 from .command import GenericCommandTool
@@ -59,10 +58,16 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     reg.register(PortScanTool())
     reg.register(NmapTool(nmap_path=cfg.nmap_path))
     reg.register(HttpProbeTool())
-    reg.register(AdChainTool())  # macro-action: full AD kill chain
-    # Native macro tools (Python, parse everything at the Autopwn level).
+    # Built-in tools (Python, parse output into variables at the Autopwn level).
+    # The AD kill chain is no longer one monolithic macro — it runs as a flat,
+    # editable SEQUENCE of these built-in tools (see playbooks.AD_KILL_CHAIN_SEQUENCE
+    # and sequence.run_sequence). smb_loot / crack_hashes / spray_cracked are the
+    # glue steps that sequence needs.
     from .macro import SmbLootTool
     reg.register(SmbLootTool())
+    from .ad_steps import CrackHashesTool, SprayCredTool
+    reg.register(CrackHashesTool())
+    reg.register(SprayCredTool())
 
     # Catalogued external tools.
     for spec in CATALOG:

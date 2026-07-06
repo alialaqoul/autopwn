@@ -186,12 +186,20 @@ function chipRow(group, selected, stepIdx, options) {
   }).join("");
 }
 
+// A <select> whose options come from a fixed list; keeps the current value even
+// if it isn't in the list (shown as an extra "custom" option) so nothing is lost.
+function pbSelect(list, val, attrs) {
+  const opts = list.slice();
+  if (val && !opts.includes(val)) opts.push(val);
+  const body = opts.map(o =>
+    `<option ${o === val ? "selected" : ""}>${esc(o)}</option>`).join("");
+  return `<select class="form-select form-select-sm" ${attrs}>${body}</select>`;
+}
+
 function renderBuilder() {
   const d = _pbDraft;
-  const triggerOpts = _pbSchema.triggers.map(t => `<option value="${esc(t)}">`).join("");
-  const nextOpts = _pbSchema.next.concat(d.steps.map(s => s.title).filter(Boolean))
-    .map(t => `<option value="${esc(t)}">`).join("");
   const toolOpts = _pbToolNames.map(t => `<option value="${esc(t)}">`).join("");
+  const nextChoices = _pbSchema.next.concat(d.steps.map(s => s.title).filter(Boolean));
 
   const steps = d.steps.map((st, i) => {
     const branches = (st.branches || []).map((b, j) => `
@@ -219,9 +227,9 @@ function renderBuilder() {
       </div>
       <div class="row g-2 mb-2">
         <div class="col-md-7"><label class="pb-lbl">Trigger <span class="text-secondary">(when this step fires)</span></label>
-          <input class="form-control form-control-sm" list="dlTriggers" value="${esc(st.trigger || "")}" data-step="${i}" data-field="trigger"></div>
+          ${pbSelect(_pbSchema.triggers, st.trigger || "start", `data-step="${i}" data-field="trigger"`)}</div>
         <div class="col-md-5"><label class="pb-lbl">Next on success</label>
-          <input class="form-control form-control-sm" list="dlNext" value="${esc(st.next || "next")}" data-step="${i}" data-field="next"></div>
+          ${pbSelect(nextChoices, st.next || "next", `data-step="${i}" data-field="next"`)}</div>
       </div>
       <div class="mb-2"><label class="pb-lbl">Consumes <span class="text-secondary">(needs from earlier steps)</span></label>
         <div class="pb-chips">${chipRow("consumes", st.consumes, i, _pbSchema.artifacts)}</div></div>
@@ -235,25 +243,31 @@ function renderBuilder() {
     </div>`;
   }).join("");
 
+  const hasSequence = ((d.run || {}).sequence || []).length;
   $("#pbBuilder").innerHTML = `
-    <datalist id="dlTriggers">${triggerOpts}</datalist>
-    <datalist id="dlNext">${nextOpts}</datalist>
     <datalist id="dlTools">${toolOpts}</datalist>
-    <div class="row g-2 mb-2">
+    <div class="row g-2 mb-1">
       <div class="col-md-4"><label class="pb-lbl">ID</label>
         <input class="form-control form-control-sm" value="${esc(d.id)}" data-field="id"></div>
       <div class="col-md-8"><label class="pb-lbl">Name</label>
         <input class="form-control form-control-sm" value="${esc(d.name)}" data-field="name"></div>
     </div>
+    <div class="form-text mb-2"><code>ID</code> is the stable slug used in URLs/commands (no spaces). <code>Name</code> is the human title shown in the list.</div>
     <div class="mb-2"><label class="pb-lbl">Summary</label>
       <textarea class="form-control form-control-sm" rows="2" data-field="summary">${esc(d.summary || "")}</textarea></div>
-    <div class="row g-2 mb-2">
+    <div class="row g-2 mb-1">
       <div class="col-md-7"><label class="pb-lbl">Match — any of these open ports</label>
         <input class="form-control form-control-sm" value="${(d.match.any_ports || []).join(", ")}" data-field="ports" placeholder="88, 445, 389"></div>
-      <div class="col-md-5"><label class="pb-lbl">Run — macro tool <span class="text-secondary">(optional)</span></label>
-        <input class="form-control form-control-sm" list="dlTools" value="${esc((d.run || {}).tool || "")}" data-field="tool" placeholder="ad_kill_chain"></div>
+      <div class="col-md-5"><label class="pb-lbl">Run — single tool <span class="text-secondary">(optional)</span></label>
+        ${pbSelect([""].concat(_pbToolNames), (d.run || {}).tool || "", `data-field="tool" ${hasSequence ? "disabled" : ""}`)}</div>
     </div>
-    <div class="mb-3"><label class="pb-lbl">Match — fact signals</label>
+    <div class="form-text mb-2">
+      Ports: comma-separated, e.g. <code>88, 445, 389</code> — the playbook matches a host with any of them open.
+      ${hasSequence
+        ? `Run: this playbook executes a <strong>built-in sequence</strong> of ${hasSequence} tools (edit it in the JSON tab); the single-tool field is disabled.`
+        : `Run: pick one built-in/catalog tool to launch, or leave blank for a detection-only finding.`}
+    </div>
+    <div class="mb-3"><label class="pb-lbl">Match — fact signals <span class="text-secondary">(extra conditions; click to toggle)</span></label>
       <div class="pb-chips">${chipRow("signals", d.match.signals, undefined, _pbSchema.signals)}</div></div>
     <hr>
     <div class="pb-section-label mb-1">Report — set a severity to make this a finding</div>
@@ -273,10 +287,13 @@ function renderBuilder() {
     <div class="mb-2"><label class="pb-lbl">Recommendation</label>
       <textarea class="form-control form-control-sm" rows="2" data-field="recommendation">${esc(d.recommendation || "")}</textarea></div>
     <hr>
-    <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="d-flex justify-content-between align-items-center mb-1">
       <span class="pb-section-label mb-0">Steps</span>
       <button class="btn btn-sm btn-outline-primary py-0" type="button" data-act="addStep">+ Add step</button>
     </div>
+    <div class="form-text mb-2">Steps document the attack path (shown in the reader view). Each has a
+      <strong>Trigger</strong> (when it fires), an <strong>Action</strong>, what it <strong>Consumes</strong>/<strong>Produces</strong>,
+      and where it goes <strong>Next</strong>. <code>Trigger</code> and <code>Next</code> are fixed choices; <code>Consumes</code>/<code>Produces</code> toggle from the artifact list.</div>
     <div class="d-flex flex-column gap-2">${steps}</div>`;
   syncJsonFromDraft();
 }
@@ -330,7 +347,7 @@ async function pbSave() {
 /* builder event delegation (bound once at boot) */
 function bindBuilder() {
   const root = $("#pbBuilder");
-  root.addEventListener("input", (e) => {
+  const onEdit = (e) => {
     const t = e.target, f = t.dataset.field;
     if (!f || !_pbDraft) return;
     if (t.dataset.branch !== undefined) {
@@ -354,7 +371,9 @@ function bindBuilder() {
       _pbDraft[f] = t.value;
     }
     syncJsonFromDraft();
-  });
+  };
+  root.addEventListener("input", onEdit);
+  root.addEventListener("change", onEdit);   // <select> dropdowns
   root.addEventListener("click", (e) => {
     const b = e.target.closest("[data-act]");
     if (!b || !_pbDraft) return;
@@ -630,10 +649,9 @@ function renderTools() {
   const rows = tools.map(t => {
     const cat = `<span class="badge ${CAT_CLASS[t.category] || "text-bg-secondary"}">${esc(t.category)}</span>`;
     const custom = t.custom ? `<span class="badge text-bg-success">custom</span>`
-      : (t.kind === "native" ? `<span class="badge text-bg-light text-secondary border">native</span>`
-        : `<span class="badge text-bg-light text-secondary border">built-in</span>`);
+      : `<span class="badge text-bg-light text-secondary border">built-in</span>`;
     const cmd = t.programmatic
-      ? `<span class="text-secondary fst-italic">${t.kind === "native" ? "native module" : "programmatic argument builder"}</span>`
+      ? `<span class="text-secondary fst-italic">${t.kind === "builtin" ? "built-in module" : "programmatic argument builder"}</span>`
       : `<code>${esc(t.template || "")}</code>`;
     const params = Object.keys((t.parameters || {}).properties || {});
     const paramBadges = params.map(p => `<span class="badge text-bg-light text-secondary border">${esc(p)}</span>`).join(" ");
@@ -647,7 +665,7 @@ function renderTools() {
         <div class="flex-grow-1">
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <span class="fw-semibold font-monospace">${esc(t.name)}</span> ${cat} ${custom}
-            ${t.binary && t.kind !== "native" ? `<span class="text-secondary small">binary: <code>${esc(t.binary)}</code></span>` : ""}
+            ${t.binary && t.kind !== "builtin" ? `<span class="text-secondary small">binary: <code>${esc(t.binary)}</code></span>` : ""}
           </div>
           <div class="text-secondary small mt-1">${esc(t.description || "")}</div>
           <div class="mt-1 small">${cmd}</div>
@@ -666,40 +684,69 @@ function renderTools() {
 function toolView(name) {
   const t = _allTools.find(x => x.name === name);
   if (!t) return;
-  const kv = (k, v) => v ? `<div class="row g-0 mb-1"><div class="col-4 text-secondary small">${esc(k)}</div><div class="col-8">${v}</div></div>` : "";
+  const builtin = t.kind === "builtin";
+
+  // Read-only mirrors of the "New tool" form controls, so the View window is the
+  // same window as Add tool — a live reference for building a new tool.
+  const roInput = (label, val, help = "", col = "") =>
+    `<div class="${col || "mb-2"}"><label class="pb-lbl">${label}${help ? ` <span class="text-secondary">${help}</span>` : ""}</label>
+       <input class="form-control form-control-sm" value="${esc(val || "")}" disabled></div>`;
+  const roArea = (label, val, rows, help = "", mono = true) =>
+    `<div class="mb-2"><label class="pb-lbl">${label}${help ? ` <span class="text-secondary">${help}</span>` : ""}</label>
+       <textarea class="form-control form-control-sm${mono ? " font-monospace" : ""}" rows="${rows}" disabled>${esc(val || "")}</textarea></div>`;
+
+  const flagsText = Object.entries(t.flags || {}).map(([v, f]) => `${v} = ${f}`).join("\n");
+  const harvestText = (t.harvest || []).map(h =>
+    `${h.var}${h.multi ? "*" : ""}${h.scope === "host" ? "@host" : ""} = ${h.regex}`
+    + (h.source === "tool" ? "   # tool-specific" : "")).join("\n");
+  // Command preview built exactly like the editor's live preview.
+  const parts = [builtin ? "(built-in module)" : (t.binary || "binary"), ...(t.subcommand || [])];
+  (t.positional || []).forEach(v => parts.push(`<${v}>`));
+  for (const [v, f] of Object.entries(t.flags || {}))
+    parts.push(f === "" ? `[${v}]` : f.includes("{v}") ? `[${f.replace("{v}", v)}]` : `[${f} <${v}>]`);
+  parts.push(...(t.fixed || []));
+  const preview = parts.join(" ");
+
   const params = (t.parameters || {}).properties || {};
   const req = (t.parameters || {}).required || [];
   const paramRows = Object.entries(params).map(([p, s]) =>
     `<div><code>${esc(p)}</code> <span class="text-secondary small">${esc(s.description || s.type || "")}</span>${req.includes(p) ? ` <span class="badge text-bg-light text-secondary border">required</span>` : ""}</div>`).join("") || `<span class="text-secondary">none</span>`;
-  const flags = t.flags && Object.keys(t.flags).length
-    ? Object.entries(t.flags).map(([v, f]) => `<code>${esc(v)}</code> → <code>${esc(f || "(bare)")}</code>`).join("<br>") : "";
-  const harvest = (t.harvest && t.harvest.length)
-    ? t.harvest.map(h => `<code>${esc(h.var)}</code>${h.multi ? "*" : ""}${h.scope === "host" ? " @host" : ""} ← <code>${esc(h.regex)}</code>${h.source === "tool" ? ' <span class="badge text-bg-light text-secondary border">tool</span>' : ""}`).join("<br>") : "";
-  const cmd = t.programmatic
-    ? `<span class="fst-italic text-secondary">${t.kind === "native" ? "native Python module" : "programmatic argument builder (built-in)"}</span>`
-    : `<code>${esc(t.template || "")}</code>`;
   const plan = (t.plan && t.plan.length)
     ? `<ol class="mb-0 ps-3">${t.plan.map(s => `<li>${esc(s)}</li>`).join("")}</ol>` : "";
+
   $("#toolViewTitle").textContent = t.name;
-  $("#toolViewBody").innerHTML =
-    kv("Category", `<span class="badge ${CAT_CLASS[t.category] || "text-bg-secondary"}">${esc(t.category)}</span>`) +
-    kv("Kind", esc(t.kind) + (t.custom ? " (editable)" : " (read-only)")) +
-    kv("Binary", t.kind === "native" ? "<span class='text-secondary'>native module</span>" : `<code>${esc(t.binary)}</code>`) +
-    (t.aliases && t.aliases.length ? kv("Aliases", t.aliases.map(a => `<code>${esc(a)}</code>`).join(" ")) : "") +
-    kv("Installed", t.installed ? "yes" : "no") +
-    (t.kind !== "native" ? kv("Intrusive", t.intrusive ? "yes — sends traffic / alters state" : "no") : "") +
-    (t.kind !== "native" ? kv("Requires host", (t.requires_host ? "yes" : "no") + (t.authorize_on ? ` · authorizes on <code>${esc(t.authorize_on)}</code>` : "")) : "") +
-    (t.timeout ? kv("Timeout", esc(t.timeout) + " s") : "") +
-    kv("Description", esc(t.description || "")) +
-    kv("Command", cmd) +
-    (plan ? kv("What it does", plan) : "") +
-    (t.subcommand && t.subcommand.length ? kv("Subcommand", `<code>${t.subcommand.map(esc).join(" ")}</code>`) : "") +
-    (t.positional && t.positional.length ? kv("Positional", t.positional.map(x => `<code>${esc(x)}</code>`).join(" ")) : "") +
-    (flags ? kv("Flags", flags) : "") +
-    (t.fixed && t.fixed.length ? kv("Fixed", `<code>${t.fixed.map(esc).join(" ")}</code>`) : "") +
-    (harvest ? kv("Harvests (parse → variable)", harvest) : "") +
-    (t.install_hint ? kv("Install", esc(t.install_hint)) : "") +
-    kv("Parameters", paramRows);
+  $("#toolViewBody").innerHTML = `
+    <p class="small text-secondary">${builtin
+      ? `A <strong>built-in</strong> tool: a Python module that runs its own logic and parses output into variables at the Autopwn level. The fields below mirror the <em>Add tool</em> form so you can see how an action is described.`
+      : `A tool runs an installed command line, built as an argv list (never a shell string): <code>binary → subcommand → &lt;positional&gt; → [flags] → fixed</code>. Same fields as the <em>Add tool</em> form — this one is read-only.`}</p>
+    <div class="row g-2 mb-2">
+      ${roInput("Name", t.name, "", "col-md-5")}
+      ${roInput(builtin ? "Binary" : "Binary (on PATH)", builtin ? "(built-in module)" : t.binary, "", "col-md-4")}
+      ${roInput("Category", t.category, "", "col-md-3")}
+    </div>
+    ${roArea("Description", t.description, 2, "", false)}
+    <div class="row g-2">
+      ${roInput("Subcommand", (t.subcommand || []).join(" "), "(space or comma separated)", "col-md-6 mb-2")}
+      ${roInput("Positional variables", (t.positional || []).join(", "), "(comma)", "col-md-6 mb-2")}
+    </div>
+    ${roArea("Flags", flagsText, 4, "(one per line: <code>variable = -flag</code>; empty = bare boolean; <code>--{v}</code> templates the value)")}
+    <div class="row g-2">
+      ${roInput("Fixed trailing tokens", (t.fixed || []).join(", "), "(comma)", "col-md-6 mb-2")}
+      ${roInput("Authorize on", t.authorize_on || t.host_from || (t.requires_host === false ? "—" : "target"), "", "col-md-3 mb-2")}
+      ${roInput("Install hint", t.install_hint, "", "col-md-3 mb-2")}
+    </div>
+    ${roArea("Harvested variables", harvestText, 3,
+      "(auto-captured from output; one per line: <code>variable = regex</code>. <code>var*</code> = every match, <code>var@host</code> = attach to host. First capture group is the value.)")}
+    ${plan ? `<div class="mb-2"><label class="pb-lbl">What it does</label>${plan}</div>` : ""}
+    <div class="mb-1"><label class="pb-lbl">Parameters ${builtin ? "" : "<span class='text-secondary'>(derived from positional + flag variables)</span>"}</label>${paramRows}</div>
+    <div class="pb-lbl">Preview</div>
+    <div class="pb-match font-monospace">${esc(preview)}</div>
+    <div class="d-flex gap-3 mt-2 small text-secondary">
+      <span>Kind: <strong>${builtin ? "built-in" : "catalog"}</strong>${t.custom ? " (editable)" : ""}</span>
+      <span>Installed: <strong>${t.installed ? "yes" : "no"}</strong></span>
+      ${!builtin ? `<span>Intrusive: <strong>${t.intrusive ? "yes" : "no"}</strong></span>` : ""}
+      ${t.timeout ? `<span>Timeout: <strong>${esc(t.timeout)}s</strong></span>` : ""}
+    </div>`;
   _toolViewModal.show();
 }
 

@@ -495,17 +495,35 @@
             <div class="col-md-4"><label class="pb-lbl">Binary (on PATH)</label>
               <input class="form-control form-control-sm" id="t_binary" placeholder="nxc"></div>
             <div class="col-md-3"><label class="pb-lbl">Category</label>
-              <input class="form-control form-control-sm" id="t_category" list="dlCat" placeholder="ad-smb"></div>
+              <select class="form-select form-select-sm" id="t_category">
+                <option value="recon">recon</option>
+                <option value="web">web</option>
+                <option value="ad-smb">ad-smb</option>
+                <option value="credentials">credentials</option>
+                <option value="exploit">exploit</option>
+                <option value="misc">misc</option>
+                <option value="custom" selected>custom</option>
+              </select></div>
           </div>
-          <datalist id="dlCat"><option value="recon"><option value="web"><option value="ad-smb"><option value="credentials"><option value="exploit"><option value="custom"></datalist>
+          <div class="form-text mb-2">
+            <strong>Name</strong>: a unique slug (no spaces), e.g. <code>my_smb_check</code> ·
+            <strong>Binary</strong>: the command as installed on PATH, e.g. <code>nxc</code> ·
+            <strong>Category</strong> groups it in the list.
+          </div>
           <div class="mb-2"><label class="pb-lbl">Description</label>
             <textarea class="form-control form-control-sm" id="t_description" rows="2" placeholder="What this action does."></textarea></div>
-          <div class="row g-2 mb-2">
+          <div class="row g-2 mb-1">
             <div class="col-md-6"><label class="pb-lbl">Subcommand <span class="text-secondary">(space or comma separated)</span></label>
               <input class="form-control form-control-sm" id="t_subcommand" placeholder="smb"></div>
             <div class="col-md-6"><label class="pb-lbl">Positional variables <span class="text-secondary">(comma)</span></label>
-              <input class="form-control form-control-sm" id="t_positional" placeholder="target"></div>
+              <input class="form-control form-control-sm" id="t_positional" list="dlVars" placeholder="target"></div>
           </div>
+          <div class="form-text mb-2">
+            Variables are canonical names Autopwn shares between tools (a value learned once auto-fills everywhere).
+            Use: <code>target</code> · <code>url</code> · <code>domain</code> · <code>username</code> · <code>password</code> ·
+            <code>nthash</code> · <code>userlist</code> · <code>passlist</code> · <code>wordlist</code> · <code>hashfile</code> · <code>dc_ip</code> · <code>base_dn</code>.
+          </div>
+          <datalist id="dlVars"><option value="target"><option value="url"><option value="domain"><option value="username"><option value="password"><option value="nthash"><option value="userlist"><option value="passlist"><option value="wordlist"><option value="hashfile"><option value="dc_ip"><option value="base_dn"></datalist>
           <div class="mb-2"><label class="pb-lbl">Flags <span class="text-secondary">(one per line: <code>variable = -flag</code>; empty flag = bare boolean; use <code>--{v}</code> to template)</span></label>
             <textarea class="form-control form-control-sm font-monospace" id="t_flags" rows="4" placeholder="username = -u&#10;password = -p&#10;domain = -d"></textarea></div>
           <div class="row g-2 mb-2">

@@ -375,17 +375,26 @@ def create_app(config_path: str = "config.yaml"):
         book = next((p for p in pb.load(_ld()) if p.get("id") == pb_id), None)
         if not book:
             raise HTTPException(404, "Playbook not found.")
-        tool = (book.get("run") or {}).get("tool", "").strip()
-        if not tool:
-            raise HTTPException(400, "This playbook has no runnable macro tool.")
+        run = book.get("run") or {}
+        sequence = run.get("sequence") or []
+        tool = (run.get("tool") or "").strip()
+        if not sequence and not tool:
+            raise HTTPException(400, "This playbook has no built-in sequence or tool.")
         sc = _scope()
         if sc.is_denied(target):
             raise HTTPException(403, f"'{target}' is on the deny list.")
         if not sc.is_allowed(target):
             sc.add_allow(target)
-        argv = _session_args() + ["run", "--tool", tool, "--set", f"target={target}"]
+        # A built-in sequence runs via the `playbook` command (streams each
+        # step + parses variables between them); a legacy macro via `run`.
+        if sequence:
+            argv = _session_args() + ["playbook", "--id", pb_id, "--target", target]
+            kind = "sequence"
+        else:
+            argv = _session_args() + ["run", "--tool", tool, "--set", f"target={target}"]
+            kind = tool
         job_id = jobs.start(argv, label=f"{pb_id} {target}", log_dir=_ld())
-        return {"id": job_id, "status": "running", "tool": tool, "args": argv}
+        return {"id": job_id, "status": "running", "tool": kind, "args": argv}
 
     @app.post("/api/facts")
     def set_fact(f: Fact):
@@ -572,7 +581,7 @@ def create_app(config_path: str = "config.yaml"):
         except Exception:
             info["installed"] = True
         if spec is None:
-            info.update(binary="(native module)", kind="native",
+            info.update(binary="(built-in module)", kind="builtin",
                         template=None, programmatic=True, harvest=[],
                         plan=list(getattr(tool, "plan", []) or []))
         else:
