@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 
@@ -35,9 +36,11 @@ ARTIFACTS = [
     "userlist", "credential", "hash", "ticket", "spn_hash", "asrep_hash",
     "shares", "relay_targets", "machine_account", "admin", "flag",
 ]
+# Execution triggers the sequence runner understands (see sequence._trigger_ok).
+# A step fires when its trigger is true against the current variables.
 TRIGGERS = [
-    "start", "no userlist yet", "have userlist", "have credential",
-    "have hash", "have ticket", "delegation found", "signing disabled",
+    "start", "guest", "no userlist", "have userlist", "have credential",
+    "have password", "have hashes", "signing disabled",
 ]
 SIGNALS = [
     "username", "nthash", "signing_false", "guest", "has_users",
@@ -91,51 +94,49 @@ def _finding(pb_id, name, severity, cvss, summary, impact, recommendation,
 
 def _step(n, title, trigger, tool, consumes, produces, detail, nxt="next",
           branches=None, severity="", cvss="", impact="", recommendation="",
-          finding_title=""):
-    # severity (+ cvss/impact/recommendation) makes the step a reportable finding:
-    # it appears in the report when the step actually fires (its produced artifact
-    # is evidenced in the run). Leave severity "" for a non-reporting step.
-    # finding_title is the title shown in the REPORT (a proper vulnerability name),
-    # separate from `title` which is the action/step name in the builder.
+          finding_title="", args=None):
+    # A step is one executable action: `tool` is the single built-in/catalog tool
+    # it RUNS, `trigger` is when it fires, and `args` are fixed arguments for the
+    # tool. The playbook's execution sequence is generated from these steps
+    # (see runnable_sequence), so the tool shown on the step is the tool that runs.
+    # severity (+ cvss/impact/recommendation/finding_title) additionally makes the
+    # step a reportable finding when it fires (its produced artifact is evidenced).
     return {"n": n, "title": title, "trigger": trigger, "tool": tool,
-            "consumes": consumes, "produces": produces, "detail": detail,
-            "next": nxt, "branches": branches or [],
+            "args": args or {}, "consumes": consumes, "produces": produces,
+            "detail": detail, "next": nxt, "branches": branches or [],
             "severity": severity, "cvss": cvss, "impact": impact,
             "recommendation": recommendation, "finding_title": finding_title}
 
 
-# The AD kill chain as a flat sequence of BUILT-IN tools. Each entry names a
-# tool, a lightweight ``when`` trigger (evaluated against the current variables),
-# an optional ``args`` (fixed arguments), and a human ``label``. Autopwn parses
-# each tool's output into variables (userlist / hashfile / username / password /
-# domain) that auto-fill the next step — so this stays as effective as the macro
-# while being transparent and editable.
-AD_KILL_CHAIN_SEQUENCE = [
-    {"tool": "netexec_smb", "when": "start",
-     "label": "Fingerprint + null session (domain, signing)"},
-    {"tool": "netexec_rid_brute", "when": "start",
-     "label": "RID-cycle the domain user list (guest/null)"},
-    {"tool": "kerbrute_userenum", "when": "no userlist",
-     "label": "User-enum fallback (Kerberos pre-auth, no lockout)"},
-    {"tool": "asrep_roast", "when": "have userlist",
-     "label": "AS-REP roast pre-auth-less accounts"},
-    {"tool": "crack_hashes", "when": "have hashes",
-     "label": "Crack AS-REP hashes (john + rockyou)"},
-    {"tool": "netexec_spray", "when": "have userlist", "args": {"userpass": "true"},
-     "label": "Password spray username == password"},
-    {"tool": "netexec_ldap", "when": "have credential", "args": {"action": "--users"},
-     "label": "Authenticated LDAP dump — full user list"},
-    {"tool": "kerberoast", "when": "have credential",
-     "label": "Kerberoast SPN accounts"},
-    {"tool": "crack_hashes", "when": "have hashes",
-     "label": "Crack Kerberoast hashes (john + rockyou)"},
-    {"tool": "spray_cracked", "when": "have password",
-     "label": "Spray the cracked password for reuse"},
-    {"tool": "smb_loot", "when": "have credential",
-     "label": "Loot readable non-default SMB shares"},
-    {"tool": "netexec_smb", "when": "have credential", "args": {"command": "whoami"},
-     "label": "Confirm access / admin (watch for Pwn3d!)"},
-]
+# A step's tool is "runnable" (part of the execution sequence) when it names a
+# single tool — not a descriptive label like "netexec_smb / netexec_rid_brute".
+_DESCRIPTIVE_TOOL = re.compile(r"[\s/+,]")
+
+
+def _runnable_tool(tool: str) -> bool:
+    tool = (tool or "").strip()
+    return bool(tool) and _DESCRIPTIVE_TOOL.search(tool) is None
+
+
+def runnable_sequence(pb: dict) -> list:
+    """The executable sequence for a playbook, GENERATED from its steps.
+
+    Each step that names a single tool contributes one execution entry
+    (tool + when-trigger + fixed args + label), in order. So the tool shown on a
+    step in the builder is exactly the tool that runs. An explicit ``run.sequence``
+    (legacy / hand-authored) still takes precedence for backward compatibility.
+    """
+    run = pb.get("run") or {}
+    if run.get("sequence"):
+        return run["sequence"]
+    seq = []
+    for st in pb.get("steps", []):
+        tool = (st.get("tool") or "").strip()
+        if not _runnable_tool(tool):
+            continue
+        seq.append({"tool": tool, "when": st.get("trigger", "start"),
+                    "args": st.get("args") or {}, "label": st.get("title", "")})
+    return seq
 
 
 DEFAULT_PLAYBOOKS = [
@@ -145,17 +146,19 @@ DEFAULT_PLAYBOOKS = [
         "summary": "Guest/RID → spray → AS-REP → Kerberoast → loot → pass-the-hash. "
                    "Re-routes on what each step actually finds.",
         "match": {"any_ports": [88, 389, 445, 636, 3268], "signals": []},
-        # Runs as a flat, editable SEQUENCE of built-in tools (Autopwn parses the
-        # output of each and feeds the variables into the next). This is the
-        # transparent alternative to the ad_kill_chain macro.
-        "run": {"sequence": AD_KILL_CHAIN_SEQUENCE},
+        # No separate run.sequence: the executable sequence is GENERATED from the
+        # steps below (each step's tool + trigger + args), so the tool shown on a
+        # step is exactly the tool that runs.
+        "run": {},
         "steps": [
-            _step(1, "Guest / null session + RID cycle", "start",
-                  "netexec_smb / netexec_rid_brute", [], ["userlist"],
-                  "netexec_smb -u guest -p '' then RID-brute to walk every domain "
-                  "user (SidTypeUser) into a user list.", "next",
-                  [{"cond": "guest enabled", "then": "RID-brute the full user list"},
-                   {"cond": "guest disabled / RID blocked", "then": "→ step 2 (user enum)"}],
+            _step(1, "Fingerprint + null session", "start",
+                  "netexec_smb", [], [],
+                  "netexec_smb against the DC to read the domain, hostname and SMB "
+                  "signing over a null session."),
+            _step(2, "RID-cycle the domain user list", "start",
+                  "netexec_rid_brute", [], ["userlist"],
+                  "RID-brute over a guest/null session to walk every domain user "
+                  "(SidTypeUser) into a user list.",
                   severity="Medium", cvss="5.3",
                   finding_title="Domain User Enumeration via Null / Guest Session",
                   impact="An unauthenticated attacker can enumerate the full domain "
@@ -163,18 +166,13 @@ DEFAULT_PLAYBOOKS = [
                          "password spraying and roasting attacks.",
                   recommendation="Disable the Guest account, restrict anonymous SID/RID "
                          "enumeration (RestrictAnonymous), and monitor for RID cycling."),
-            _step(2, "User enumeration (hardened DC fallback)", "no userlist yet",
-                  "netexec_ldap / kerbrute_userenum", ["credential"], ["userlist"],
-                  "Build a user list another way when RID cycling returns nothing.",
-                  "next",
-                  [{"cond": "have a credential", "then": "authenticated netexec_ldap --users (complete list)"},
-                   {"cond": "no credential", "then": "kerbrute_userenum (Kerberos pre-auth, no lockout)"}]),
-            _step(3, "AS-REP roast + crack", "have userlist",
-                  "asrep_roast + john/hashcat", ["userlist"], ["credential", "asrep_hash"],
-                  "Roast accounts without Kerberos pre-auth, crack offline "
-                  "(john krb5asrep / hashcat 18200). Foothold that beats guest-disabled DCs.",
-                  "next",
-                  [{"cond": "hash cracked", "then": "recovered password becomes a real domain credential"}],
+            _step(3, "User-enum fallback (hardened DC)", "no userlist",
+                  "kerbrute_userenum", [], ["userlist"],
+                  "When RID cycling returns nothing, enumerate valid usernames via "
+                  "Kerberos pre-auth (no lockout)."),
+            _step(4, "AS-REP roast", "have userlist",
+                  "asrep_roast", ["userlist"], ["asrep_hash"],
+                  "Request AS-REP hashes for accounts without Kerberos pre-auth.",
                   severity="High", cvss="7.5",
                   finding_title="AS-REP Roastable Accounts (Kerberos Pre-Authentication Disabled)",
                   impact="Accounts with Kerberos pre-authentication disabled allow an "
@@ -182,11 +180,14 @@ DEFAULT_PLAYBOOKS = [
                          "them offline, yielding domain credentials.",
                   recommendation="Enable Kerberos pre-authentication on all accounts "
                          "(remove DONT_REQ_PREAUTH) and enforce strong passwords."),
-            _step(4, "Password spray (username == password)", "have userlist",
+            _step(5, "Crack AS-REP hashes", "have hashes",
+                  "crack_hashes", ["asrep_hash"], ["credential"],
+                  "Crack the AS-REP hashes offline with john + rockyou."),
+            _step(6, "Password spray (username == password)", "have userlist",
                   "netexec_spray", ["userlist"], ["credential"],
-                  "--no-bruteforce in one server-side batch (one attempt per user → "
-                  "no lockout). Highest-yield first spray.", "next",
-                  [{"cond": "hit", "then": "foothold credential (e.g. hodor:hodor)"}],
+                  "One server-side batch, --no-bruteforce (one attempt per user, no "
+                  "lockout): try password == username.",
+                  args={"userpass": "true"},
                   severity="High", cvss="8.1",
                   finding_title="Weak or Guessable Account Passwords",
                   impact="Weak or guessable account passwords (including password equal "
@@ -195,12 +196,13 @@ DEFAULT_PLAYBOOKS = [
                   recommendation="Enforce a strong password policy, block username-based "
                          "and common passwords (e.g. Azure AD Password Protection), and "
                          "enable account lockout / spray detection."),
-            _step(5, "Kerberoast + crack", "have credential",
-                  "kerberoast + hashcat", ["credential"], ["credential", "spn_hash", "ticket"],
-                  "GetUserSPNs for SPN accounts; crack offline (hashcat 13100). "
-                  "Detects delegation on the SPN account.", "next",
-                  [{"cond": "constrained / unconstrained delegation", "then": "S4U2Proxy: get_st -impersonate Administrator"},
-                   {"cond": "password cracked", "then": "spray it for reuse across all users"}],
+            _step(7, "Authenticated LDAP user dump", "have credential",
+                  "netexec_ldap", ["credential"], ["userlist"],
+                  "With a credential, dump the complete user list over LDAP.",
+                  args={"action": "--users"}),
+            _step(8, "Kerberoast SPN accounts", "have credential",
+                  "kerberoast", ["credential"], ["spn_hash"],
+                  "GetUserSPNs for SPN accounts to request their service tickets.",
                   severity="High", cvss="8.1",
                   finding_title="Kerberoastable Service Accounts",
                   impact="Service accounts with SPNs are Kerberoastable: any domain user "
@@ -208,11 +210,16 @@ DEFAULT_PLAYBOOKS = [
                          "Service accounts are often privileged.",
                   recommendation="Use group Managed Service Accounts (gMSA) or 25+ char "
                          "random passwords for SPN accounts, and use AES encryption."),
-            _step(6, "Password reuse + loot shares", "have credential",
-                  "netexec_spray / smb_get", ["credential"], ["hash", "shares"],
-                  "Spray recovered passwords across all users; loot readable "
-                  "non-default shares (backups, scripts, GPP, KeePass).", "next",
-                  [{"cond": "machine-account / NTLM hashes found", "then": "→ step 7 (pass-the-hash)"}],
+            _step(9, "Crack Kerberoast hashes", "have hashes",
+                  "crack_hashes", ["spn_hash"], ["credential"],
+                  "Crack the Kerberoast (krb5tgs) hashes offline with john + rockyou."),
+            _step(10, "Password reuse spray", "have password",
+                  "spray_cracked", ["credential"], ["credential"],
+                  "Spray a cracked password across all users to find reuse."),
+            _step(11, "Loot readable shares", "have credential",
+                  "smb_loot", ["credential"], ["shares", "hash"],
+                  "Enumerate and flag readable non-default SMB shares (backups, "
+                  "scripts, GPP cpassword, KeePass).",
                   severity="Medium", cvss="6.5",
                   finding_title="Credential Reuse and Sensitive Data on Readable Shares",
                   impact="Recovered passwords are reused across accounts and/or credential "
@@ -220,11 +227,11 @@ DEFAULT_PLAYBOOKS = [
                          "readable shares, extending compromise.",
                   recommendation="Enforce unique passwords, remove secrets from shares, "
                          "and restrict share permissions to least privilege."),
-            _step(7, "Pass-the-hash → goal", "have hash",
-                  "netexec_smb -H / secretsdump", ["hash"], ["admin", "flag"],
-                  "netexec_smb -u acct -H <nt> against the DC; watch for Pwn3d!. "
-                  "Then read C$ / flags or secretsdump (DCSync).", "final",
-                  [{"cond": "Pwn3d!", "then": "admin on DC → dump NTDS / capture flags"}],
+            _step(12, "Confirm access / admin", "have credential",
+                  "netexec_smb", ["credential"], ["admin", "flag"],
+                  "Authenticate to the DC and run whoami; watch for Pwn3d! (local "
+                  "admin) — then read C$ / capture flags.", "final",
+                  args={"command": "whoami"},
                   severity="Critical", cvss="9.8",
                   finding_title="Full Domain Compromise — Administrative Access to Domain Controller",
                   impact="Administrative access to a Domain Controller was achieved "
@@ -391,30 +398,34 @@ def load(log_dir) -> list:
 def _migrate(log_dir, data: list) -> list:
     """Upgrade older stored playbooks in place.
 
-    * The AD kill chain used to run the ``ad_kill_chain`` macro; it now runs a
-      built-in tool sequence — give any stored copy that lacks one the default.
-    * Steps gained finding fields (severity/cvss/impact/recommendation) so each
-      step can be reported. Back-fill them from the defaults (matched by id + step
-      number) onto any stored step that doesn't have them yet, without touching a
-      step the operator has already customised.
+    The AD kill chain was restructured to a tool-per-step model (each step names
+    the single tool it runs; the execution sequence is generated from the steps).
+    Re-seed the stored copy from the default when it is still the old shape (a
+    separate run.sequence, or descriptive multi-tool step labels). For every
+    built-in playbook, ensure each step has the current keys (args + finding
+    fields) so the editor can show and edit them.
     """
     changed = False
     defaults = {pb["id"]: pb for pb in DEFAULT_PLAYBOOKS}
     for pb in data:
         pid = pb.get("id")
-        if pid == "ad-kill-chain":
-            run = pb.setdefault("run", {})
-            if not run.get("sequence"):
-                run["sequence"] = copy.deepcopy(AD_KILL_CHAIN_SEQUENCE)
-                run.pop("tool", None)
-                changed = True
         dpb = defaults.get(pid)
+        if pid == "ad-kill-chain" and dpb:
+            run = pb.get("run") or {}
+            old_shape = bool(run.get("sequence")) or any(
+                not _runnable_tool(s.get("tool", "")) for s in pb.get("steps", []))
+            if old_shape:
+                pb["steps"] = copy.deepcopy(dpb["steps"])
+                pb["run"] = copy.deepcopy(dpb.get("run", {}))
+                changed = True
         dsteps = {s.get("n"): s for s in (dpb or {}).get("steps", [])}
         for st in pb.get("steps", []):
-            # ensure the finding keys exist so the editor can show/edit them
+            dsrc = dsteps.get(st.get("n"), {})
+            if "args" not in st:
+                st["args"] = copy.deepcopy(dsrc.get("args", {}))
+                changed = True
             for k in ("severity", "cvss", "impact", "recommendation", "finding_title"):
                 if k not in st:
-                    dsrc = dsteps.get(st.get("n"), {})
                     st[k] = dsrc.get(k, "")
                     changed = True
     if changed:

@@ -1014,7 +1014,7 @@ def cmd_autorun(args) -> int:
     ran = 0
     for pb in pb_mod.load(cfg.log_dir):
         run = pb.get("run") or {}
-        sequence = run.get("sequence") or []
+        sequence = pb_mod.runnable_sequence(pb)   # generated from the steps' tools
         tool_name = (run.get("tool") or "").strip()
         matched = pb_mod.matching_hosts(pb, hosts)
         for host in matched:
@@ -1073,9 +1073,9 @@ def cmd_playbook(args) -> int:
     if not book:
         console.print(f"[red]No playbook with id '{args.id}'.[/]")
         return 1
-    seq = ((book.get("run") or {}).get("sequence")) or []
+    seq = pb_mod.runnable_sequence(book)   # generated from the steps' tools
     if not seq:
-        console.print(f"[red]Playbook '{args.id}' has no built-in sequence.[/]")
+        console.print(f"[red]Playbook '{args.id}' has no runnable steps.[/]")
         return 1
 
     # Seed any operator-supplied variables (domain, creds) before the run.

@@ -219,16 +219,19 @@ function renderBuilder() {
           <button class="btn btn-outline-danger py-0" type="button" data-act="delStep" data-step="${i}">Remove</button>
         </div>
       </div>
-      <div class="row g-2 mb-2">
+      <div class="row g-2 mb-1">
         <div class="col-md-7"><label class="pb-lbl">Title</label>
           <input class="form-control form-control-sm" value="${esc(st.title)}" data-step="${i}" data-field="title"></div>
-        <div class="col-md-5"><label class="pb-lbl">Action / tool</label>
-          <input class="form-control form-control-sm" list="dlTools" value="${esc(st.tool)}" data-step="${i}" data-field="tool" placeholder="e.g. netexec_spray"></div>
+        <div class="col-md-5"><label class="pb-lbl">Tool <span class="text-secondary">(runs this step)</span></label>
+          ${pbSelect([""].concat(_pbToolNames), st.tool || "", `data-step="${i}" data-field="tool"`)}</div>
       </div>
+      <div class="form-text mb-2">This tool runs when the trigger below is met. A single tool name executes; a label with <code>/</code> or <code>+</code> is treated as documentation only (won't run).</div>
       <div class="row g-2 mb-2">
-        <div class="col-md-7"><label class="pb-lbl">Trigger <span class="text-secondary">(when this step fires)</span></label>
+        <div class="col-md-4"><label class="pb-lbl">Trigger <span class="text-secondary">(when it runs)</span></label>
           ${pbSelect(_pbSchema.triggers, st.trigger || "start", `data-step="${i}" data-field="trigger"`)}</div>
-        <div class="col-md-5"><label class="pb-lbl">Next on success</label>
+        <div class="col-md-4"><label class="pb-lbl">Arguments <span class="text-secondary">(key=value)</span></label>
+          <input class="form-control form-control-sm" value="${esc(Object.entries(st.args || {}).map(([k, v]) => `${k}=${v}`).join(", "))}" data-step="${i}" data-field="args" placeholder="userpass=true"></div>
+        <div class="col-md-4"><label class="pb-lbl">Next on success</label>
           ${pbSelect(nextChoices, st.next || "next", `data-step="${i}" data-field="next"`)}</div>
       </div>
       <div class="mb-2"><label class="pb-lbl">Consumes <span class="text-secondary">(needs from earlier steps)</span></label>
@@ -261,7 +264,12 @@ function renderBuilder() {
     </div>`;
   }).join("");
 
-  const hasSequence = ((d.run || {}).sequence || []).length;
+  // The execution sequence is generated from the steps whose Tool is a single
+  // runnable tool (no "/" or "+"). If any exist, the playbook runs from its steps
+  // and the top-level single-tool field is not used.
+  const runnableTool = (t) => t && !/[\s/+,]/.test(t.trim());
+  const stepTools = (d.steps || []).map(s => (s.tool || "").trim()).filter(runnableTool);
+  const hasSequence = (d.run || {}).sequence ? (d.run.sequence.length) : stepTools.length;
   $("#pbBuilder").innerHTML = `
     <datalist id="dlTools">${toolOpts}</datalist>
     <div class="row g-2 mb-1">
@@ -282,8 +290,8 @@ function renderBuilder() {
     <div class="form-text mb-2">
       Ports: comma-separated, e.g. <code>88, 445, 389</code> — the playbook matches a host with any of them open.
       ${hasSequence
-        ? `Run: this playbook executes a <strong>built-in sequence</strong> of ${hasSequence} tools (edit it in the JSON tab); the single-tool field is disabled.`
-        : `Run: pick one built-in/catalog tool to launch, or leave blank for a detection-only finding.`}
+        ? `Run: this playbook executes its <strong>steps below in order</strong> (${hasSequence} tool step${hasSequence === 1 ? "" : "s"}) — each step's Tool runs when its trigger is met. The single-tool field is not used.`
+        : `Run: pick one tool to launch, or leave blank and add steps below (each step's Tool runs), or leave empty for a detection-only finding.`}
     </div>
     <div class="mb-3"><label class="pb-lbl">Match — fact signals <span class="text-secondary">(extra conditions; click to toggle)</span></label>
       <div class="pb-chips">${chipRow("signals", d.match.signals, undefined, _pbSchema.signals)}</div></div>
@@ -309,9 +317,10 @@ function renderBuilder() {
       <span class="pb-section-label mb-0">Steps</span>
       <button class="btn btn-sm btn-outline-primary py-0" type="button" data-act="addStep">+ Add step</button>
     </div>
-    <div class="form-text mb-2">Steps document the attack path (shown in the reader view). Each has a
-      <strong>Trigger</strong> (when it fires), an <strong>Action</strong>, what it <strong>Consumes</strong>/<strong>Produces</strong>,
-      and where it goes <strong>Next</strong>. <code>Trigger</code> and <code>Next</code> are fixed choices; <code>Consumes</code>/<code>Produces</code> toggle from the artifact list.</div>
+    <div class="form-text mb-2">Steps are the execution plan <em>and</em> the documented attack path. Each step's
+      <strong>Tool</strong> runs when its <strong>Trigger</strong> is met, with the given <strong>Arguments</strong>; Autopwn parses each tool's
+      output into variables that the next step auto-fills. <code>Consumes</code>/<code>Produces</code> document the data flow, and a step with a
+      <strong>severity</strong> becomes a report finding when it fires.</div>
     <div class="d-flex flex-column gap-2">${steps}</div>`;
   syncJsonFromDraft();
 }
@@ -371,7 +380,17 @@ function bindBuilder() {
     if (t.dataset.branch !== undefined) {
       _pbDraft.steps[+t.dataset.step].branches[+t.dataset.branch][f] = t.value;
     } else if (t.dataset.step !== undefined) {
-      _pbDraft.steps[+t.dataset.step][f] = t.value;
+      const st = _pbDraft.steps[+t.dataset.step];
+      if (f === "args") {
+        const obj = {};
+        t.value.split(/[\n,]+/).forEach(p => {
+          const i = p.indexOf("=");
+          if (i > 0) { const k = p.slice(0, i).trim(), v = p.slice(i + 1).trim(); if (k) obj[k] = v; }
+        });
+        st.args = obj;
+      } else {
+        st[f] = t.value;
+      }
     } else if (f === "ports") {
       _pbDraft.match.any_ports = parsePorts(t.value);
     } else if (f === "host_facts") {

@@ -135,7 +135,8 @@ def run_sequence(book: dict, target: str, ctx, reg,
     if given, is called ``record(tool_name, result)`` after each step so the
     caller can append the tool output to a session transcript (for findings).
     """
-    seq = ((book.get("run") or {}).get("sequence")) or []
+    from .playbooks import runnable_sequence
+    seq = runnable_sequence(book)
     name = book.get("name", book.get("id", "playbook"))
     report("head", f"Built-in sequence: {name} — {len(seq)} step(s) against {target}")
 

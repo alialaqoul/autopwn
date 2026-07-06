@@ -376,10 +376,10 @@ def create_app(config_path: str = "config.yaml"):
         if not book:
             raise HTTPException(404, "Playbook not found.")
         run = book.get("run") or {}
-        sequence = run.get("sequence") or []
+        sequence = pb.runnable_sequence(book)   # generated from the steps' tools
         tool = (run.get("tool") or "").strip()
         if not sequence and not tool:
-            raise HTTPException(400, "This playbook has no built-in sequence or tool.")
+            raise HTTPException(400, "This playbook has no runnable steps or tool.")
         sc = _scope()
         if sc.is_denied(target):
             raise HTTPException(403, f"'{target}' is on the deny list.")

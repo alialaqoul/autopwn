@@ -373,11 +373,11 @@ def _playbook_ran(pb, transcript):
              if e.get("kind") == "tool_result"}
     if not names:
         return False
-    run = pb.get("run") or {}
-    seq_tools = {s.get("tool") for s in (run.get("sequence") or [])}
+    from . import playbooks as pb_mod
+    seq_tools = {s.get("tool") for s in pb_mod.runnable_sequence(pb)}
     if seq_tools & names:
         return True
-    if run.get("tool") and run["tool"] in names:
+    if (pb.get("run") or {}).get("tool") in names and pb["run"]["tool"]:
         return True
     return f"playbook:{pb.get('id')}" in names
 
