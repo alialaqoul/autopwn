@@ -18,6 +18,17 @@ class AdChainTool(Tool):
     category = "ad-smb"
     name = "ad_kill_chain"
     active = True
+    #: what it does — shown in the Tools "View" for transparency.
+    plan = [
+        "Guest / null session, then RID-cycle the domain user list",
+        "User-enum fallback (authenticated LDAP or kerbrute) when guest is disabled",
+        "AS-REP roast pre-auth-less accounts and crack offline",
+        "Password spray username==password (one attempt/user, no lockout)",
+        "After the first credential, authenticated LDAP dump for the full user list",
+        "Kerberoast SPN accounts and crack; flag constrained/unconstrained delegation",
+        "Password reuse spray + loot readable non-default shares for NTLM hashes",
+        "Pass-the-hash to the DC → read the goal / DCSync",
+    ]
     description = (
         "Run the full Active Directory attack chain against a domain controller "
         "in one step: guest/null session -> RID-brute users -> spray "
@@ -69,7 +80,15 @@ class AdChainTool(Tool):
         except Exception:
             pass
 
-        state = run_ad_chain(target, domain, runner, report=None,
+        # Stream each chain step so the operator sees exactly what's happening
+        # (this prints into the job log, which the console watches live).
+        def _report(kind, msg):
+            try:
+                print(f"  │ {msg}", flush=True)
+            except UnicodeEncodeError:
+                print(f"  | {msg}", flush=True)
+
+        state = run_ad_chain(target, domain, runner, report=_report,
                              workdir=f"{log_dir}/chain", max_rid=max_rid)
         # The chain detects the DC's real domain from its SMB banner — use that
         # (not the possibly-stale passed domain) to label credentials.
