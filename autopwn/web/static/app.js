@@ -313,16 +313,23 @@ function renderBuilder() {
     <div class="mb-2"><label class="pb-lbl">Recommendation</label>
       <textarea class="form-control form-control-sm" rows="2" data-field="recommendation">${esc(d.recommendation || "")}</textarea></div>
     <hr>
+    <div class="pb-inputs mb-3">
+      <div class="pb-section-label mb-1">Inputs <span class="pb-inputs-sub">— supplied once when you launch the playbook; every step can use them</span></div>
+      <span class="pb-input-chip req">target</span><span class="text-secondary small me-3">host / IP · required</span>
+      <span class="pb-input-chip">username</span>
+      <span class="pb-input-chip">password</span>
+      <span class="pb-input-chip">domain</span>
+      <span class="pb-input-chip">hash</span>
+      <span class="text-secondary small ms-1">optional · assumed-breach start</span>
+    </div>
     <div class="d-flex justify-content-between align-items-center mb-1">
       <span class="pb-section-label mb-0">Steps</span>
       <button class="btn btn-sm btn-outline-primary py-0" type="button" data-act="addStep">+ Add step</button>
     </div>
     <div class="form-text mb-2">Steps are the execution plan <em>and</em> the documented attack path. Each step's
       <strong>Tool</strong> runs when its <strong>Trigger</strong> is met, with the given <strong>Arguments</strong>; Autopwn parses each tool's
-      output into variables that the next step auto-fills. <code>Consumes</code>/<code>Produces</code> document the data flow, and a step with a
-      <strong>severity</strong> becomes a report finding when it fires.
-      <br>Note: <code>Consumes</code>/<code>Produces</code> list artifacts that flow <em>between steps</em>. The <code>target</code> (host) — and any
-      creds/domain you seed at launch — are supplied once to the whole playbook, so they're not listed per step.</div>
+      output into variables that the next step auto-fills. <code>Consumes</code>/<code>Produces</code> list the artifacts that flow <em>between steps</em>
+      (the <strong>Inputs</strong> above are supplied at launch, so they're not repeated per step), and a step with a <strong>severity</strong> becomes a report finding when it fires.</div>
     <div class="d-flex flex-column gap-2">${steps}</div>`;
   syncJsonFromDraft();
 }

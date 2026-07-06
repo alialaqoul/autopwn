@@ -271,6 +271,20 @@ textarea::placeholder, input::placeholder {
 /* nested "report as finding" panel — solid body-bg so it separates from the
    tinted step card around it. */
 .pb-finding-box { background: var(--bs-body-bg); }
+/* highlighted "Inputs" panel — the launch-time inputs (target + optional seeds)
+   that feed the whole playbook, called out so they're not confused with the
+   per-step Consumes/Produces artifacts. */
+.pb-inputs { border: 1px solid var(--ap-accent); border-left: 4px solid var(--ap-accent);
+  border-radius: .5rem; padding: .6rem .8rem;
+  background: var(--bs-tertiary-bg);
+  background: color-mix(in srgb, var(--ap-accent) 8%, var(--bs-body-bg)); }
+.pb-inputs-sub { text-transform: none; letter-spacing: 0; font-weight: 400;
+  color: var(--bs-secondary-color); }
+.pb-input-chip { display: inline-block; font-size: .78rem; padding: .1rem .55rem;
+  border-radius: 1rem; margin: .1rem .2rem .1rem 0; border: 1px solid var(--bs-border-color);
+  background: var(--bs-body-bg); color: var(--bs-secondary-color); }
+.pb-input-chip.req { background: var(--ap-accent); border-color: var(--ap-accent);
+  color: #fff; font-weight: 600; }
 .pb-lbl { font-size: .74rem; font-weight: 600; color: var(--bs-secondary-color);
   margin-bottom: .1rem; display: block; }
 .pb-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
