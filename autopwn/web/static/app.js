@@ -592,7 +592,7 @@ async function loadFindings() {
     return `<tr><td class="font-monospace">${esc(c.username)}</td>
       <td class="font-monospace">${secret}</td><td class="small">${esc(c.domain || "")}</td>
       <td>${srcBadges}</td>
-      <td class="text-end"><button class="btn btn-sm btn-outline-danger py-0" data-open-session="${i}">Open session</button></td></tr>`;
+      <td class="text-end align-middle"><button class="btn btn-sm btn-outline-danger py-0 text-nowrap" data-open-session="${i}">Open session</button></td></tr>`;
   }).join("") : `<tr><td colspan="5" class="text-center text-secondary py-3">No credentials recovered yet.</td></tr>`;
   $$("#credsTable [data-open-session]").forEach(b => b.onclick = () => openSessionFrom(window._creds[+b.dataset.openSession]));
 
