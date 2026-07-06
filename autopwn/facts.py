@@ -62,8 +62,15 @@ DEFAULT_HARVEST: list[HarvestRule] = [
     HarvestRule("smb_signing", r"\(signing:(True|False)\)", scope="host"),
     HarvestRule("smb_nullauth", r"Null Auth:\s*(True|False)", scope="host"),
     # NetExec/CME success line: "[+] corp.local\\admin:Passw0rd (Pwn3d!)"
-    HarvestRule("username", r"\[\+\]\s*[^\\\s]+\\([^:\s]+):", scope="global"),
-    HarvestRule("password", r"\[\+\]\s*[^\\\s]+\\[^:\s]+:([^\s(]+)", scope="global"),
+    # The negative lookahead rejects lines that fell back to Guest ("(Guest)") or
+    # carry a disqualifying account status ("STATUS_..."): those are NOT valid
+    # credentials, and capturing them poisons the shared username/password.
+    HarvestRule("username",
+                r"\[\+\](?![^\n]*(?:\(Guest\)|STATUS_))\s*[^\\\s]+\\([^:\s]+):",
+                scope="global"),
+    HarvestRule("password",
+                r"\[\+\](?![^\n]*(?:\(Guest\)|STATUS_))\s*[^\\\s]+\\[^:\s]+:([^\s(]+)",
+                scope="global"),
     # ---- structured branch signals (drive adaptive path selection) -------
     # Guest/null session accepted -> RID enumeration is available.
     HarvestRule("smb_guest", r"\[\+\]\s*[^\\\s]+\\(guest):", scope="host", group=1),

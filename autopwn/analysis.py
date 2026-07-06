@@ -29,46 +29,89 @@ _CHAIN_USERS_RE = re.compile(r"^Users \(\d+\):\s*(.+)$", re.M)
 def extract_results(transcript, domain: str = "") -> dict:
     """Credentials and usernames a run discovered, from its tool output.
 
-    Deduped by (username, password) so the same login found in several domains /
-    tools shows once; a domain-bearing hit is preferred over a domainless one.
+    Aggregated by (username, domain): the same account found by several tools is
+    ONE row whose ``sources`` list every tool that found it. A domain-bearing hit
+    is preferred over a domainless one, and a real secret over a weak
+    username==password spray hit.
     """
-    creds: dict = {}   # (user.lower(), password) -> record
+    creds: dict = {}   # (user.lower(), domain.lower()) -> record
     users: set = set()
 
-    # Built-in disabled accounts NetExec may report a "[+]" for — never real creds.
+    # Built-in disabled accounts NetExec may report a "[+]" for — never real creds,
+    # neither as a username nor (paired with a real user) as a password.
     _NEVER = {"guest", "defaultaccount", "wdagutilityaccount", "krbtgt"}
 
-    def add_cred(u, pw, dom, note):
+    def _find(u_l):
+        """An existing record for this user in any domain (to merge/upgrade)."""
+        for (uu, dd), r in creds.items():
+            if uu == u_l:
+                return (uu, dd), r
+        return None, None
+
+    def add_cred(u, pw, dom, source):
+        pw = pw or ""
         if u.lower() in _NEVER or u.endswith("$"):
             return
+        if pw.lower() in _NEVER:            # a built-in account name is never a password
+            return
         users.add(u)
-        key = (u.lower(), pw)
-        ex = creds.get(key)
-        if ex is None:
-            creds[key] = {"username": u, "password": pw, "domain": dom, "note": note}
-        elif dom and not ex.get("domain"):   # upgrade with a real domain
-            ex["domain"], ex["note"] = dom, note
+        u_l, dom_l = u.lower(), (dom or "").lower()
+        key = (u_l, dom_l)
+        rec = creds.get(key)
+        if rec is None:
+            # Merge with the same user under a different/blank domain rather than
+            # creating a second row: prefer a real domain, keep one identity.
+            k2, r2 = _find(u_l)
+            if r2 is not None and (not r2["domain"] or not dom_l):
+                if dom_l and not r2["domain"]:      # upgrade the domainless record
+                    del creds[k2]
+                    r2["domain"] = dom
+                    creds[key] = r2
+                rec = r2
+        if rec is None:
+            rec = {"username": u, "password": pw, "domain": dom, "sources": []}
+            creds[key] = rec
+        # Secret: fill if empty, and upgrade a weak user==pass hit to a real secret.
+        if pw:
+            if not rec["password"]:
+                rec["password"] = pw
+            elif rec["password"].lower() == u_l and pw.lower() != u_l:
+                rec["password"] = pw
+        if source and source not in rec["sources"]:
+            rec["sources"].append(source)
 
     for e in transcript or []:
         out = e.get("output") or e.get("raw_output") or e.get("summary") or ""
         if not out:
             continue
-        for m in _CRED_RE.finditer(out):
-            add_cred(m.group(2), m.group(3), m.group(1), "netexec")
+        # Source = the tool that produced this output, so a cred found by several
+        # tools lists each of them. The consolidated playbook entry is labelled
+        # "kill-chain" rather than "playbook:<id>".
+        src = e.get("name") or "tool"
+        if src.startswith("playbook:"):
+            src = "kill-chain"
+        for line in out.splitlines():
+            # Skip NetExec Guest-fallback ("(Guest)") and disqualified-status lines:
+            # the password is not valid for that user (it mapped to Guest).
+            if "(Guest)" in line or "STATUS_" in line:
+                continue
+            m = _CRED_RE.search(line)
+            if m:
+                add_cred(m.group(2), m.group(3), m.group(1), src)
         chain_hits = list(_CHAIN_CRED_RE.finditer(out))
         for m in chain_hits:       # authoritative "Credential: user:pass @ domain"
             dom = "" if m.group(3) == "unknown" else m.group(3)
-            add_cred(m.group(1), m.group(2), dom, "kill-chain")
+            add_cred(m.group(1), m.group(2), dom, src)
         if not chain_hits:         # older transcripts: prefer the summary line
             summ = _OLD_CHAIN_SUMMARY_RE.search(out)
             if summ:
                 for pair in summ.group(1).split(","):
                     u, _, pw = pair.strip().partition(":")
                     if u and pw:
-                        add_cred(u, pw, "", "kill-chain")
+                        add_cred(u, pw, "", src)
             else:                  # last resort: per-step logs (noisier)
                 for m in _OLD_CHAIN_CRED_RE.finditer(out):
-                    add_cred(m.group(1), m.group(2), "", "kill-chain")
+                    add_cred(m.group(1), m.group(2), "", src)
         for m in _KERBRUTE_RE.finditer(out):
             users.add(m.group(1))
         for m in _LDAP_USER_RE.finditer(out):
@@ -83,7 +126,13 @@ def extract_results(transcript, domain: str = "") -> dict:
                 u = u.strip()
                 if u and not u.endswith("$"):
                     users.add(u)
-    return {"credentials": list(creds.values()), "users": sorted(users)}
+    # Present a joined "note" (the tools that found each cred) for back-compat, plus
+    # the structured "sources" list.
+    out_creds = []
+    for r in creds.values():
+        r["note"] = ", ".join(r.get("sources", []))
+        out_creds.append(r)
+    return {"credentials": out_creds, "users": sorted(users)}
 
 
 def _open(entry: dict) -> dict[int, dict]:

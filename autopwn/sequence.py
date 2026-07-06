@@ -48,12 +48,17 @@ def _acct_of(h: str) -> str:
     return m.group(1) if m else ""
 
 
+# Built-in accounts that must never go into the spray/roast user list — they are
+# disabled and only produce NetExec "(Guest)" fallback noise.
+_BUILTIN_USERS = {"guest", "defaultaccount", "wdagutilityaccount", "krbtgt", ""}
+
+
 def _extract_users(text: str) -> set[str]:
     users: set[str] = set()
     for rx in (_RID_USER, _KERB_USER, _LDAP_USER):
         for u in rx.findall(text or ""):
             u = u.strip()
-            if u and not u.endswith("$") and u.lower() not in ("guest", ""):
+            if u and not u.endswith("$") and u.lower() not in _BUILTIN_USERS:
                 users.add(u)
     return users
 

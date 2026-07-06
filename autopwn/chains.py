@@ -36,10 +36,14 @@ _BAD_STATUS = ("STATUS_ACCOUNT_DISABLED", "STATUS_ACCOUNT_RESTRICTION",
 
 def _valid_hits(text: str):
     """(domain, user, pass) tuples from real SMB successes — a '[+]' line with no
-    disqualifying account status."""
+    disqualifying account status and no Guest fallback.
+
+    NetExec prints "[+] dom\\user:pass (Guest)" when the DC maps a failed logon to
+    the Guest account: the password is NOT valid for that user, so those lines are
+    excluded (otherwise a spray of one wrong password "succeeds" for everyone)."""
     out = []
     for line in (text or "").splitlines():
-        if "[+]" not in line or any(b in line for b in _BAD_STATUS):
+        if "[+]" not in line or "(Guest)" in line or any(b in line for b in _BAD_STATUS):
             continue
         m = _HIT_RE.search(line)
         if m:

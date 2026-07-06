@@ -586,9 +586,12 @@ async function loadFindings() {
   window._creds = d.credentials;
   $("#credsTable tbody").innerHTML = d.credentials.length ? d.credentials.map((c, i) => {
     const secret = c.password ? esc(c.password) : "(hash)";
+    const srcs = (c.sources && c.sources.length) ? c.sources : (c.note ? [c.note] : []);
+    const srcBadges = srcs.map(s =>
+      `<span class="badge text-bg-light text-secondary border me-1">${esc(s)}</span>`).join("") || "—";
     return `<tr><td class="font-monospace">${esc(c.username)}</td>
       <td class="font-monospace">${secret}</td><td class="small">${esc(c.domain || "")}</td>
-      <td><span class="badge text-bg-light text-secondary border">${esc(c.note || "")}</span></td>
+      <td>${srcBadges}</td>
       <td class="text-end"><button class="btn btn-sm btn-outline-danger py-0" data-open-session="${i}">Open session</button></td></tr>`;
   }).join("") : `<tr><td colspan="5" class="text-center text-secondary py-3">No credentials recovered yet.</td></tr>`;
   $$("#credsTable [data-open-session]").forEach(b => b.onclick = () => openSessionFrom(window._creds[+b.dataset.openSession]));
