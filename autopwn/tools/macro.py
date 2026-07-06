@@ -20,6 +20,7 @@ other native tools. See ``SmbLootTool`` below for a worked example.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -77,17 +78,53 @@ class MacroTool(Tool):
         self._R.steps.append(msg)
 
     def sub(self, tool_name: str, **kwargs: Any) -> str:
-        """Run another registered tool and return its raw output text ('' on error)."""
+        """Run another registered tool and return its raw output text ('' on error).
+
+        The tool's parameters are auto-filled from the variables captured/stored so
+        far (username, password, domain, dc_ip, userlist, …); anything passed
+        explicitly here overrides. So a value parsed with ``capture()`` earlier is
+        passed to later tools automatically."""
         t = self._reg.get(tool_name)
         if t is None:
             self.log(f"[!] sub-tool '{tool_name}' is unavailable")
             return ""
+        from ..facts import autofill
+        params = set(t.parameters.get("properties", {}))
+        filled = autofill(params)
+        filled.update({k: v for k, v in kwargs.items() if v not in (None, "")})
         try:
-            r = t.run(self._ctx, **kwargs)
+            r = t.run(self._ctx, **filled)
         except Exception as e:
             self.log(f"[!] {tool_name} error: {e}")
             return ""
         return r.raw_output or r.summary or ""
+
+    # ---- variable capture (parse output → variable → autofilled downstream) --
+    def set_var(self, name: str, value: Any) -> None:
+        """Store a variable (engagement fact). It auto-fills into any later tool
+        that takes a parameter of the same name (via sub())."""
+        if value not in (None, ""):
+            from .. import store
+            store.set_fact(name, str(value))
+
+    def get_var(self, name: str) -> Optional[str]:
+        from .. import store
+        return store.get_fact(name)
+
+    def capture(self, text: str, pattern: str, var: str, group: int = 1) -> Optional[str]:
+        """Parse *var* out of *text* with a regex and store it as a variable.
+
+        e.g. ``self.capture(out, r"login:\\s*(\\S+)", "username")`` extracts the
+        username and makes it flow into every subsequent tool. Returns the value
+        (or None)."""
+        m = re.search(pattern, text)
+        if not m:
+            return None
+        val = (m.group(group) or "").strip()
+        if val:
+            self.set_var(var, val)
+            self.log(f"  │ captured {var} = {val}")
+        return val or None
 
     def add_cred(self, username: str, password: str, domain: str = "",
                  note: str = "") -> None:
@@ -96,6 +133,11 @@ class MacroTool(Tool):
             self._R.creds.append({"username": username, "password": password,
                                   "domain": domain, "note": note or self.name})
         self._R.users.add(username)
+        # store as variables so they auto-fill into subsequent sub() tools
+        self.set_var("username", username)
+        self.set_var("password", password)
+        if domain:
+            self.set_var("domain", domain)
         self.log(f"  │ credential: {username}:{password}"
                  + (f" @ {domain}" if domain else ""))
 
@@ -136,8 +178,6 @@ class MacroTool(Tool):
 # ==========================================================================
 # Worked example — a small native tool built on the framework.
 # ==========================================================================
-import re
-
 _DEFAULT_SHARES = {"ADMIN$", "C$", "IPC$", "NETLOGON", "SYSVOL", "PRINT$"}
 _SHARE_ROW = re.compile(r"^SMB\s+\S+\s+\d+\s+\S+\s+(\S+)\s+((?:READ|WRITE)[\w,]*)", re.M)
 
@@ -169,10 +209,19 @@ class SmbLootTool(MacroTool):
 
     def execute(self, R: Results, **kw: Any) -> None:
         host = kw["target"]
+        # 1) fingerprint, and PARSE the domain + hostname from the banner into
+        #    variables — they then auto-fill into every later tool.
+        self.log(f"[run] fingerprinting {host}")
+        info = self.sub("netexec_smb", target=host, username=kw.get("username", ""),
+                        password=kw.get("password", ""), domain=kw.get("domain", ""),
+                        hash=kw.get("hash", ""))
+        self.capture(info, r"\(domain:([A-Za-z0-9.\-]+)\)", "domain")
+        self.capture(info, r"\(name:([A-Za-z0-9\-]+)\)", "hostname")
+        # 2) enumerate shares — `domain` is auto-filled from the captured variable.
         self.log(f"[run] enumerating SMB shares on {host}")
         out = self.sub("netexec_smb", target=host, username=kw.get("username", ""),
-                       password=kw.get("password", ""), domain=kw.get("domain", ""),
-                       hash=kw.get("hash", ""), enumerate="shares")
+                       password=kw.get("password", ""), hash=kw.get("hash", ""),
+                       enumerate="shares")
         readable = [(m.group(1), m.group(2)) for m in _SHARE_ROW.finditer(out)
                     if m.group(1).upper() not in _DEFAULT_SHARES]
         for share, perm in readable:
