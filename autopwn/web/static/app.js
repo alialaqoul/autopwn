@@ -678,6 +678,8 @@ function toolView(name) {
   const cmd = t.programmatic
     ? `<span class="fst-italic text-secondary">${t.kind === "native" ? "native Python module" : "programmatic argument builder (built-in)"}</span>`
     : `<code>${esc(t.template || "")}</code>`;
+  const plan = (t.plan && t.plan.length)
+    ? `<ol class="mb-0 ps-3">${t.plan.map(s => `<li>${esc(s)}</li>`).join("")}</ol>` : "";
   $("#toolViewTitle").textContent = t.name;
   $("#toolViewBody").innerHTML =
     kv("Category", `<span class="badge ${CAT_CLASS[t.category] || "text-bg-secondary"}">${esc(t.category)}</span>`) +
@@ -686,6 +688,7 @@ function toolView(name) {
     kv("Installed", t.installed ? "yes" : "no") +
     kv("Description", esc(t.description || "")) +
     kv("Command", cmd) +
+    (plan ? kv("What it does", plan) : "") +
     (t.subcommand && t.subcommand.length ? kv("Subcommand", `<code>${t.subcommand.map(esc).join(" ")}</code>`) : "") +
     (t.positional && t.positional.length ? kv("Positional", t.positional.map(x => `<code>${esc(x)}</code>`).join(" ")) : "") +
     (flags ? kv("Flags", flags) : "") +

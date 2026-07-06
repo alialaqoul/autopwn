@@ -60,6 +60,9 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     reg.register(NmapTool(nmap_path=cfg.nmap_path))
     reg.register(HttpProbeTool())
     reg.register(AdChainTool())  # macro-action: full AD kill chain
+    # Native macro tools (Python, parse everything at the Autopwn level).
+    from .macro import SmbLootTool
+    reg.register(SmbLootTool())
 
     # Catalogued external tools.
     for spec in CATALOG:

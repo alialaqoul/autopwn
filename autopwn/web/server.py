@@ -573,7 +573,8 @@ def create_app(config_path: str = "config.yaml"):
             info["installed"] = True
         if spec is None:
             info.update(binary="(native module)", kind="native",
-                        template=None, programmatic=True, harvest=[])
+                        template=None, programmatic=True, harvest=[],
+                        plan=list(getattr(tool, "plan", []) or []))
         else:
             programmatic = spec.build_args is not None
             harvest = [{"var": r.var, "regex": r.regex, "scope": r.scope,
