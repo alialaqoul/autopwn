@@ -322,7 +322,10 @@ def build_findings(hosts: dict, facts: dict, transcript=None,
             ev = _step_evidence(st, transcript, results, matched)
             if ev is None:
                 continue                 # step didn't fire — nothing to report
-            title = st.get("title") or f"{pb.get('id','')} step {st.get('n','')}"
+            # Prefer the dedicated report title (a proper vulnerability name) over
+            # the terse action/step name.
+            title = (st.get("finding_title") or st.get("title")
+                     or f"{pb.get('id','')} step {st.get('n','')}")
             if title in seen:
                 continue
             seen.add(title)

@@ -256,8 +256,21 @@ textarea::placeholder, input::placeholder {
 .pb-flow-tag.nxt  { background: #cfe2ff; border-color: #9ec5fe; color: #084298; }
 
 /* builder */
-.pb-build-step { border: 1px solid var(--bs-border-color); border-radius: .55rem;
-  padding: .75rem; background: var(--bs-body-bg); }
+/* Tinted card + accent edge so each step reads as a distinct block against the
+   white modal body; the form controls inside stay body-bg (white) for contrast. */
+.pb-build-step { border: 1px solid var(--bs-border-color);
+  border-left: 3px solid var(--ap-accent); border-radius: .55rem;
+  padding: .85rem 1rem; background: var(--bs-tertiary-bg);
+  box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+.pb-build-step .form-control, .pb-build-step .form-select,
+.pb-build-step textarea { background: var(--bs-body-bg); }
+.pb-step-head { border-bottom: 1px solid var(--bs-border-color);
+  padding-bottom: .4rem; margin-bottom: .6rem !important; }
+.pb-step-badge { font-weight: 600; background: var(--ap-accent); color: #fff;
+  border-radius: .35rem; padding: .1rem .5rem; font-size: .82rem; }
+/* nested "report as finding" panel — solid body-bg so it separates from the
+   tinted step card around it. */
+.pb-finding-box { background: var(--bs-body-bg); }
 .pb-lbl { font-size: .74rem; font-weight: 600; color: var(--bs-secondary-color);
   margin-bottom: .1rem; display: block; }
 .pb-chips { display: flex; flex-wrap: wrap; gap: .3rem; }

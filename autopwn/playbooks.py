@@ -90,15 +90,18 @@ def _finding(pb_id, name, severity, cvss, summary, impact, recommendation,
 
 
 def _step(n, title, trigger, tool, consumes, produces, detail, nxt="next",
-          branches=None, severity="", cvss="", impact="", recommendation=""):
+          branches=None, severity="", cvss="", impact="", recommendation="",
+          finding_title=""):
     # severity (+ cvss/impact/recommendation) makes the step a reportable finding:
     # it appears in the report when the step actually fires (its produced artifact
     # is evidenced in the run). Leave severity "" for a non-reporting step.
+    # finding_title is the title shown in the REPORT (a proper vulnerability name),
+    # separate from `title` which is the action/step name in the builder.
     return {"n": n, "title": title, "trigger": trigger, "tool": tool,
             "consumes": consumes, "produces": produces, "detail": detail,
             "next": nxt, "branches": branches or [],
             "severity": severity, "cvss": cvss, "impact": impact,
-            "recommendation": recommendation}
+            "recommendation": recommendation, "finding_title": finding_title}
 
 
 # The AD kill chain as a flat sequence of BUILT-IN tools. Each entry names a
@@ -154,6 +157,7 @@ DEFAULT_PLAYBOOKS = [
                   [{"cond": "guest enabled", "then": "RID-brute the full user list"},
                    {"cond": "guest disabled / RID blocked", "then": "→ step 2 (user enum)"}],
                   severity="Medium", cvss="5.3",
+                  finding_title="Domain User Enumeration via Null / Guest Session",
                   impact="An unauthenticated attacker can enumerate the full domain "
                          "user list (guest/null session + RID cycling), which seeds "
                          "password spraying and roasting attacks.",
@@ -172,6 +176,7 @@ DEFAULT_PLAYBOOKS = [
                   "next",
                   [{"cond": "hash cracked", "then": "recovered password becomes a real domain credential"}],
                   severity="High", cvss="7.5",
+                  finding_title="AS-REP Roastable Accounts (Kerberos Pre-Authentication Disabled)",
                   impact="Accounts with Kerberos pre-authentication disabled allow an "
                          "unauthenticated attacker to request AS-REP hashes and crack "
                          "them offline, yielding domain credentials.",
@@ -183,6 +188,7 @@ DEFAULT_PLAYBOOKS = [
                   "no lockout). Highest-yield first spray.", "next",
                   [{"cond": "hit", "then": "foothold credential (e.g. hodor:hodor)"}],
                   severity="High", cvss="8.1",
+                  finding_title="Weak or Guessable Account Passwords",
                   impact="Weak or guessable account passwords (including password equal "
                          "to the username) were accepted, giving an attacker a domain "
                          "foothold for lateral movement.",
@@ -196,6 +202,7 @@ DEFAULT_PLAYBOOKS = [
                   [{"cond": "constrained / unconstrained delegation", "then": "S4U2Proxy: get_st -impersonate Administrator"},
                    {"cond": "password cracked", "then": "spray it for reuse across all users"}],
                   severity="High", cvss="8.1",
+                  finding_title="Kerberoastable Service Accounts",
                   impact="Service accounts with SPNs are Kerberoastable: any domain user "
                          "can request their service tickets and crack them offline. "
                          "Service accounts are often privileged.",
@@ -207,6 +214,7 @@ DEFAULT_PLAYBOOKS = [
                   "non-default shares (backups, scripts, GPP, KeePass).", "next",
                   [{"cond": "machine-account / NTLM hashes found", "then": "→ step 7 (pass-the-hash)"}],
                   severity="Medium", cvss="6.5",
+                  finding_title="Credential Reuse and Sensitive Data on Readable Shares",
                   impact="Recovered passwords are reused across accounts and/or credential "
                          "material (NTLM hashes, GPP cpassword, backups) is exposed on "
                          "readable shares, extending compromise.",
@@ -218,6 +226,7 @@ DEFAULT_PLAYBOOKS = [
                   "Then read C$ / flags or secretsdump (DCSync).", "final",
                   [{"cond": "Pwn3d!", "then": "admin on DC → dump NTDS / capture flags"}],
                   severity="Critical", cvss="9.8",
+                  finding_title="Full Domain Compromise — Administrative Access to Domain Controller",
                   impact="Administrative access to a Domain Controller was achieved "
                          "(pass-the-hash / DCSync), giving full control of the domain — "
                          "all accounts, hashes and data are compromised.",
@@ -248,6 +257,7 @@ DEFAULT_PLAYBOOKS = [
                   "export KRB5CCNAME=<ccache>; secretsdump -k -no-pass <dc> (DCSync) or read C$.",
                   "final",
                   severity="Critical", cvss="9.0",
+                  finding_title="Privilege Escalation via Resource-Based Constrained Delegation (RBCD)",
                   impact="Resource-Based Constrained Delegation was abused to impersonate "
                          "a privileged user and reach Domain Admin.",
                   recommendation="Set MachineAccountQuota to 0, restrict who can write "
@@ -271,6 +281,7 @@ DEFAULT_PLAYBOOKS = [
             _step(3, "Execute / dump", "have hash", "ntlmrelayx", ["hash"], ["admin"],
                   "Command execution or SAM/secrets dump on the relayed host.", "final",
                   severity="High", cvss="8.1",
+                  finding_title="NTLM Relay to Code Execution / Secrets Dump",
                   impact="Relayed NTLM authentication yielded code execution or a SAM/"
                          "secrets dump on a signing-disabled host, enabling lateral movement.",
                   recommendation="Require SMB signing everywhere, disable LLMNR/NBT-NS/mDNS, "
@@ -292,6 +303,7 @@ DEFAULT_PLAYBOOKS = [
             _step(3, "Vulnerability scan", "start", "nuclei", [], ["credential"],
                   "Test auth, injection, SSRF, deserialization, default creds.",
                   severity="High", cvss="7.5",
+                  finding_title="Exploitable Web Application Vulnerability / Default Credentials",
                   impact="The web application exposed a vulnerability or default/weak "
                          "credentials that yield a foothold.",
                   recommendation="Patch the identified issue, remove default credentials, "
@@ -400,7 +412,7 @@ def _migrate(log_dir, data: list) -> list:
         dsteps = {s.get("n"): s for s in (dpb or {}).get("steps", [])}
         for st in pb.get("steps", []):
             # ensure the finding keys exist so the editor can show/edit them
-            for k in ("severity", "cvss", "impact", "recommendation"):
+            for k in ("severity", "cvss", "impact", "recommendation", "finding_title"):
                 if k not in st:
                     dsrc = dsteps.get(st.get("n"), {})
                     st[k] = dsrc.get(k, "")

@@ -211,8 +211,8 @@ function renderBuilder() {
         <button class="btn btn-outline-danger" type="button" data-act="delBranch" data-step="${i}" data-branch="${j}">✕</button>
       </div>`).join("");
     return `<div class="pb-build-step">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <span class="fw-semibold">Step ${st.n}</span>
+      <div class="pb-step-head d-flex justify-content-between align-items-center mb-2">
+        <span class="pb-step-badge">Step ${st.n}</span>
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-secondary py-0" type="button" data-act="upStep" data-step="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
           <button class="btn btn-outline-secondary py-0" type="button" data-act="downStep" data-step="${i}" ${i === d.steps.length - 1 ? "disabled" : ""}>↓</button>
@@ -240,7 +240,7 @@ function renderBuilder() {
       <div class="mb-2"><label class="pb-lbl">Branches <span class="text-secondary">(conditional re-routes)</span></label>
         ${branches}
         <button class="btn btn-sm btn-outline-secondary py-0" type="button" data-act="addBranch" data-step="${i}">+ branch</button></div>
-      <div class="border rounded p-2 mt-2">
+      <div class="pb-finding-box border rounded p-2 mt-2">
         <div class="row g-2 align-items-end">
           <div class="col-md-5"><label class="pb-lbl">Report as finding <span class="text-secondary">(severity)</span></label>
             <select class="form-select form-select-sm" data-step="${i}" data-field="severity">
@@ -251,6 +251,8 @@ function renderBuilder() {
             <input class="form-control form-control-sm" value="${esc(st.cvss || "")}" data-step="${i}" data-field="cvss" placeholder="8.1"></div>
         </div>
         <div class="form-text mb-1">Set a severity to include this step in the report — it appears when the step actually fires (its produced artifact is evidenced in the run).</div>
+        <div class="mb-1"><label class="pb-lbl">Finding title <span class="text-secondary">(shown in the report — a proper vulnerability name, not the action name)</span></label>
+          <input class="form-control form-control-sm" value="${esc(st.finding_title || "")}" data-step="${i}" data-field="finding_title" placeholder="e.g. Kerberoastable Service Accounts"></div>
         <div class="mb-1"><label class="pb-lbl">Impact</label>
           <textarea class="form-control form-control-sm" rows="2" data-step="${i}" data-field="impact" placeholder="What an attacker gains when this step succeeds.">${esc(st.impact || "")}</textarea></div>
         <div><label class="pb-lbl">Recommendation</label>
