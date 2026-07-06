@@ -320,7 +320,9 @@ function renderBuilder() {
     <div class="form-text mb-2">Steps are the execution plan <em>and</em> the documented attack path. Each step's
       <strong>Tool</strong> runs when its <strong>Trigger</strong> is met, with the given <strong>Arguments</strong>; Autopwn parses each tool's
       output into variables that the next step auto-fills. <code>Consumes</code>/<code>Produces</code> document the data flow, and a step with a
-      <strong>severity</strong> becomes a report finding when it fires.</div>
+      <strong>severity</strong> becomes a report finding when it fires.
+      <br>Note: <code>Consumes</code>/<code>Produces</code> list artifacts that flow <em>between steps</em>. The <code>target</code> (host) — and any
+      creds/domain you seed at launch — are supplied once to the whole playbook, so they're not listed per step.</div>
     <div class="d-flex flex-column gap-2">${steps}</div>`;
   syncJsonFromDraft();
 }
