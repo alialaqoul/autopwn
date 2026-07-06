@@ -295,7 +295,131 @@ def build_findings(hosts: dict, facts: dict, transcript=None,
             "evidence_cmd": cmd, "evidence_out": out,
         })
         fid += 1
+
+    # --- step-level findings ------------------------------------------------
+    # Any playbook STEP that has a severity becomes a reportable finding *when it
+    # actually fired* — i.e. the artifact it produces is evidenced in the run (a
+    # cracked hash, a Pwn3d! admin, recovered creds, …). This turns the attack
+    # path itself (Kerberoast, AS-REP, spray, pass-the-hash) into findings, not
+    # just the standalone detection playbooks.
+    results = extract_results(transcript or [])
+    seen = {f["title"] for f in findings}
+    for pb in books:
+        if pb.get("severity"):
+            continue                     # already handled above
+        if not _playbook_ran(pb, transcript):
+            continue                     # don't attribute evidence to a playbook that
+                                         # never executed (e.g. RBCD firing on the AD
+                                         # chain's Pwn3d!)
+        matched = pb_mod.matching_hosts(pb, hosts)
+        ports = pb.get("match", {}).get("any_ports") or []
+        if ports and not matched:
+            continue                     # this playbook's services aren't present
+        for st in pb.get("steps", []):
+            sev = st.get("severity")
+            if not sev:
+                continue
+            ev = _step_evidence(st, transcript, results, matched)
+            if ev is None:
+                continue                 # step didn't fire — nothing to report
+            title = st.get("title") or f"{pb.get('id','')} step {st.get('n','')}"
+            if title in seen:
+                continue
+            seen.add(title)
+            findings.append({
+                "id": f"F-{fid:02d}", "title": title, "severity": sev,
+                "cvss": st.get("cvss", ""), "hosts": ev[2] or matched,
+                "description": st.get("detail", ""),
+                "impact": st.get("impact", ""),
+                "recommendation": st.get("recommendation", ""),
+                "evidence_cmd": ev[0], "evidence_out": ev[1],
+            })
+            fid += 1
+
+    findings.sort(key=lambda f: SEV_ORDER.get(f.get("severity"), 9))
     return findings
+
+
+# Signals that a step's produced artifact was actually obtained, so the step
+# becomes a real finding only when it fired. Ordered most-distinctive first so a
+# Kerberoast step reports Kerberoast evidence, not generic "a credential exists".
+SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
+_STEP_SIGNALS = {
+    "admin": [r"\(Pwn3d!\)"],
+    "flag": [r"(?:THM|HTB|flag|FLAG)\{[^}]{2,80}\}"],
+    "spn_hash": [r"\$krb5tgs\$"],
+    "ticket": [r"\$krb5tgs\$"],
+    "asrep_hash": [r"\$krb5asrep\$"],
+    "hash": [r"[a-f0-9]{32}:[a-f0-9]{32}:::"],
+    "machine_account": [r"[Ss]uccessfully added (?:machine )?account", r"Adding computer"],
+    "relay_targets": [r"\(signing:False\)"],
+    "userlist": [r"\(SidTypeUser\)", r"VALID USERNAME:"],
+}
+_ARTIFACT_ORDER = ["admin", "flag", "spn_hash", "ticket", "asrep_hash", "hash",
+                   "machine_account", "shares", "relay_targets", "userlist", "credential"]
+
+
+def _playbook_ran(pb, transcript):
+    """True if this playbook actually executed in the run — so its step findings
+    are attributed to it, not to unrelated evidence another playbook produced.
+
+    Executed = one of its built-in sequence tools ran, its single run tool ran, or
+    a consolidated ``playbook:<id>`` entry exists. Documentation playbooks with no
+    executor (RBCD, relay, web-app) therefore report nothing unless actually run."""
+    names = {e.get("name") for e in transcript or []
+             if e.get("kind") == "tool_result"}
+    if not names:
+        return False
+    run = pb.get("run") or {}
+    seq_tools = {s.get("tool") for s in (run.get("sequence") or [])}
+    if seq_tools & names:
+        return True
+    if run.get("tool") and run["tool"] in names:
+        return True
+    return f"playbook:{pb.get('id')}" in names
+
+
+def _scan_transcript(transcript, patterns, hosts):
+    """(command, matching-lines excerpt) of the first tool output matching any
+    pattern; prefer a run that targeted one of the finding's hosts."""
+    rx = re.compile("|".join(patterns))
+    best = None
+    for e in transcript or []:
+        if e.get("kind") != "tool_result":
+            continue
+        out = e.get("output") or e.get("summary") or ""
+        if not out or not rx.search(out):
+            continue
+        cmd = e.get("command") or e.get("name") or ""
+        lines = [ln for ln in out.splitlines() if rx.search(ln)][:12]
+        excerpt = "\n".join(lines)[:1500] or out[:800]
+        if hosts and any(h in (cmd + " " + out) for h in hosts):
+            return (cmd, excerpt)
+        best = best or (cmd, excerpt)
+    return best
+
+
+def _step_evidence(step, transcript, results, matched):
+    """Return (cmd, evidence, hosts) if the step fired, else None."""
+    produces = step.get("produces") or []
+    creds = results.get("credentials", [])
+    for art in _ARTIFACT_ORDER:
+        if art not in produces:
+            continue
+        if art == "credential":
+            if creds:
+                out = "\n".join(
+                    f"{c['username']}:{c.get('password') or '(hash)'}"
+                    f" @ {c.get('domain') or '?'}" for c in creds[:12])
+                return ("credential recovery (spray / crack / reuse)", out, matched)
+            continue
+        pats = _STEP_SIGNALS.get(art)
+        if not pats:
+            continue
+        hit = _scan_transcript(transcript, pats, matched)
+        if hit:
+            return (hit[0], hit[1], matched)
+    return None
 
 
 def _port_evidence(hosts: dict, matched: list, ports: set) -> str:

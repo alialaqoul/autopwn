@@ -90,10 +90,15 @@ def _finding(pb_id, name, severity, cvss, summary, impact, recommendation,
 
 
 def _step(n, title, trigger, tool, consumes, produces, detail, nxt="next",
-          branches=None):
+          branches=None, severity="", cvss="", impact="", recommendation=""):
+    # severity (+ cvss/impact/recommendation) makes the step a reportable finding:
+    # it appears in the report when the step actually fires (its produced artifact
+    # is evidenced in the run). Leave severity "" for a non-reporting step.
     return {"n": n, "title": title, "trigger": trigger, "tool": tool,
             "consumes": consumes, "produces": produces, "detail": detail,
-            "next": nxt, "branches": branches or []}
+            "next": nxt, "branches": branches or [],
+            "severity": severity, "cvss": cvss, "impact": impact,
+            "recommendation": recommendation}
 
 
 # The AD kill chain as a flat sequence of BUILT-IN tools. Each entry names a
@@ -147,7 +152,13 @@ DEFAULT_PLAYBOOKS = [
                   "netexec_smb -u guest -p '' then RID-brute to walk every domain "
                   "user (SidTypeUser) into a user list.", "next",
                   [{"cond": "guest enabled", "then": "RID-brute the full user list"},
-                   {"cond": "guest disabled / RID blocked", "then": "→ step 2 (user enum)"}]),
+                   {"cond": "guest disabled / RID blocked", "then": "→ step 2 (user enum)"}],
+                  severity="Medium", cvss="5.3",
+                  impact="An unauthenticated attacker can enumerate the full domain "
+                         "user list (guest/null session + RID cycling), which seeds "
+                         "password spraying and roasting attacks.",
+                  recommendation="Disable the Guest account, restrict anonymous SID/RID "
+                         "enumeration (RestrictAnonymous), and monitor for RID cycling."),
             _step(2, "User enumeration (hardened DC fallback)", "no userlist yet",
                   "netexec_ldap / kerbrute_userenum", ["credential"], ["userlist"],
                   "Build a user list another way when RID cycling returns nothing.",
@@ -159,28 +170,60 @@ DEFAULT_PLAYBOOKS = [
                   "Roast accounts without Kerberos pre-auth, crack offline "
                   "(john krb5asrep / hashcat 18200). Foothold that beats guest-disabled DCs.",
                   "next",
-                  [{"cond": "hash cracked", "then": "recovered password becomes a real domain credential"}]),
+                  [{"cond": "hash cracked", "then": "recovered password becomes a real domain credential"}],
+                  severity="High", cvss="7.5",
+                  impact="Accounts with Kerberos pre-authentication disabled allow an "
+                         "unauthenticated attacker to request AS-REP hashes and crack "
+                         "them offline, yielding domain credentials.",
+                  recommendation="Enable Kerberos pre-authentication on all accounts "
+                         "(remove DONT_REQ_PREAUTH) and enforce strong passwords."),
             _step(4, "Password spray (username == password)", "have userlist",
                   "netexec_spray", ["userlist"], ["credential"],
                   "--no-bruteforce in one server-side batch (one attempt per user → "
                   "no lockout). Highest-yield first spray.", "next",
-                  [{"cond": "hit", "then": "foothold credential (e.g. hodor:hodor)"}]),
+                  [{"cond": "hit", "then": "foothold credential (e.g. hodor:hodor)"}],
+                  severity="High", cvss="8.1",
+                  impact="Weak or guessable account passwords (including password equal "
+                         "to the username) were accepted, giving an attacker a domain "
+                         "foothold for lateral movement.",
+                  recommendation="Enforce a strong password policy, block username-based "
+                         "and common passwords (e.g. Azure AD Password Protection), and "
+                         "enable account lockout / spray detection."),
             _step(5, "Kerberoast + crack", "have credential",
                   "kerberoast + hashcat", ["credential"], ["credential", "spn_hash", "ticket"],
                   "GetUserSPNs for SPN accounts; crack offline (hashcat 13100). "
                   "Detects delegation on the SPN account.", "next",
                   [{"cond": "constrained / unconstrained delegation", "then": "S4U2Proxy: get_st -impersonate Administrator"},
-                   {"cond": "password cracked", "then": "spray it for reuse across all users"}]),
+                   {"cond": "password cracked", "then": "spray it for reuse across all users"}],
+                  severity="High", cvss="8.1",
+                  impact="Service accounts with SPNs are Kerberoastable: any domain user "
+                         "can request their service tickets and crack them offline. "
+                         "Service accounts are often privileged.",
+                  recommendation="Use group Managed Service Accounts (gMSA) or 25+ char "
+                         "random passwords for SPN accounts, and use AES encryption."),
             _step(6, "Password reuse + loot shares", "have credential",
                   "netexec_spray / smb_get", ["credential"], ["hash", "shares"],
                   "Spray recovered passwords across all users; loot readable "
                   "non-default shares (backups, scripts, GPP, KeePass).", "next",
-                  [{"cond": "machine-account / NTLM hashes found", "then": "→ step 7 (pass-the-hash)"}]),
+                  [{"cond": "machine-account / NTLM hashes found", "then": "→ step 7 (pass-the-hash)"}],
+                  severity="Medium", cvss="6.5",
+                  impact="Recovered passwords are reused across accounts and/or credential "
+                         "material (NTLM hashes, GPP cpassword, backups) is exposed on "
+                         "readable shares, extending compromise.",
+                  recommendation="Enforce unique passwords, remove secrets from shares, "
+                         "and restrict share permissions to least privilege."),
             _step(7, "Pass-the-hash → goal", "have hash",
                   "netexec_smb -H / secretsdump", ["hash"], ["admin", "flag"],
                   "netexec_smb -u acct -H <nt> against the DC; watch for Pwn3d!. "
                   "Then read C$ / flags or secretsdump (DCSync).", "final",
-                  [{"cond": "Pwn3d!", "then": "admin on DC → dump NTDS / capture flags"}]),
+                  [{"cond": "Pwn3d!", "then": "admin on DC → dump NTDS / capture flags"}],
+                  severity="Critical", cvss="9.8",
+                  impact="Administrative access to a Domain Controller was achieved "
+                         "(pass-the-hash / DCSync), giving full control of the domain — "
+                         "all accounts, hashes and data are compromised.",
+                  recommendation="Rotate krbtgt and privileged credentials, enforce "
+                         "tiered administration and LAPS, restrict NTLM, and monitor for "
+                         "DCSync/replication from non-DCs."),
         ],
     },
     {
@@ -203,7 +246,12 @@ DEFAULT_PLAYBOOKS = [
             _step(4, "Use the ticket", "have ticket", "secretsdump -k",
                   ["ticket"], ["admin", "flag"],
                   "export KRB5CCNAME=<ccache>; secretsdump -k -no-pass <dc> (DCSync) or read C$.",
-                  "final"),
+                  "final",
+                  severity="Critical", cvss="9.0",
+                  impact="Resource-Based Constrained Delegation was abused to impersonate "
+                         "a privileged user and reach Domain Admin.",
+                  recommendation="Set MachineAccountQuota to 0, restrict who can write "
+                         "msDS-AllowedToActOnBehalfOfOtherIdentity, and audit delegation."),
         ],
     },
     {
@@ -221,7 +269,12 @@ DEFAULT_PLAYBOOKS = [
                   ["relay_targets"], ["hash"],
                   "Responder poisons LLMNR/NBT-NS/mDNS; ntlmrelayx relays to a signing-disabled host."),
             _step(3, "Execute / dump", "have hash", "ntlmrelayx", ["hash"], ["admin"],
-                  "Command execution or SAM/secrets dump on the relayed host.", "final"),
+                  "Command execution or SAM/secrets dump on the relayed host.", "final",
+                  severity="High", cvss="8.1",
+                  impact="Relayed NTLM authentication yielded code execution or a SAM/"
+                         "secrets dump on a signing-disabled host, enabling lateral movement.",
+                  recommendation="Require SMB signing everywhere, disable LLMNR/NBT-NS/mDNS, "
+                         "and disable NTLM where possible."),
         ],
     },
     {
@@ -237,7 +290,12 @@ DEFAULT_PLAYBOOKS = [
             _step(2, "Content discovery", "start", "ffuf / feroxbuster", [], [],
                   "Directory/vhost brute force; find admin panels, APIs, uploads."),
             _step(3, "Vulnerability scan", "start", "nuclei", [], ["credential"],
-                  "Test auth, injection, SSRF, deserialization, default creds."),
+                  "Test auth, injection, SSRF, deserialization, default creds.",
+                  severity="High", cvss="7.5",
+                  impact="The web application exposed a vulnerability or default/weak "
+                         "credentials that yield a foothold.",
+                  recommendation="Patch the identified issue, remove default credentials, "
+                         "and apply secure configuration and input validation."),
             _step(4, "Pivot credentials", "have credential", "netexec_spray",
                   ["credential"], ["admin"],
                   "Any recovered credential → spray across the AD estate.", "final"),
@@ -321,18 +379,32 @@ def load(log_dir) -> list:
 def _migrate(log_dir, data: list) -> list:
     """Upgrade older stored playbooks in place.
 
-    The AD kill chain used to run the ``ad_kill_chain`` macro; it now runs a
-    built-in tool sequence. Give any stored copy that still lacks a sequence the
-    default one so existing installs get the built-in path without a reset.
+    * The AD kill chain used to run the ``ad_kill_chain`` macro; it now runs a
+      built-in tool sequence — give any stored copy that lacks one the default.
+    * Steps gained finding fields (severity/cvss/impact/recommendation) so each
+      step can be reported. Back-fill them from the defaults (matched by id + step
+      number) onto any stored step that doesn't have them yet, without touching a
+      step the operator has already customised.
     """
     changed = False
+    defaults = {pb["id"]: pb for pb in DEFAULT_PLAYBOOKS}
     for pb in data:
-        if pb.get("id") == "ad-kill-chain":
+        pid = pb.get("id")
+        if pid == "ad-kill-chain":
             run = pb.setdefault("run", {})
             if not run.get("sequence"):
                 run["sequence"] = copy.deepcopy(AD_KILL_CHAIN_SEQUENCE)
                 run.pop("tool", None)
                 changed = True
+        dpb = defaults.get(pid)
+        dsteps = {s.get("n"): s for s in (dpb or {}).get("steps", [])}
+        for st in pb.get("steps", []):
+            # ensure the finding keys exist so the editor can show/edit them
+            for k in ("severity", "cvss", "impact", "recommendation"):
+                if k not in st:
+                    dsrc = dsteps.get(st.get("n"), {})
+                    st[k] = dsrc.get(k, "")
+                    changed = True
     if changed:
         save(log_dir, data)
     return data

@@ -237,9 +237,25 @@ function renderBuilder() {
         <div class="pb-chips">${chipRow("produces", st.produces, i, _pbSchema.artifacts)}</div></div>
       <div class="mb-2"><label class="pb-lbl">Detail</label>
         <textarea class="form-control form-control-sm" rows="2" data-step="${i}" data-field="detail">${esc(st.detail || "")}</textarea></div>
-      <div><label class="pb-lbl">Branches <span class="text-secondary">(conditional re-routes)</span></label>
+      <div class="mb-2"><label class="pb-lbl">Branches <span class="text-secondary">(conditional re-routes)</span></label>
         ${branches}
         <button class="btn btn-sm btn-outline-secondary py-0" type="button" data-act="addBranch" data-step="${i}">+ branch</button></div>
+      <div class="border rounded p-2 mt-2">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-5"><label class="pb-lbl">Report as finding <span class="text-secondary">(severity)</span></label>
+            <select class="form-select form-select-sm" data-step="${i}" data-field="severity">
+              <option value="">— off (don't report) —</option>
+              ${(_pbSchema.severities || []).map(s => `<option ${st.severity === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select></div>
+          <div class="col-md-3"><label class="pb-lbl">CVSS</label>
+            <input class="form-control form-control-sm" value="${esc(st.cvss || "")}" data-step="${i}" data-field="cvss" placeholder="8.1"></div>
+        </div>
+        <div class="form-text mb-1">Set a severity to include this step in the report — it appears when the step actually fires (its produced artifact is evidenced in the run).</div>
+        <div class="mb-1"><label class="pb-lbl">Impact</label>
+          <textarea class="form-control form-control-sm" rows="2" data-step="${i}" data-field="impact" placeholder="What an attacker gains when this step succeeds.">${esc(st.impact || "")}</textarea></div>
+        <div><label class="pb-lbl">Recommendation</label>
+          <textarea class="form-control form-control-sm" rows="2" data-step="${i}" data-field="recommendation" placeholder="How to remediate.">${esc(st.recommendation || "")}</textarea></div>
+      </div>
     </div>`;
   }).join("");
 
