@@ -674,7 +674,7 @@ function toolView(name) {
   const flags = t.flags && Object.keys(t.flags).length
     ? Object.entries(t.flags).map(([v, f]) => `<code>${esc(v)}</code> → <code>${esc(f || "(bare)")}</code>`).join("<br>") : "";
   const harvest = (t.harvest && t.harvest.length)
-    ? t.harvest.map(h => `<code>${esc(h.var)}</code>${h.multi ? "*" : ""}${h.scope === "host" ? " @host" : ""} ← <code>${esc(h.regex)}</code>`).join("<br>") : "";
+    ? t.harvest.map(h => `<code>${esc(h.var)}</code>${h.multi ? "*" : ""}${h.scope === "host" ? " @host" : ""} ← <code>${esc(h.regex)}</code>${h.source === "tool" ? ' <span class="badge text-bg-light text-secondary border">tool</span>' : ""}`).join("<br>") : "";
   const cmd = t.programmatic
     ? `<span class="fst-italic text-secondary">${t.kind === "native" ? "native Python module" : "programmatic argument builder (built-in)"}</span>`
     : `<code>${esc(t.template || "")}</code>`;
@@ -685,7 +685,11 @@ function toolView(name) {
     kv("Category", `<span class="badge ${CAT_CLASS[t.category] || "text-bg-secondary"}">${esc(t.category)}</span>`) +
     kv("Kind", esc(t.kind) + (t.custom ? " (editable)" : " (read-only)")) +
     kv("Binary", t.kind === "native" ? "<span class='text-secondary'>native module</span>" : `<code>${esc(t.binary)}</code>`) +
+    (t.aliases && t.aliases.length ? kv("Aliases", t.aliases.map(a => `<code>${esc(a)}</code>`).join(" ")) : "") +
     kv("Installed", t.installed ? "yes" : "no") +
+    (t.kind !== "native" ? kv("Intrusive", t.intrusive ? "yes — sends traffic / alters state" : "no") : "") +
+    (t.kind !== "native" ? kv("Requires host", (t.requires_host ? "yes" : "no") + (t.authorize_on ? ` · authorizes on <code>${esc(t.authorize_on)}</code>` : "")) : "") +
+    (t.timeout ? kv("Timeout", esc(t.timeout) + " s") : "") +
     kv("Description", esc(t.description || "")) +
     kv("Command", cmd) +
     (plan ? kv("What it does", plan) : "") +
@@ -693,7 +697,7 @@ function toolView(name) {
     (t.positional && t.positional.length ? kv("Positional", t.positional.map(x => `<code>${esc(x)}</code>`).join(" ")) : "") +
     (flags ? kv("Flags", flags) : "") +
     (t.fixed && t.fixed.length ? kv("Fixed", `<code>${t.fixed.map(esc).join(" ")}</code>`) : "") +
-    (harvest ? kv("Harvests", harvest) : "") +
+    (harvest ? kv("Harvests (parse → variable)", harvest) : "") +
     (t.install_hint ? kv("Install", esc(t.install_hint)) : "") +
     kv("Parameters", paramRows);
   _toolViewModal.show();

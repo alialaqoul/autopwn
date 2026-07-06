@@ -576,16 +576,30 @@ def create_app(config_path: str = "config.yaml"):
                         template=None, programmatic=True, harvest=[],
                         plan=list(getattr(tool, "plan", []) or []))
         else:
+            from ..tools.command import (host_from_domain, host_from_target,
+                                         host_from_url)
+            _hr = {host_from_target: "target", host_from_url: "url",
+                   host_from_domain: "domain"}
+            from ..facts import DEFAULT_HARVEST
             programmatic = spec.build_args is not None
+            # every catalog tool's output is parsed by the global DEFAULT_HARVEST
+            # rules (domain, hostname, username, password, …) plus any tool-specific
+            # rules — show both so the operator sees exactly what becomes a variable.
             harvest = [{"var": r.var, "regex": r.regex, "scope": r.scope,
-                        "multi": r.multi} for r in (spec.harvest or [])]
+                        "multi": r.multi, "source": "global"} for r in DEFAULT_HARVEST]
+            harvest += [{"var": r.var, "regex": r.regex, "scope": r.scope,
+                         "multi": r.multi, "source": "tool"} for r in (spec.harvest or [])]
             info.update(
                 binary=spec.binary, kind="custom" if info["custom"] else "catalog",
                 programmatic=programmatic,
                 template=None if programmatic else custom_tools.command_template(spec),
                 subcommand=spec.subcommand, positional=spec.positional,
                 flags=spec.flags, fixed=spec.fixed, harvest=harvest,
-                install_hint=spec.install_hint)
+                install_hint=spec.install_hint,
+                # full built-in settings
+                intrusive=spec.active, requires_host=spec.requires_host,
+                timeout=spec.timeout, aliases=spec.aliases,
+                authorize_on=_hr.get(spec.host_resolver, "custom"))
         return info
 
     @app.get("/api/tools")
