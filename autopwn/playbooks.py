@@ -31,10 +31,16 @@ import re
 from pathlib import Path
 
 
+# Bump when the built-in playbooks change so existing installs re-seed them.
+_BUILTIN_VERSION = 2
+
 # Controlled vocabulary the step builder offers (free text is still allowed).
+# `domain`/`signing`/`host_info` are the reconnaissance variables an early
+# fingerprint step produces (and that later Kerberos steps consume).
 ARTIFACTS = [
-    "userlist", "credential", "hash", "ticket", "spn_hash", "asrep_hash",
-    "shares", "relay_targets", "machine_account", "admin", "flag",
+    "domain", "host_info", "signing", "userlist", "credential", "hash", "ticket",
+    "spn_hash", "asrep_hash", "shares", "relay_targets", "machine_account",
+    "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
 # A step fires when its trigger is true against the current variables.
@@ -152,9 +158,10 @@ DEFAULT_PLAYBOOKS = [
         "run": {},
         "steps": [
             _step(1, "Fingerprint + null session", "start",
-                  "netexec_smb", [], [],
+                  "netexec_smb", [], ["domain", "host_info", "signing"],
                   "netexec_smb against the DC to read the domain, hostname and SMB "
-                  "signing over a null session."),
+                  "signing over a null session. The domain it discovers is required "
+                  "by the Kerberos steps (kerbrute / AS-REP / Kerberoast)."),
             _step(2, "RID-cycle the domain user list", "start",
                   "netexec_rid_brute", [], ["userlist"],
                   "RID-brute over a guest/null session to walk every domain user "
@@ -167,11 +174,11 @@ DEFAULT_PLAYBOOKS = [
                   recommendation="Disable the Guest account, restrict anonymous SID/RID "
                          "enumeration (RestrictAnonymous), and monitor for RID cycling."),
             _step(3, "User-enum fallback (hardened DC)", "no userlist",
-                  "kerbrute_userenum", [], ["userlist"],
+                  "kerbrute_userenum", ["domain"], ["userlist"],
                   "When RID cycling returns nothing, enumerate valid usernames via "
-                  "Kerberos pre-auth (no lockout)."),
+                  "Kerberos pre-auth (no lockout). Needs the domain."),
             _step(4, "AS-REP roast", "have userlist",
-                  "asrep_roast", ["userlist"], ["asrep_hash"],
+                  "asrep_roast", ["userlist", "domain"], ["asrep_hash"],
                   "Request AS-REP hashes for accounts without Kerberos pre-auth.",
                   severity="High", cvss="7.5",
                   finding_title="AS-REP Roastable Accounts (Kerberos Pre-Authentication Disabled)",
@@ -201,8 +208,9 @@ DEFAULT_PLAYBOOKS = [
                   "With a credential, dump the complete user list over LDAP.",
                   args={"action": "--users"}),
             _step(8, "Kerberoast SPN accounts", "have credential",
-                  "kerberoast", ["credential"], ["spn_hash"],
-                  "GetUserSPNs for SPN accounts to request their service tickets.",
+                  "kerberoast", ["credential", "domain"], ["spn_hash"],
+                  "GetUserSPNs for SPN accounts to request their service tickets. "
+                  "Needs a credential and the domain.",
                   severity="High", cvss="8.1",
                   finding_title="Kerberoastable Service Accounts",
                   impact="Service accounts with SPNs are Kerberoastable: any domain user "
@@ -214,8 +222,9 @@ DEFAULT_PLAYBOOKS = [
                   "crack_hashes", ["spn_hash"], ["credential"],
                   "Crack the Kerberoast (krb5tgs) hashes offline with john + rockyou."),
             _step(10, "Password reuse spray", "have password",
-                  "spray_cracked", ["credential"], ["credential"],
-                  "Spray a cracked password across all users to find reuse."),
+                  "spray_cracked", ["credential", "userlist"], ["credential"],
+                  "Spray a cracked password across all users (the user list) to "
+                  "find reuse."),
             _step(11, "Loot readable shares", "have credential",
                   "smb_loot", ["credential"], ["shares", "hash"],
                   "Enumerate and flag readable non-default SMB shares (backups, "
@@ -398,35 +407,33 @@ def load(log_dir) -> list:
 def _migrate(log_dir, data: list) -> list:
     """Upgrade older stored playbooks in place.
 
-    The AD kill chain was restructured to a tool-per-step model (each step names
-    the single tool it runs; the execution sequence is generated from the steps).
-    Re-seed the stored copy from the default when it is still the old shape (a
-    separate run.sequence, or descriptive multi-tool step labels). For every
-    built-in playbook, ensure each step has the current keys (args + finding
-    fields) so the editor can show and edit them.
+    Built-in playbooks evolve (the AD chain became a tool-per-step model; steps
+    gained args, finding fields, and accurate consumes/produces). Each built-in is
+    stamped with ``_v``; when the stored copy predates the current
+    ``_BUILTIN_VERSION`` (or is the old AD-chain shape) it is re-seeded from the
+    default. User-created playbooks are never re-seeded — only back-filled with any
+    missing step keys so the editor can show them.
     """
     changed = False
     defaults = {pb["id"]: pb for pb in DEFAULT_PLAYBOOKS}
-    for pb in data:
-        pid = pb.get("id")
-        dpb = defaults.get(pid)
-        if pid == "ad-kill-chain" and dpb:
+    for i, pb in enumerate(data):
+        dpb = defaults.get(pb.get("id"))
+        if dpb is not None:
             run = pb.get("run") or {}
             old_shape = bool(run.get("sequence")) or any(
                 not _runnable_tool(s.get("tool", "")) for s in pb.get("steps", []))
-            if old_shape:
-                pb["steps"] = copy.deepcopy(dpb["steps"])
-                pb["run"] = copy.deepcopy(dpb.get("run", {}))
+            if pb.get("_v") != _BUILTIN_VERSION or old_shape:
+                data[i] = copy.deepcopy(dpb)
+                data[i]["_v"] = _BUILTIN_VERSION
                 changed = True
-        dsteps = {s.get("n"): s for s in (dpb or {}).get("steps", [])}
-        for st in pb.get("steps", []):
-            dsrc = dsteps.get(st.get("n"), {})
+                continue
+        for st in pb.get("steps", []):        # user-created / already-current
             if "args" not in st:
-                st["args"] = copy.deepcopy(dsrc.get("args", {}))
+                st["args"] = {}
                 changed = True
             for k in ("severity", "cvss", "impact", "recommendation", "finding_title"):
                 if k not in st:
-                    st[k] = dsrc.get(k, "")
+                    st[k] = ""
                     changed = True
     if changed:
         save(log_dir, data)
