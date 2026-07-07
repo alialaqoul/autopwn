@@ -148,7 +148,7 @@ CLI (autopwn) / Web console
 ### 1. Get the code and Python dependencies
 
 ```bash
-git clone https://github.com/<your-username>/autopwn.git
+git clone https://github.com/alialaqoul/autopwn.git
 cd autopwn
 python3 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
@@ -434,6 +434,9 @@ whenever a step fires:
 # no-creds → Domain Admin AD chain
 autopwn playbook --id ad-kill-chain --target 10.0.0.10 --domain corp.local
 
+# privilege escalation from ONE unprivileged domain user → map every path
+autopwn playbook --id privesc-ad        --target 10.0.0.11 --domain corp.local -u user -p pass
+
 # assumed-breach paths (seed a credential)
 autopwn playbook --id kerberoast-da     --target 10.0.0.11 --domain corp.local -u user -p pass
 autopwn playbook --id adcs-esc          --target 10.0.0.10 --domain corp.local -u user -p pass
@@ -441,11 +444,15 @@ autopwn playbook --id delegation-abuse  --target 10.0.0.11 --domain corp.local -
 autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -u user -p pass
 ```
 
-The 19 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
+The 21 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `kerberoast-da`, `adcs-esc`, `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
 `domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
-`trust-abuse`, `creds-in-ad`, plus detection playbooks (SMB signing/null-auth,
-RDP, WSUS, …). They are all editable in the web console.
+`trust-abuse`, `creds-in-ad`, and — from a single unprivileged domain user —
+**`privesc-ad`** (enumerate every escalation path in one run: Kerberoast, AS-REP,
+abusable ACLs, delegation, AD CS ESC, and creds-in-directory) and
+**`privesc-local`** (Windows local → SYSTEM via SeImpersonate/potato and service
+misconfigs), plus detection playbooks (SMB signing/null-auth, RDP, WSUS, …). All
+are editable in the web console.
 
 ### Verify — prove a playbook against a lab
 

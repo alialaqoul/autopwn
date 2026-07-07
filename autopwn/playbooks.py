@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 8
+_BUILTIN_VERSION = 10
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -587,6 +587,114 @@ DEFAULT_PLAYBOOKS = [
                   ["credential"], ["gpp"],
                   "nxc ldap -M laps: read LAPS local-admin passwords your account can see.",
                   "final", args={"protocol": "ldap", "module": "laps"}),
+        ],
+    },
+    {
+        "id": "privesc-ad",
+        "name": "AD privilege escalation — map every path (authenticated user)",
+        "summary": "From ONE unprivileged domain credential, enumerate and surface every "
+                   "escalation path: Kerberoast, AS-REP, abusable ACLs, delegation, AD CS "
+                   "(ESC), and credentials stored in the directory (GPP/description/LAPS).",
+        "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Enumerate the full user list", "have credential", "netexec_ldap",
+                  ["credential"], ["userlist"],
+                  "Authenticated LDAP dump of every domain user (feeds AS-REP roasting).",
+                  args={"action": "--users"}),
+            _step(2, "Collect the ACL / attack graph", "have credential",
+                  "bloodhound_python", ["credential"], [],
+                  "Collect users/groups/ACLs/sessions/trusts so every escalation edge from "
+                  "this user is visible in BloodHound."),
+            _step(3, "Kerberoastable service accounts", "have credential", "kerberoast",
+                  ["credential", "domain"], ["spn_hash"],
+                  "Roast SPN accounts — often privileged.",
+                  severity="High", cvss="8.1",
+                  finding_title="Kerberoastable Service Accounts",
+                  impact="SPN service accounts can be roasted by any domain user and cracked "
+                         "offline; they are frequently privileged.",
+                  recommendation="Use gMSA or 25+ char random passwords for SPN accounts."),
+            _step(4, "AS-REP roastable accounts", "have userlist", "asrep_roast",
+                  ["userlist", "domain"], ["asrep_hash"],
+                  "Roast accounts without Kerberos pre-auth (crackable, no creds needed).",
+                  severity="High", cvss="7.5",
+                  finding_title="AS-REP Roastable Accounts (Kerberos Pre-Authentication Disabled)",
+                  impact="Accounts with pre-auth disabled yield crackable AS-REP hashes.",
+                  recommendation="Enable Kerberos pre-authentication on all accounts."),
+            _step(5, "Abusable ACLs over other principals", "have credential", "bloodyad",
+                  ["credential"], ["acl_write"],
+                  "bloodyAD get writable — objects this user can modify (GenericAll/WriteDACL/"
+                  "GenericWrite/ForceChangePassword → takeover).",
+                  severity="High", cvss="8.1",
+                  finding_title="Abusable Active Directory ACLs (GenericAll / WriteDACL / …)",
+                  impact="Dangerous write rights over other principals allow takeover via "
+                         "targeted Kerberoast, shadow credentials, group add, or password reset.",
+                  recommendation="Audit and remove excessive ACEs; apply least privilege and tiering."),
+            _step(6, "Kerberos delegation", "have credential", "finddelegation",
+                  ["credential"], ["delegation"],
+                  "Unconstrained / constrained / RBCD delegation abusable to impersonate admins.",
+                  severity="High", cvss="8.1",
+                  finding_title="Kerberos Delegation Misconfiguration",
+                  impact="Delegation lets an account impersonate any user (incl. Domain Admins) "
+                         "to the delegated services.",
+                  recommendation="Remove unconstrained delegation; scope constrained tightly; "
+                         "protect admins (sensitive/Protected Users)."),
+            _step(7, "AD CS vulnerable templates (ESC)", "have credential", "certipy_find",
+                  ["credential", "domain"], ["adcs_vuln"],
+                  "certipy find -vulnerable: ESC1-ESC8 templates enrollable as a privileged user.",
+                  severity="High", cvss="8.1",
+                  finding_title="AD CS Misconfiguration (Vulnerable Certificate Template)",
+                  impact="A vulnerable AD CS template lets a low-priv user enroll a certificate "
+                         "as Domain Admin — full domain compromise.",
+                  recommendation="Remove enrollee-supplied-subject (ESC1), restrict enrollment, "
+                         "enable manager approval, and audit templates."),
+            _step(8, "Credentials stored in the directory (GPP)", "have credential",
+                  "netexec_module", ["credential"], ["gpp"],
+                  "GPP cpassword cached in SYSVOL (the AES key is public).",
+                  args={"protocol": "smb", "module": "gpp_password"},
+                  severity="High", cvss="7.5",
+                  finding_title="Credentials Exposed in AD (GPP / description / LAPS)",
+                  impact="Reusable credentials are stored in the directory (GPP cpassword, "
+                         "description fields, or over-readable LAPS).",
+                  recommendation="Remove GPP passwords (KB2962486), never store secrets in "
+                         "description fields, restrict LAPS read rights."),
+            _step(9, "Passwords in description fields", "have credential", "netexec_module",
+                  ["credential"], ["gpp"],
+                  "nxc ldap -M get-desc-users: user description fields often hold passwords.",
+                  args={"protocol": "ldap", "module": "get-desc-users"}),
+            _step(10, "Readable LAPS passwords", "have credential", "netexec_module",
+                  ["credential"], ["gpp"],
+                  "nxc ldap -M laps: LAPS local-admin passwords your account can read.",
+                  args={"protocol": "ldap", "module": "laps"}),
+            _step(11, "Crack what you roasted", "have hashes", "crack_hashes",
+                  ["spn_hash", "asrep_hash"], ["credential"],
+                  "Crack the AS-REP / Kerberoast hashes offline → a more privileged credential.",
+                  "final"),
+        ],
+    },
+    {
+        "id": "privesc-local",
+        "name": "Local Windows privilege escalation → SYSTEM",
+        "summary": "From code execution on a host (e.g. an MSSQL service account or a shell), "
+                   "escalate to SYSTEM via SeImpersonate (potato), service misconfigurations, "
+                   "or stored credentials.",
+        "match": {"any_ports": [445, 3389, 5985, 1433], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Host privilege & config triage", "have credential",
+                  "winPEAS / Seatbelt (upload + run on the host)", ["credential"], [],
+                  "Once you have a shell (evil-winrm as a local admin, or an MSSQL "
+                  "xp_cmdshell foothold), run winPEAS/Seatbelt: token privileges, services, "
+                  "AlwaysInstallElevated, autologon creds, unquoted paths, scheduled tasks."),
+            _step(2, "Abuse SeImpersonatePrivilege → SYSTEM", "have credential",
+                  "PrintSpoofer / GodPotato (on the host)", ["credential"], ["admin"],
+                  "Service accounts (IIS/MSSQL) usually hold SeImpersonatePrivilege — "
+                  "PrintSpoofer64.exe -i -c cmd (or GodPotato) impersonates SYSTEM. This is the "
+                  "MSSQL foothold → SYSTEM step. (Documented: needs a shell on the host.)"),
+            _step(3, "Service / path misconfigurations", "have credential",
+                  "sc / accesschk (on the host)", ["credential"], ["admin"],
+                  "Weak service ACLs (reconfigure binPath), unquoted service paths, or writable "
+                  "%PATH% dirs → run a payload as the service (often SYSTEM).", "final"),
         ],
     },
 
