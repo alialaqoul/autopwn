@@ -368,8 +368,9 @@ _STEP_SIGNALS = {
                    r"Protocol Transition", r"AllowedToDelegate"],
     "trust": [r"[Tt]rusted-?Domain", r"trustAttributes", r"trustPartner",
               r"trustDirection", r"flatName\s"],
-    "acl_write": [r"\$krb5tgs\$", r"GenericAll", r"WriteDacl|WriteOwner|GenericWrite",
-                  r"ForceChangePassword", r"writable\b"],
+    "acl_write": [r"\$krb5tgs\$",
+                  r"permission:\s*(?:WRITE|FULL_CONTROL|GENERIC_ALL|WRITE_DACL|WRITE_OWNER|ALLOWED_TO_ACT)",
+                  r"GenericAll|WriteDacl|WriteOwner|GenericWrite|ForceChangePassword"],
     # a credential recovered from AD storage (GPP cpassword, description, LAPS)
     "gpp": [r"cpassword", r"Found credentials in", r"description:[^\n]*[Pp]ass",
             r"Computer:[^\n]*Password:", r"[Gg]ot LAPS[^\n]*[Pp]assword"],
