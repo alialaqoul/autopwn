@@ -358,15 +358,25 @@ _STEP_SIGNALS = {
     "relay_targets": [r"\(signing:False\)"],
     "shares": [r"Readable non-default SMB share", r"Loot: \\\\", r"readable non-default share"],
     "userlist": [r"\(SidTypeUser\)", r"VALID USERNAME:"],
-    # new artifacts (ADCS / MSSQL / coercion)
+    # new artifacts (ADCS / MSSQL / coercion / ACL / delegation / trust / creds-in-AD)
     "adcs_vuln": [r"ESC\d+", r"\[!\].*[Vv]ulnerable"],
     "certificate": [r"Saved certificate and private key", r"Got hash for '"],
     "mssql_exec": [r"MSSQL[^\n]*\(Pwn3d!\)", r"nt service\\mssqlserver",
                    r"Executed command via", r"xp_cmdshell"],
     "coerced": [r"\[\+\][^\n]*SMB\s+Auth", r"named pipe[^\n]*efsrpc[^\n]*accessible"],
+    "delegation": [r"[Uu]nconstrained", r"Constrained w/", r"Resource-Based",
+                   r"Protocol Transition", r"AllowedToDelegate"],
+    "trust": [r"[Tt]rusted-?Domain", r"trustAttributes", r"trustPartner",
+              r"trustDirection", r"flatName\s"],
+    "acl_write": [r"\$krb5tgs\$", r"GenericAll", r"WriteDacl|WriteOwner|GenericWrite",
+                  r"ForceChangePassword", r"writable\b"],
+    # a credential recovered from AD storage (GPP cpassword, description, LAPS)
+    "gpp": [r"cpassword", r"Found credentials in", r"description:[^\n]*[Pp]ass",
+            r"Computer:[^\n]*Password:", r"[Gg]ot LAPS[^\n]*[Pp]assword"],
 }
 _ARTIFACT_ORDER = ["admin", "flag", "certificate", "adcs_vuln", "spn_hash", "ticket",
-                   "asrep_hash", "mssql_exec", "coerced", "hash", "machine_account",
+                   "asrep_hash", "mssql_exec", "coerced", "delegation", "trust",
+                   "gpp", "acl_write", "hash", "machine_account",
                    "shares", "relay_targets", "userlist", "credential"]
 
 
