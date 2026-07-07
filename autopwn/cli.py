@@ -1141,6 +1141,54 @@ def cmd_playbook(args) -> int:
     return 0
 
 
+def cmd_verify(args) -> int:
+    """Prove playbook accuracy against a lab: run each and assert its expected
+    finding fires. Records a dated verified stamp in <log_dir>/verification.json."""
+    from . import verify as vmod
+    cfg, scope = _load(args)
+    _seed_creds(args)
+    if args.suite:
+        try:
+            suite = vmod.load_suite(args.suite)
+        except (OSError, ValueError) as e:
+            console.print(f"[red]Bad suite file: {e}[/]"); return 2
+    elif args.id and args.target:
+        suite = [{"id": args.id, "target": args.target, "domain": args.domain,
+                  "username": args.username, "password": args.password,
+                  "hash": getattr(args, "nt_hash", None),
+                  "expect": [e.strip() for e in (args.expect or "").split("||") if e.strip()]}]
+    else:
+        console.print("[red]Give --suite FILE, or --id and --target (and --expect).[/]")
+        return 2
+
+    from rich.table import Table
+    console.print(Panel(f"[bold]Playbook verification[/] — {len(suite)} playbook(s)",
+                        title="Autopwn", border_style="cyan"))
+    results = []
+    for entry in suite:
+        console.print(f"[cyan]▶ verifying[/] {entry['id']} vs {entry.get('target')}")
+        r = vmod.run_one(entry, cfg, scope,
+                         report=lambda k, m: console.print(f"[dim]  {m}[/]"))
+        results.append(r)
+    path = vmod.stamp(results, cfg.log_dir)
+
+    table = Table(title="Verification results")
+    table.add_column("Playbook", style="cyan"); table.add_column("Target")
+    table.add_column("Status"); table.add_column("Expected → fired?")
+    colour = {"PASS": "green", "FAIL": "red", "ERROR": "red", "SKIP": "yellow", "RAN": "white"}
+    for r in results:
+        exp = ", ".join(r.get("expect", [])) or "(none)"
+        detail = "✓ all fired" if r["status"] == "PASS" else (
+            "missing: " + ", ".join(r["missing"]) if r.get("missing")
+            else r.get("error", "") or "ran")
+        st = r["status"]
+        table.add_row(r["id"], r["target"], f"[{colour.get(st,'white')}]{st}[/]", detail)
+    console.print(table)
+    npass = sum(1 for r in results if r["status"] == "PASS")
+    console.print(f"[green]{npass}/{len(results)} passed[/] — stamped to {path}")
+    return 0 if all(r["status"] in ("PASS", "RAN", "SKIP") for r in results) else 1
+
+
 def cmd_agent(args) -> int:
     cfg, scope = _load(args)
     if not cfg.ai_enabled:
@@ -1370,6 +1418,17 @@ def build_parser() -> argparse.ArgumentParser:
     pbc.add_argument("--domain", help="AD domain.")
     pbc.add_argument("--hash", dest="nt_hash", help="Starting NTLM hash.")
     pbc.set_defaults(func=cmd_playbook)
+
+    vf = sub.add_parser("verify", help="Prove playbooks against a lab (assert findings fire).")
+    vf.add_argument("--suite", help="JSON suite file: [{id,target,domain,username,password,expect}].")
+    vf.add_argument("--id", help="Single playbook id to verify.")
+    vf.add_argument("--target", help="Target host/IP for the single playbook.")
+    vf.add_argument("--domain", help="AD domain.")
+    vf.add_argument("--username", help="Assumed-breach username.")
+    vf.add_argument("--password", help="Assumed-breach password.")
+    vf.add_argument("--hash", dest="nt_hash", help="Assumed-breach NTLM hash.")
+    vf.add_argument("--expect", help="Expected finding title(s), '||'-separated substrings.")
+    vf.set_defaults(func=cmd_verify)
 
     a = sub.add_parser("agent", help="Run the AI agent (autopilot with --target).")
     a.add_argument("--target", help="Target host/IP. With no --objective, runs "

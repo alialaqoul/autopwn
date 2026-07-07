@@ -1,0 +1,45 @@
+[
+  {
+    "_note": "Kerberoast: any north domain user can roast sql_svc. VERIFIED accurate.",
+    "id": "kerberoast-da",
+    "target": "192.168.140.11",
+    "domain": "north.sevenkingdoms.local",
+    "username": "hodor",
+    "password": "hodor",
+    "expect": ["Kerberoastable Service Accounts"]
+  },
+  {
+    "_note": "Coercion: DC .11 is coercible via MS-RPRN (PrinterBug). VERIFIED accurate.",
+    "id": "smb-relay",
+    "target": "192.168.140.11",
+    "domain": "north.sevenkingdoms.local",
+    "username": "hodor",
+    "password": "hodor",
+    "expect": ["Authentication Coercion"]
+  },
+  {
+    "_note": "RBCD enabler: MachineAccountQuota>0 lets an authed user add a computer.",
+    "id": "rbcd",
+    "target": "192.168.140.11",
+    "domain": "north.sevenkingdoms.local",
+    "username": "hodor",
+    "password": "hodor",
+    "expect": ["MachineAccountQuota"]
+  },
+  {
+    "_note": "ADCS ESC8 on SEVENKINGDOMS-CA. NOTE: certipy needs DNS -> a DC; point /etc/resolv.conf at 192.168.140.11 first, else this FAILs (that is the harness doing its job).",
+    "id": "adcs-esc",
+    "target": "192.168.140.11",
+    "domain": "north.sevenkingdoms.local",
+    "username": "hodor",
+    "password": "hodor",
+    "expect": ["AD CS Misconfiguration"]
+  },
+  {
+    "_note": "Full no-cred chain vs the north DC. No strict assertion (depends on lab state); recorded as RAN with whatever findings fire.",
+    "id": "ad-kill-chain",
+    "target": "192.168.140.11",
+    "domain": "north.sevenkingdoms.local",
+    "expect": []
+  }
+]

