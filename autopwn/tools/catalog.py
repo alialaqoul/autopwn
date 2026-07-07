@@ -550,7 +550,6 @@ CATALOG: list[CommandSpec] = [
                              + (["-u", _s(k["username"]), "-p", _s(k.get("password", "")),
                                  "-d", _s(k.get("domain", ""))] if k.get("username") else [])
                              + ["-v"],
-        harvest=[HarvestRule("coerced", r"\[\+\].*(?:got|authentication|responded|success)", scope="host")],
         timeout=300, install_hint="pipx install coercer.",
     ),
 
@@ -713,11 +712,14 @@ _CATEGORIES = {
     "recon": ["masscan", "dns_recon"],
     "web": ["whatweb", "nikto", "nuclei", "ffuf", "gobuster_dir", "wpscan",
             "sqlmap"],
-    "ad-smb": ["netexec_smb", "netexec_winrm", "netexec_ldap", "enum4linux",
+    "ad-smb": ["netexec_smb", "netexec_rid_brute", "netexec_spray", "smb_get",
+               "netexec_winrm", "netexec_ldap", "netexec_mssql", "enum4linux",
                "smbmap", "smbclient_shares", "ldapsearch_anon",
                "kerbrute_userenum", "asrep_roast", "kerberoast",
-               "certipy_find", "bloodhound_python", "secretsdump"],
-    "credentials": ["hydra"],
+               "add_computer", "rbcd", "get_st", "ticketer",
+               "certipy_find", "certipy_req", "certipy_auth", "coercer",
+               "bloodhound_python", "secretsdump"],
+    "credentials": ["hydra", "john", "hashcat", "hashid"],
     "exploit": ["searchsploit"],
 }
 _NAME_TO_CATEGORY = {n: c for c, names in _CATEGORIES.items() for n in names}

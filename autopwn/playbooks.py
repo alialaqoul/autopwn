@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 4
+_BUILTIN_VERSION = 5
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -279,14 +279,10 @@ DEFAULT_PLAYBOOKS = [
                   "get_st (set spn + impersonate=Administrator)",
                   ["machine_account"], ["ticket", "admin", "flag"],
                   "impacket-getST -spn cifs/<target.fqdn> -impersonate Administrator → .ccache; "
-                  "then KRB5CCNAME=… secretsdump -k / psexec -k for admin on the target.", "final",
-                  severity="Critical", cvss="9.0",
-                  finding_title="Privilege Escalation via Resource-Based Constrained Delegation (RBCD)",
-                  impact="Write access to a computer's delegation attribute plus "
-                         "MachineAccountQuota let an attacker impersonate a privileged user "
-                         "on that host — up to Domain Admin.",
-                  recommendation="Restrict who can write msDS-AllowedToActOnBehalfOf-"
-                         "OtherIdentity, set MachineAccountQuota to 0, and audit delegation."),
+                  "then KRB5CCNAME=… secretsdump -k / psexec -k for admin on the target. "
+                  "This is the RBCD → Domain Admin escalation (Critical) once you have write "
+                  "over the target computer — run it manually with the values from BloodHound.",
+                  "final"),
         ],
     },
     {
@@ -414,7 +410,7 @@ DEFAULT_PLAYBOOKS = [
                   ["credential", "domain"], [],
                   "Windows-auth to the SQL instance with a recovered domain credential."),
             _step(2, "Command execution via xp_cmdshell", "have credential",
-                  "netexec_mssql", ["credential"], ["mssql_exec", "admin"],
+                  "netexec_mssql", ["credential"], ["mssql_exec"],
                   "Enable and run xp_cmdshell to execute OS commands as the SQL service "
                   "account (then abuse SeImpersonate → SYSTEM).", "final",
                   args={"command": "whoami"},

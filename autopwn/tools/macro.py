@@ -166,6 +166,14 @@ class MacroTool(Tool):
             store.set_fact("password", c["password"])
             lines.append(f"Credential: {c['username']}:{c['password']} "
                          f"@ {c['domain'] or 'unknown'}")
+        # Surface findings/loot/flags as plain lines so a playbook step that
+        # produces them (and its report finding) is detectable in the transcript.
+        for f in R.findings:
+            lines.append(f"Finding: [{f.get('severity', '')}] {f.get('title', '')}")
+        for l in R.loot:
+            lines.append(f"Loot: {l.get('name', '')} — {l.get('detail', '')}")
+        for fl in R.flags:
+            lines.append(f"FLAG: {fl}")
         ok = bool(R.creds or R.findings or R.users or R.loot or R.flags)
         summary = (f"{self.name}: {len(R.creds)} cred(s), "
                    f"{len(R.findings)} finding(s), {len(R.users)} user(s)")

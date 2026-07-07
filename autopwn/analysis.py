@@ -356,11 +356,13 @@ _STEP_SIGNALS = {
     "hash": [r"[a-f0-9]{32}:[a-f0-9]{32}:::"],
     "machine_account": [r"[Ss]uccessfully added (?:machine )?account", r"Adding computer"],
     "relay_targets": [r"\(signing:False\)"],
+    "shares": [r"Readable non-default SMB share", r"Loot: \\\\", r"readable non-default share"],
     "userlist": [r"\(SidTypeUser\)", r"VALID USERNAME:"],
     # new artifacts (ADCS / MSSQL / coercion)
     "adcs_vuln": [r"ESC\d+", r"\[!\].*[Vv]ulnerable"],
     "certificate": [r"Saved certificate and private key", r"Got hash for '"],
-    "mssql_exec": [r"nt service\\mssqlserver", r"Executed command via", r"xp_cmdshell"],
+    "mssql_exec": [r"MSSQL[^\n]*\(Pwn3d!\)", r"nt service\\mssqlserver",
+                   r"Executed command via", r"xp_cmdshell"],
     "coerced": [r"\[\+\][^\n]*SMB\s+Auth", r"named pipe[^\n]*efsrpc[^\n]*accessible"],
 }
 _ARTIFACT_ORDER = ["admin", "flag", "certificate", "adcs_vuln", "spn_hash", "ticket",
