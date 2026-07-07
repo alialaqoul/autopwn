@@ -35,8 +35,9 @@ where `cd`/state carry), and a netcat-style reverse-shell listener:
 <p align="center"><img src="assets/console.png" alt="Console — credentialed sessions and reverse-shell listener" width="90%"></p>
 
 **Playbooks** — the attack paths *and* the report findings, unified and editable:
-each shows how it matches the scan and how each step executes; finding playbooks
-carry the severity/CVSS/impact that lands in the report:
+each step names the **tool that runs**, its trigger, arguments, and the
+data it consumes/produces; give a step a **severity** and it becomes a report
+finding (with CVSS/impact/recommendation) when it actually fires:
 
 <p align="center"><img src="assets/playbooks.png" alt="Playbooks — editable attack paths and findings" width="90%"></p>
 
@@ -77,19 +78,30 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   and audit every LLM request/response from the **Settings** page.
 - **Authorization gate** — every tool call is checked against your scope
   (allow/deny CIDRs, hostnames, and an expiry date) before any packet is sent.
-- **Full tool coverage** — 47+ tools across recon, web, SMB/Active Directory
-  (incl. AD CS, BloodHound, Kerberos roasting, RID-cycling, pass-the-hash, and
-  RBCD → Domain Admin), and credential testing, run through a safe, auditable wrapper.
+- **Full tool coverage** — 60+ tools across recon, web, SMB/Active Directory, and
+  credential testing, run through a safe, auditable wrapper. The AD toolkit covers
+  the modern kill chain end to end: RID-cycling, spraying, AS-REP/Kerberoast,
+  BloodHound, **AD CS (ESC)**, **MSSQL** (xp_cmdshell), **coercion + NTLM relay**
+  (PetitPotam/PrinterBug), **delegation** (unconstrained/constrained/RBCD),
+  **ACL abuse** + **shadow credentials**, **domain/forest trusts** (child→parent
+  SID history), DCSync, and golden/silver tickets.
 - **Autopilot** — give it just a target and it fingerprints the host, then
   adapts its methodology to whatever it is (DC, IIS/nginx/Apache, database, mail,
   remote-access host, …).
 - **Authenticated / assumed-breach engagements** — supply starting credentials
   (`--username/--password/--domain/--hash`, or the menu prompt) and they flow into
   every credentialed tool and the agent from step one.
-- **Deterministic attack-chain engine** — known multi-step paths (e.g. the full
-  no-creds → Domain Admin AD chain) run as one macro-action (`ad_kill_chain`) that
-  branches on real tool output and passes artifacts (user lists, hashes, loot)
-  between steps — reliable even with a weak local model.
+- **Editable playbooks = the execution engine** — an attack path is an ordered
+  list of **steps**, each naming one built-in tool, a trigger (when it runs), and
+  its arguments; Autopwn parses every tool's output into shared variables that
+  auto-fill the next step. The full no-creds → Domain Admin AD chain, Kerberoast,
+  ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, and more ship as
+  19 playbooks — each editable in the console and driven from real output, not an
+  LLM. A step with a severity becomes a report finding when it actually fires.
+- **Lab-validated for accuracy** — a built-in verify harness (`autopwn verify`)
+  runs a playbook against a target and *asserts its finding fires*, stamping a
+  dated `verified` record. The shipped playbooks are proven against the GOAD lab
+  rather than assumed to work.
 - **Adaptive, self-improving RAG** — a knowledge base of pentest playbooks is
   retrieved each step, **conditioned on the real state** (open ports + discovered
   facts) so retrieval tracks results; successful runs are distilled back into the
@@ -107,13 +119,15 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
 ## Architecture
 
 ```
-CLI (autopwn)
-  └── Agent  ── reason → act → observe loop
-        ├── LLM provider     (OpenAI / Ollama / AnythingLLM / any OpenAI-compatible)
-        ├── Tool registry    (auto-loads only tools installed on the host)
-        ├── Attack-chain engine (deterministic multi-step paths, e.g. ad_kill_chain)
-        ├── State-conditioned RAG (playbooks retrieved by real ports + facts)
-        └── Authorization    (scope gate — enforced on every tool)
+CLI (autopwn) / Web console
+  ├── Playbook engine   (tool-per-step sequences; harvest → variable → autofill)
+  ├── Verify harness    (run a playbook vs a lab, assert its finding fires)
+  ├── Agent  ── reason → act → observe loop
+  │     ├── LLM provider (OpenAI / Ollama / AnythingLLM / any OpenAI-compatible)
+  │     └── State-conditioned RAG (playbooks retrieved by real ports + facts)
+  ├── Tool registry     (auto-loads only tools installed on the host)
+  ├── Findings engine   (per-step, fires only on evidenced artifacts)
+  └── Authorization     (scope gate — enforced on every tool)
 ```
 
 ---
@@ -169,9 +183,21 @@ sudo curl -fsSL -o /usr/local/bin/kerbrute \
   https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_amd64
 sudo chmod +x /usr/local/bin/kerbrute
 
-# impacket (GetNPUsers, GetUserSPNs, secretsdump, …):
+# impacket (GetNPUsers, GetUserSPNs, secretsdump, findDelegation, ticketer,
+# lookupsid, raiseChild, addcomputer, rbcd, getST, dacledit, mssqlclient …):
 pipx install impacket        # or: sudo apt install -y python3-impacket
+
+# extra AD tooling used by the ADCS / delegation / ACL / coercion playbooks:
+pipx install certipy-ad      # AD CS (find/req/auth/shadow)  — point DNS at a DC
+pipx install coercer         # PetitPotam / PrinterBug coercion
+pipx install bloodyAD        # ACL abuse (get writable / grant / shadow)
+pipx install netexec         # nxc (SMB/LDAP/MSSQL + modules: gpp_password, laps, …)
+pipx install git+https://github.com/ShutdownRepo/targetedKerberoast   # targeted roast
 ```
+
+> pipx installs land in `~/.local/bin`; Autopwn searches that path automatically.
+> `certipy` needs DNS that resolves the domain — on an isolated lab, point
+> `/etc/resolv.conf` at a domain controller.
 
 Tools you don't install are simply hidden from the agent — nothing breaks. Check
 what's available any time with `python -m autopwn tools`.
@@ -397,18 +423,44 @@ runs authenticated enumeration (BloodHound, Kerberoast, LDAP, share/SYSVOL
 looting) and can chain all the way to Domain Admin — e.g. via the built-in RBCD
 path (`add_computer` → `rbcd` → `get_st` S4U2Proxy → DCSync).
 
-### Full AD kill chain in one action
+### Playbooks — run a whole attack path
 
-Against a domain controller you can run the whole no-credential → Domain Admin
-path as a single macro-action that branches on real output:
+A playbook is an editable, ordered sequence of built-in tools. Run one against a
+target and Autopwn executes each step in order, parsing each tool's output into
+variables that feed the next, streaming every step, and raising a report finding
+whenever a step fires:
 
 ```bash
-autopwn run --tool ad_kill_chain --set target=10.0.0.10 --set domain=corp.local
+# no-creds → Domain Admin AD chain
+autopwn playbook --id ad-kill-chain --target 10.0.0.10 --domain corp.local
+
+# assumed-breach paths (seed a credential)
+autopwn playbook --id kerberoast-da     --target 10.0.0.11 --domain corp.local -u user -p pass
+autopwn playbook --id adcs-esc          --target 10.0.0.10 --domain corp.local -u user -p pass
+autopwn playbook --id delegation-abuse  --target 10.0.0.11 --domain corp.local -u user -p pass
+autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -u user -p pass
 ```
 
-It performs: guest/null session → RID-cycle users → spray `username==password`
-→ Kerberoast → crack → loot readable shares → pass-the-hash → read the goal, and
-returns the credentials, admin access, findings, and any flags it captured.
+The 19 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
+`kerberoast-da`, `adcs-esc`, `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
+`domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
+`trust-abuse`, `creds-in-ad`, plus detection playbooks (SMB signing/null-auth,
+RDP, WSUS, …). They are all editable in the web console.
+
+### Verify — prove a playbook against a lab
+
+The verify harness runs a playbook and **asserts its finding fires**, then stamps
+a dated `verified` record in `logs/verification.json`:
+
+```bash
+autopwn verify --id kerberoast-da --target 10.0.0.11 --domain corp.local \
+  -u user -p pass --expect "Kerberoastable Service Accounts"
+
+autopwn verify --suite examples/goad-verify.json      # a whole suite
+```
+
+This is how the shipped playbooks are kept accurate — each is proven against the
+GOAD lab, not assumed to work.
 
 ### Reports & engagement details
 
@@ -473,27 +525,30 @@ into a single host** for its ports and services.
 
 ## Tool catalog
 
-47+ tools across five categories (run `autopwn tools` for the live list with
+60+ tools across five categories (run `autopwn tools` for the live list with
 install status):
 
 | Category | Tools |
 |---|---|
-| **recon** (9) | `nmap_scan`, `native_port_scan`, `masscan`, `dns_recon`, `subfinder`, `amass`, `theharvester`, `httpx`, `gau` |
-| **web** (13) | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `feroxbuster`, `katana`, `wpscan`, `sqlmap`, `arjun`, `testssl`, `subzy` |
-| **ad-smb** (20) | `ad_kill_chain` (macro), `netexec_smb`, `netexec_rid_brute`, `netexec_spray`, `netexec_winrm`, `netexec_ldap`, `smb_get`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `add_computer`, `rbcd`, `get_st`, `certipy_find`, `bloodhound_python`, `secretsdump` |
-| **credentials** (4) | `hydra`, `john`, `hashcat`, `hashid` |
-| **exploit** (1) | `searchsploit` |
+| **recon** | `nmap_scan`, `native_port_scan`, `masscan`, `dns_recon`, `subfinder`, `amass`, `theharvester`, `httpx`, `gau` |
+| **web** | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `feroxbuster`, `katana`, `wpscan`, `sqlmap`, `arjun`, `testssl`, `subzy` |
+| **ad-smb** | `netexec_smb`, `netexec_rid_brute`, `netexec_spray`, `netexec_winrm`, `netexec_ldap`, `netexec_mssql`, `netexec_module`, `smb_get`, `smb_loot`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `targeted_kerberoast`, `bloodhound_python`, `bloodyad`, `dacledit`, `finddelegation`, `add_computer`, `rbcd`, `get_st`, `ticketer`, `lookupsid`, `raisechild`, `coercer`, `certipy_find`, `certipy_req`, `certipy_auth`, `certipy_shadow`, `secretsdump` |
+| **credentials** | `crack_hashes`, `spray_cracked`, `hydra`, `john`, `hashcat`, `hashid` |
+| **exploit** | `searchsploit` |
 
-The AD tooling covers the modern kill chain: **RID-cycling** user enumeration
-(`netexec_rid_brute`), **batch password spraying** incl. `username==password`
-(`netexec_spray`, no lockout), **pass-the-hash** (`-H` on the NetExec tools),
-**share looting** (`smb_get`), **Kerberos roasting**, **AD CS** (`certipy_find`),
-and **RBCD → Domain Admin** (`add_computer` → `rbcd` → `get_st`).
+The AD toolkit covers the modern kill chain: **RID-cycling** user enumeration,
+**batch spraying** incl. `username==password` (no lockout), **pass-the-hash**,
+**share/GPP/LAPS/description looting**, **AS-REP/Kerberoast** (incl. targeted),
+**AD CS ESC** (find → request → auth → shadow), **MSSQL** exec, **coercion +
+NTLM relay**, **delegation** (unconstrained/constrained/RBCD), **ACL abuse**,
+**domain/forest trusts** (child→parent SID history), **DCSync**, and
+**golden/silver tickets**.
 
 Tools chain across steps automatically: `subfinder`/`amass` discover subdomains
 (recorded as hosts) → `httpx` finds the live web ones → web tools run against
-them; the AD roasting tools produce hashes that `john`/`hashcat` crack; and
-`ad_kill_chain` sequences the whole AD path in one action.
+them; the AD roasting tools produce hashes that `crack_hashes`/`hashcat` crack;
+and the **playbook engine** sequences a whole attack path, passing each tool's
+parsed output into the next step.
 
 Credentialed tools (Kerberoast, secretsdump, netexec with `-u/-p`, RBCD, hydra)
 require valid credentials and are skipped until you have them (or supply them up
@@ -595,10 +650,10 @@ string); its real output is fed back and **harvested for structured signals**
 (domain, creds, SMB signing, `guest` enabled, `Pwn3d!` admin, Kerberoastable,
 user counts). Two guardrails keep it grounded: it **never guesses passwords
 one-by-one** (bulk testing is a deliberate `netexec_spray`), and repeated failed
-logins abort the guess loop. For well-trodden paths, the **attack-chain engine**
-(`chains.py` / `ad_kill_chain`) runs the sequence deterministically and passes
-files (user lists, hashes, loot) between steps — the thing scalar variables
-can't do. The loop repeats until it produces a grounded findings report.
+logins abort the guess loop. For well-trodden paths, a **playbook** runs its
+tool-per-step sequence deterministically and passes files (user lists, hashes,
+loot) between steps — the thing scalar variables can't do. The loop repeats until
+it produces a grounded findings report.
 
 ---
 
