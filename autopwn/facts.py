@@ -55,11 +55,11 @@ class HarvestRule:
 
 # Applied to every tool's output regardless of which tool ran.
 DEFAULT_HARVEST: list[HarvestRule] = [
-    # Real tools print the domain with a colon — "(domain:corp.local)",
-    # "Found AD domain: corp.local". Do NOT match "domain=args.domain" style
-    # assignments that appear in a tool's Python-traceback output (that captured
-    # the literal "args.domain" and poisoned the domain for every later step).
-    HarvestRule("domain", r"domain:\s*\(?([A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,})"),
+    # Match "(domain:corp.local)", "Found AD domain: corp.local", and
+    # "-domain corp.local" style output. Code-artifact captures like
+    # "domain=args.domain" (from a tool's Python traceback) are dropped by the
+    # reject filter in apply_harvest, so they no longer poison the domain.
+    HarvestRule("domain", r"domain[:=]\s*\(?([A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,})"),
     HarvestRule("hostname", r"\bname:\s*([A-Za-z0-9\-]{1,32})", scope="host"),
     HarvestRule("os", r"(Windows[^()\[\]\n]{0,40})", scope="host"),
     # NetExec SMB banner: "(signing:False)" — signing not required = relay target.
