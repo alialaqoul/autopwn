@@ -357,14 +357,15 @@ _STEP_SIGNALS = {
     "machine_account": [r"[Ss]uccessfully added (?:machine )?account", r"Adding computer"],
     "relay_targets": [r"\(signing:False\)"],
     "userlist": [r"\(SidTypeUser\)", r"VALID USERNAME:"],
-    # new artifacts (ADCS / MSSQL)
+    # new artifacts (ADCS / MSSQL / coercion)
     "adcs_vuln": [r"ESC\d+", r"\[!\].*[Vv]ulnerable"],
     "certificate": [r"Saved certificate and private key", r"Got hash for '"],
     "mssql_exec": [r"nt service\\mssqlserver", r"Executed command via", r"xp_cmdshell"],
+    "coerced": [r"\[\+\][^\n]*SMB\s+Auth", r"named pipe[^\n]*efsrpc[^\n]*accessible"],
 }
 _ARTIFACT_ORDER = ["admin", "flag", "certificate", "adcs_vuln", "spn_hash", "ticket",
-                   "asrep_hash", "mssql_exec", "hash", "machine_account", "shares",
-                   "relay_targets", "userlist", "credential"]
+                   "asrep_hash", "mssql_exec", "coerced", "hash", "machine_account",
+                   "shares", "relay_targets", "userlist", "credential"]
 
 
 def _playbook_ran(pb, transcript):
@@ -387,6 +388,9 @@ def _playbook_ran(pb, transcript):
     return f"playbook:{pb.get('id')}" in names
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def _scan_transcript(transcript, patterns, hosts):
     """(command, matching-lines excerpt) of the first tool output matching any
     pattern; prefer a run that targeted one of the finding's hosts."""
@@ -395,7 +399,7 @@ def _scan_transcript(transcript, patterns, hosts):
     for e in transcript or []:
         if e.get("kind") != "tool_result":
             continue
-        out = e.get("output") or e.get("summary") or ""
+        out = _ANSI.sub("", e.get("output") or e.get("summary") or "")
         if not out or not rx.search(out):
             continue
         cmd = e.get("command") or e.get("name") or ""

