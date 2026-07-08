@@ -78,7 +78,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   and audit every LLM request/response from the **Settings** page.
 - **Authorization gate** — every tool call is checked against your scope
   (allow/deny CIDRs, hostnames, and an expiry date) before any packet is sent.
-- **Full tool coverage** — 60+ tools across recon, web, SMB/Active Directory, and
+- **Full tool coverage** — 65+ tools across recon, web, SMB/Active Directory, and
   credential testing, run through a safe, auditable wrapper. The AD toolkit covers
   the modern kill chain end to end: RID-cycling, spraying, AS-REP/Kerberoast,
   BloodHound, **AD CS (ESC)**, **MSSQL** (xp_cmdshell), **coercion + NTLM relay**
@@ -444,15 +444,16 @@ autopwn playbook --id delegation-abuse  --target 10.0.0.11 --domain corp.local -
 autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -u user -p pass
 ```
 
-The 21 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
+The 26 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `kerberoast-da`, `adcs-esc`, `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
 `domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
-`trust-abuse`, `creds-in-ad`, and — from a single unprivileged domain user —
-**`privesc-ad`** (enumerate every escalation path in one run: Kerberoast, AS-REP,
-abusable ACLs, delegation, AD CS ESC, and creds-in-directory) and
-**`privesc-local`** (Windows local → SYSTEM via SeImpersonate/potato and service
-misconfigs), plus detection playbooks (SMB signing/null-auth, RDP, WSUS, …). All
-are editable in the web console.
+`trust-abuse`, `creds-in-ad`, `relay-adcs-esc8` (coerce→relay→ESC8→DA),
+`ad-cve-check` (ZeroLogon/noPac/PrintNightmare/MS17-010/coercion — non-destructive
+checks), `password-policy`, `dpapi-loot`, `unauth-ad-roast` (pre2k/timeroast, no
+creds), and — from a single unprivileged domain user — **`privesc-ad`** (enumerate
+every escalation path in one run) and **`privesc-local`** (Windows local → SYSTEM),
+plus detection playbooks (SMB signing/null-auth, RDP, WSUS, …). All are editable in
+the web console.
 
 ### Verify — prove a playbook against a lab
 
@@ -532,7 +533,7 @@ into a single host** for its ports and services.
 
 ## Tool catalog
 
-60+ tools across five categories (run `autopwn tools` for the live list with
+65+ tools across five categories (run `autopwn tools` for the live list with
 install status):
 
 | Category | Tools |
