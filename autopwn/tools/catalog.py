@@ -735,6 +735,116 @@ CATALOG: list[CommandSpec] = [
         install_hint="apt install exploitdb.",
     ),
 
+    # ==== Batch D: unauth AD roasting / GPO / net-services / web injection =
+    CommandSpec(
+        name="pre2k",
+        description="Check for pre-created (pre-Windows-2000) computer accounts whose "
+                    "password equals the lowercase computer name — an unauthenticated "
+                    "foothold. Give a list of computer names.",
+        binary="pre2k", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN,
+            "userlist": {"type": "string", "description": "File of computer names to test."}},
+            ["target", "domain"]),
+        build_args=lambda k: ["unauth", "-d", _s(k["domain"]), "-dc-ip", _s(k["target"])]
+                             + (["-inputfile", _s(k["userlist"])] if k.get("userlist") else []),
+        install_hint="pipx install pre2k.",
+    ),
+    CommandSpec(
+        name="timeroast",
+        description="Timeroasting: request NTP authentication from the DC to extract "
+                    "computer-account (and trust) password hashes UNauthenticated, then "
+                    "crack them offline. No domain credentials needed.",
+        binary="timeroast", category="ad-smb",
+        parameters=_params(_TARGET, ["target"]),
+        build_args=lambda k: [_s(k["target"])],
+        aliases=["timeroast.py"], install_hint="Install timeroast (SecuraBV).",
+    ),
+    CommandSpec(
+        name="pygpoabuse",
+        description="Abuse write access to a Group Policy Object: add an immediate "
+                    "scheduled task that runs as SYSTEM on every computer the GPO applies "
+                    "to. Needs a credential with write over the GPO.",
+        binary="pygpoabuse", category="ad-smb",
+        parameters=_params({**_DOMAIN, **_AUTH,
+            "gpo_id": {"type": "string", "description": "Target GPO GUID."},
+            "command": {"type": "string", "description": "Command to run as SYSTEM (optional)."}},
+            ["domain", "username", "password", "gpo_id"]),
+        build_args=lambda k: [f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}",
+                              "-gpo-id", _s(k["gpo_id"])]
+                             + (["-command", _s(k["command"])] if k.get("command") else []),
+        host_resolver=host_from_domain, aliases=["pygpoabuse.py"],
+        install_hint="Install pyGPOAbuse.",
+    ),
+    CommandSpec(
+        name="dalfox",
+        description="Automated XSS discovery and verification on a URL/parameter.",
+        binary="dalfox", category="web", host_resolver=host_from_url,
+        parameters=_params(_URL, ["url"]),
+        subcommand=["url"], positional=["url"], timeout=900,
+        install_hint="go install github.com/hahwul/dalfox/v2@latest.",
+    ),
+    CommandSpec(
+        name="commix",
+        description="Automated OS command-injection detection and exploitation on a URL.",
+        binary="commix", category="web", host_resolver=host_from_url,
+        parameters=_params({**_URL,
+            "data": {"type": "string", "description": "POST body to test (optional)."}},
+            ["url"]),
+        build_args=lambda k: ["--url", _s(k["url"]), "--batch"]
+                             + (["--data", _s(k["data"])] if k.get("data") else []),
+        timeout=1200, install_hint="apt install commix.",
+    ),
+    CommandSpec(
+        name="jwt_tool",
+        description="Analyse and attack a JSON Web Token (alg confusion, none, weak key, "
+                    "tampering). Local — no target contacted.",
+        binary="jwt_tool", category="web", requires_host=False,
+        parameters=_params({"token": {"type": "string", "description": "The JWT to test."}}, ["token"]),
+        positional=["token"], install_hint="pipx install jwt-tool.",
+    ),
+    CommandSpec(
+        name="snmp_walk",
+        description="Walk SNMP (v2c) with a community string to read device config, "
+                    "processes, users, and sometimes credentials.",
+        binary="snmpwalk", category="recon",
+        parameters=_params({**_TARGET,
+            "community": {"type": "string", "description": "Community string. Default public."}},
+            ["target"]),
+        build_args=lambda k: ["-v2c", "-c", _s(k.get("community", "public")), _s(k["target"])],
+        timeout=600, install_hint="apt install snmp.",
+    ),
+    CommandSpec(
+        name="onesixtyone",
+        description="Fast SNMP community-string brute-force / sweep to find readable "
+                    "SNMP services.",
+        binary="onesixtyone", category="recon",
+        parameters=_params({**_TARGET,
+            "community": {"type": "string", "description": "Community to try. Default public."}},
+            ["target"]),
+        build_args=lambda k: [_s(k["target"]), _s(k.get("community", "public"))],
+        install_hint="apt install onesixtyone.",
+    ),
+    CommandSpec(
+        name="smtp_user_enum",
+        description="Enumerate valid users on an SMTP server via VRFY/EXPN/RCPT.",
+        binary="smtp-user-enum", category="recon",
+        parameters=_params({**_TARGET,
+            "userlist": {"type": "string", "description": f"Usernames file. Default {WL_USERS}."}},
+            ["target"]),
+        build_args=lambda k: ["-M", "VRFY", "-U", _s(k.get("userlist", WL_USERS)),
+                              "-t", _s(k["target"])],
+        timeout=600, install_hint="apt install smtp-user-enum.",
+    ),
+    CommandSpec(
+        name="nfs_shares",
+        description="List NFS exports on a host (showmount -e) — world-readable exports "
+                    "often leak files.",
+        binary="showmount", category="recon",
+        parameters=_params(_TARGET, ["target"]),
+        build_args=lambda k: ["-e", _s(k["target"])],
+        install_hint="apt install nfs-common.",
+    ),
+
     # ==== Extended coverage (from the pentest cheat sheet) ================
     # ---- Recon: subdomain / OSINT / crawl (feed the host + web pipeline) --
     CommandSpec(

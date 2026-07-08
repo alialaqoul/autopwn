@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 12
+_BUILTIN_VERSION = 13
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -42,7 +42,7 @@ ARTIFACTS = [
     "spn_hash", "asrep_hash", "shares", "relay_targets", "coerced", "machine_account",
     "adcs_vuln", "certificate", "mssql_exec", "delegation", "trust", "acl_write",
     "gpp", "zerologon_vuln", "nopac_vuln", "printnightmare_vuln", "ms17_vuln",
-    "weak_policy", "dpapi_secret", "admin", "flag",
+    "weak_policy", "dpapi_secret", "pre2k_hit", "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
 # A step fires when its trigger is true against the current variables.
@@ -699,6 +699,35 @@ DEFAULT_PLAYBOOKS = [
         ],
     },
 
+    {
+        "id": "unauth-ad-roast",
+        "name": "Unauthenticated AD credential exposure (pre2k / timeroast)",
+        "summary": "With NO domain credentials, recover crackable secrets: pre-created "
+                   "computer accounts whose password equals their name (pre2k) and computer/"
+                   "trust account hashes via NTP (timeroast).",
+        "match": {"any_ports": [88, 445], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Timeroast computer/trust accounts (NTP, unauth)", "start",
+                  "timeroast", [], ["hash"],
+                  "timeroast <dc>: request NTP auth to extract computer/trust account "
+                  "password hashes without any credential; crack offline (hashcat 31300)."),
+            _step(2, "Pre-created (pre-2000) computer accounts", "start", "pre2k",
+                  [], ["pre2k_hit", "credential"],
+                  "pre2k unauth: computers whose password is the lowercase computer name — "
+                  "a free machine-account foothold.",
+                  severity="Medium", cvss="5.9",
+                  finding_title="Pre-created (pre-Windows-2000) Computer Accounts",
+                  impact="Pre-staged computer accounts keep a predictable password (the "
+                         "lowercase computer name), giving an unauthenticated attacker a "
+                         "machine-account foothold in the domain.",
+                  recommendation="Reset or remove stale pre-created computer accounts and "
+                         "avoid the 'assign as pre-Windows 2000 computer' option."),
+            _step(3, "Crack what you recovered", "have hashes", "crack_hashes",
+                  ["hash"], ["credential"],
+                  "Crack the timeroast/pre2k hashes offline → a domain foothold.", "final"),
+        ],
+    },
     {
         "id": "password-policy",
         "name": "Weak domain password policy",
