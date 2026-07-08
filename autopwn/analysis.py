@@ -339,8 +339,56 @@ def build_findings(hosts: dict, facts: dict, transcript=None,
             })
             fid += 1
 
+    # --- macro-tool findings ------------------------------------------------
+    # Native tools (e.g. ntlm_relay) report their own findings via add_finding.
+    # Surface them directly so a documentation-labelled playbook step (which the
+    # step-signal path can't attribute) still contributes its result to the report.
+    for f in _harvest_macro_findings(transcript, seen):
+        f["id"] = f"F-{fid:02d}"
+        findings.append(f)
+        fid += 1
+
     findings.sort(key=lambda f: SEV_ORDER.get(f.get("severity"), 9))
     return findings
+
+
+def _harvest_macro_findings(transcript, seen: set) -> list[dict]:
+    """Findings a macro tool reported itself, carried structurally on its
+    transcript entry (``findings`` key, attached by the ``run`` recorder for
+    standalone native tools like ntlm_relay). Deduped by title against findings
+    already produced by the signal/playbook paths.
+
+    Only structured entries are harvested — findings produced inside a playbook
+    *sequence* are recorded as plain output and already surface through the
+    step-signal path, so they are intentionally not re-harvested here (which would
+    double-report them under the macro's own wording)."""
+    out: list[dict] = []
+    for e in transcript or []:
+        if e.get("kind") != "tool_result":
+            continue
+        host = _host_of_entry(e)
+        for sf in e.get("findings") or []:
+            title = sf.get("title", "")
+            if not title or title in seen:
+                continue
+            seen.add(title)
+            out.append({
+                "title": title, "severity": sf.get("severity", "Info"),
+                "cvss": sf.get("cvss", ""), "hosts": [host] if host else [],
+                "description": sf.get("description", ""),
+                "impact": sf.get("impact", ""),
+                "recommendation": sf.get("recommendation", ""),
+                "evidence_cmd": e.get("command", e.get("name", "")),
+                "evidence_out": (e.get("output", "") or "")[:1200],
+            })
+    return out
+
+
+def _host_of_entry(e) -> str:
+    """Best-effort target host from a tool_result command/output."""
+    text = f"{e.get('command','')} {e.get('output','')}"
+    m = re.search(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b", text)
+    return m.group(1) if m else ""
 
 
 # Signals that a step's produced artifact was actually obtained, so the step

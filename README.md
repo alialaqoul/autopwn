@@ -448,7 +448,10 @@ autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -
 The 27 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `kerberoast-da`, `adcs-esc`, `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
 `domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
-`trust-abuse`, `creds-in-ad`, `relay-adcs-esc8` (coerce→relay→ESC8→DA),
+`trust-abuse`, `creds-in-ad`, `relay-adcs-esc8` (coerce→relay→ESC8→DA — the
+built-in **`ntlm_relay`** tool orchestrates the whole listener+coercion end to
+end against the in-scope target; run as root via `sudo autopwn run --tool
+ntlm_relay`),
 `ad-cve-check` (ZeroLogon/noPac/PrintNightmare/MS17-010/coercion — non-destructive
 checks), `sccm-attack` (SCCM/MECM enum + abuse), `password-policy`, `dpapi-loot`, `unauth-ad-roast` (pre2k/timeroast, no
 creds), and — from a single unprivileged domain user — **`privesc-ad`** (enumerate

@@ -68,6 +68,8 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     from .ad_steps import CrackHashesTool, SprayCredTool
     reg.register(CrackHashesTool())
     reg.register(SprayCredTool())
+    from .relay import NtlmRelayTool
+    reg.register(NtlmRelayTool())
 
     # Catalogued external tools.
     for spec in CATALOG:

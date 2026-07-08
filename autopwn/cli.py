@@ -259,7 +259,47 @@ def cmd_run(args) -> int:
         console.print(f"[red]{e}[/]"); return 2
     console.print(Panel(result.raw_output or result.summary, title=result.summary,
                         border_style="green" if result.ok else "red"))
+    # Record the result into the current assessment's transcript so its
+    # findings/credentials surface in the report and the web Findings view — a
+    # root-only tool like ntlm_relay is run from the CLI but belongs to the same
+    # engagement as the console. Only records when the run produced something.
+    if result.ok and (result.data.get("findings") or result.data.get("creds")
+                      or result.data.get("loot") or result.raw_output):
+        _record_run_to_session(cfg, args.tool, result)
     return 0 if result.ok else 1
+
+
+def _record_run_to_session(cfg, tool_name: str, result) -> None:
+    """Append a single ``run`` result to the latest session transcript (or start
+    one) so manually-run tools contribute to the engagement's findings."""
+    log_dir = Path(cfg.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    existing = sorted(log_dir.glob("session-*.json"))
+    tpath = existing[-1] if existing else \
+        log_dir / f"session-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    try:
+        transcript = _json.loads(tpath.read_text(encoding="utf-8")) if tpath.exists() else []
+        if not isinstance(transcript, list):
+            transcript = []
+    except (ValueError, OSError):
+        transcript = []
+    entry = {"kind": "tool_result", "name": tool_name,
+             "command": (result.data or {}).get("command", tool_name),
+             "ok": bool(result.ok),
+             "output": result.raw_output or result.summary}
+    # Carry a macro tool's structured findings/loot so the report shows the full
+    # vulnerability (title + severity + impact + recommendation), not just a line.
+    macro = result.data or {}
+    if macro.get("findings"):
+        entry["findings"] = macro["findings"]
+    if macro.get("loot"):
+        entry["loot"] = macro["loot"]
+    transcript.append(entry)
+    try:
+        tpath.write_text(_json.dumps(transcript, indent=2), encoding="utf-8")
+        console.print(f"[dim]recorded to {tpath.name} — findings will appear in the report[/]")
+    except OSError as e:
+        console.print(f"[yellow]could not record result: {e}[/]")
 
 
 def _render_matrix() -> None:

