@@ -95,9 +95,10 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   list of **steps**, each naming one built-in tool, a trigger (when it runs), and
   its arguments; Autopwn parses every tool's output into shared variables that
   auto-fill the next step. The full no-creds → Domain Admin AD chain, Kerberoast,
-  ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, and more ship as
-  19 playbooks — each editable in the console and driven from real output, not an
-  LLM. A step with a severity becomes a report finding when it actually fires.
+  ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, privilege
+  escalation, and critical-CVE checks ship as 26 playbooks — each editable in the
+  console and driven from real output, not an LLM. A step with a severity becomes a
+  report finding when it actually fires.
 - **Lab-validated for accuracy** — a built-in verify harness (`autopwn verify`)
   runs a playbook against a target and *asserts its finding fires*, stamping a
   dated `verified` record. The shipped playbooks are proven against the GOAD lab
