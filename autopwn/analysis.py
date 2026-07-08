@@ -376,6 +376,8 @@ _STEP_SIGNALS = {
                     r"Minimum password length:\s*[0-7]\b"],
     "dpapi_secret": [r"\[DPAPI\]", r"dpapi_hash", r"masterkey", r"Decrypted"],
     "pre2k_hit": [r"VALID CREDENTIALS", r"\$sntp-ms\$", r"pre2k[^\n]*valid"],
+    "sccm": [r"Management Point", r"Distribution Point", r"Site Code\s*:",
+             r"Found SCCM", r"Primary Site", r"System Management", r"NAA "],
     "delegation": [r"[Uu]nconstrained", r"Constrained w/", r"Resource-Based",
                    r"Protocol Transition", r"AllowedToDelegate"],
     "trust": [r"[Tt]rusted-?Domain", r"trustAttributes", r"trustPartner",
@@ -390,7 +392,7 @@ _STEP_SIGNALS = {
 _ARTIFACT_ORDER = ["admin", "flag", "certificate", "adcs_vuln", "spn_hash", "ticket",
                    "asrep_hash", "mssql_exec", "coerced", "zerologon_vuln",
                    "nopac_vuln", "printnightmare_vuln", "ms17_vuln", "weak_policy",
-                   "dpapi_secret", "pre2k_hit", "delegation",
+                   "dpapi_secret", "pre2k_hit", "sccm", "delegation",
                    "trust", "gpp", "acl_write", "hash", "machine_account",
                    "shares", "relay_targets", "userlist", "credential"]
 

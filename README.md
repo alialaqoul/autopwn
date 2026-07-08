@@ -96,7 +96,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   its arguments; Autopwn parses every tool's output into shared variables that
   auto-fill the next step. The full no-creds → Domain Admin AD chain, Kerberoast,
   ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, privilege
-  escalation, and critical-CVE checks ship as 26 playbooks — each editable in the
+  escalation, and critical-CVE checks ship as 27 playbooks — each editable in the
   console and driven from real output, not an LLM. A step with a severity becomes a
   report finding when it actually fires.
 - **Lab-validated for accuracy** — a built-in verify harness (`autopwn verify`)
@@ -445,12 +445,12 @@ autopwn playbook --id delegation-abuse  --target 10.0.0.11 --domain corp.local -
 autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -u user -p pass
 ```
 
-The 26 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
+The 27 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `kerberoast-da`, `adcs-esc`, `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
 `domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
 `trust-abuse`, `creds-in-ad`, `relay-adcs-esc8` (coerce→relay→ESC8→DA),
 `ad-cve-check` (ZeroLogon/noPac/PrintNightmare/MS17-010/coercion — non-destructive
-checks), `password-policy`, `dpapi-loot`, `unauth-ad-roast` (pre2k/timeroast, no
+checks), `sccm-attack` (SCCM/MECM enum + abuse), `password-policy`, `dpapi-loot`, `unauth-ad-roast` (pre2k/timeroast, no
 creds), and — from a single unprivileged domain user — **`privesc-ad`** (enumerate
 every escalation path in one run) and **`privesc-local`** (Windows local → SYSTEM),
 plus detection playbooks (SMB signing/null-auth, RDP, WSUS, …). All are editable in
