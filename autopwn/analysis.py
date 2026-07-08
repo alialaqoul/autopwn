@@ -26,6 +26,7 @@ _OLD_CHAIN_CRED_RE = re.compile(r"valid credential:\s*([^\s:]+):(\S+?)(?:\s|\(|$
 # accounts ($) and built-in accounts are dropped by add_cred.
 _NTDS_RE = re.compile(r"^([^\s:]+):\d+:[a-f0-9]{32}:([a-f0-9]{32}):::", re.M)
 _EMPTY_NT = "31d6cfe0d16ae931b73c59d7e0c089c0"   # NT hash of a blank password
+_LOOKS_NT = re.compile(r"^[a-f0-9]{32}$", re.I)  # a stored secret that is an NT hash
 # Crackable/loot hashes captured during a run (for the "Captured hashes" view).
 _TGS_HASH = re.compile(r"\$krb5tgs\$\S+")
 _TGS_ACCT = re.compile(r"\$krb5tgs\$\d+\$\*?([^$*]+?)\$")
@@ -84,12 +85,16 @@ def extract_results(transcript, domain: str = "") -> dict:
         if rec is None:
             rec = {"username": u, "password": pw, "domain": dom, "sources": []}
             creds[key] = rec
-        # Secret: fill if empty, and upgrade a weak user==pass hit to a real secret.
+        # Secret: fill if empty, upgrade a weak user==pass hit to a real secret,
+        # and prefer a cracked plaintext over a stored NT hash.
         if pw:
-            if not rec["password"]:
+            stored = rec["password"]
+            if not stored:
                 rec["password"] = pw
-            elif rec["password"].lower() == u_l and pw.lower() != u_l:
+            elif stored.lower() == u_l and pw.lower() != u_l:
                 rec["password"] = pw
+            elif _LOOKS_NT.match(stored) and not _LOOKS_NT.match(pw):
+                rec["password"] = pw            # cracked plaintext beats a hash
         if source and source not in rec["sources"]:
             rec["sources"].append(source)
 

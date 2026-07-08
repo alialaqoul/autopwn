@@ -1077,6 +1077,22 @@ def cmd_autorun(args) -> int:
             if r:
                 console.print(f"    [dim]{r.summary}[/]")
 
+    # 3.5) Automatic AD escalation (ESC8 → DCSync → crack) — best-effort. Runs
+    #      only with a domain credential + root + an ESC8-capable CA + a coercible
+    #      DC; otherwise it skips without touching the assessment.
+    from .escalate import auto_escalate
+
+    def _record_text(name, command, output):
+        transcript.append({"kind": "tool_result", "name": name,
+                           "command": command, "ok": True, "output": output})
+        _save()
+
+    try:
+        auto_escalate(_store.all_hosts(), _run, _record_text,
+                      lambda m: console.print(f"[cyan]═ escalate ═[/] {m}"))
+    except Exception as e:
+        console.print(f"[yellow]AD escalation error (skipped): {e}[/]")
+
     # 4) Report (the transcript was saved incrementally during the run).
     _save()
     final = f"Deterministic assessment ran {ran} playbook action(s) across {args.target}."
