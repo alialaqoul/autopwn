@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 10
+_BUILTIN_VERSION = 11
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -41,7 +41,8 @@ ARTIFACTS = [
     "domain", "host_info", "signing", "userlist", "credential", "hash", "ticket",
     "spn_hash", "asrep_hash", "shares", "relay_targets", "coerced", "machine_account",
     "adcs_vuln", "certificate", "mssql_exec", "delegation", "trust", "acl_write",
-    "gpp", "admin", "flag",
+    "gpp", "zerologon_vuln", "nopac_vuln", "printnightmare_vuln", "ms17_vuln",
+    "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
 # A step fires when its trigger is true against the current variables.
@@ -695,6 +696,69 @@ DEFAULT_PLAYBOOKS = [
                   "sc / accesschk (on the host)", ["credential"], ["admin"],
                   "Weak service ACLs (reconfigure binPath), unquoted service paths, or writable "
                   "%PATH% dirs → run a payload as the service (often SYSTEM).", "final"),
+        ],
+    },
+
+    {
+        "id": "ad-cve-check",
+        "name": "Critical AD CVE checks (ZeroLogon / noPac / PrintNightmare / …)",
+        "summary": "Safely CHECK a DC/host for the well-known critical AD vulnerabilities "
+                   "that grant Domain Admin or SYSTEM in one shot. Non-destructive checks "
+                   "via NetExec modules — a finding fires only for what is actually vulnerable.",
+        "match": {"any_ports": [445], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "ZeroLogon (CVE-2020-1472)", "start", "netexec_module",
+                  [], ["zerologon_vuln"],
+                  "nxc smb -M zerologon: check the Netlogon flaw that resets the DC "
+                  "machine password → instant Domain Admin. (Check only, non-destructive.)",
+                  args={"protocol": "smb", "module": "zerologon"},
+                  severity="Critical", cvss="10.0",
+                  finding_title="ZeroLogon — Domain Controller Vulnerable (CVE-2020-1472)",
+                  impact="An unauthenticated attacker can reset the DC machine account "
+                         "password and immediately obtain Domain Admin / DCSync.",
+                  recommendation="Apply the August 2020+ patches and enforce Netlogon "
+                         "secure-channel enforcement mode."),
+            _step(2, "noPac (CVE-2021-42278/42287)", "have credential", "netexec_module",
+                  ["credential"], ["nopac_vuln"],
+                  "nxc smb -M nopac: sAMAccountName spoofing lets a standard user impersonate "
+                  "a DC and reach Domain Admin.",
+                  args={"protocol": "smb", "module": "nopac"},
+                  severity="Critical", cvss="9.0",
+                  finding_title="noPac / sAMAccountName Spoofing (CVE-2021-42278/42287)",
+                  impact="Any authenticated user can escalate to Domain Admin by spoofing "
+                         "a domain controller's account name.",
+                  recommendation="Apply the November 2021 patches; set ms-DS-Machine-"
+                         "AccountQuota to 0 as defence in depth."),
+            _step(3, "PrintNightmare (CVE-2021-34527)", "have credential", "netexec_module",
+                  ["credential"], ["printnightmare_vuln"],
+                  "nxc smb -M printnightmare: Print Spooler RCE → SYSTEM on the host.",
+                  args={"protocol": "smb", "module": "printnightmare"},
+                  severity="High", cvss="8.8",
+                  finding_title="PrintNightmare — Print Spooler RCE (CVE-2021-34527)",
+                  impact="The Print Spooler allows remote code execution as SYSTEM; on a DC "
+                         "this is domain compromise.",
+                  recommendation="Patch and disable the Print Spooler service on servers/DCs "
+                         "that don't need it; restrict Point-and-Print."),
+            _step(4, "MS17-010 EternalBlue", "start", "netexec_module",
+                  [], ["ms17_vuln"],
+                  "nxc smb -M ms17-010: legacy SMBv1 RCE → SYSTEM.",
+                  args={"protocol": "smb", "module": "ms17-010"},
+                  severity="Critical", cvss="9.3",
+                  finding_title="MS17-010 EternalBlue — SMBv1 RCE",
+                  impact="Unauthenticated remote code execution as SYSTEM over SMBv1.",
+                  recommendation="Patch MS17-010 and disable SMBv1 entirely."),
+            _step(5, "Authentication coercion (PetitPotam / PrinterBug / DFSCoerce)", "start",
+                  "netexec_module", [], ["coerced"],
+                  "nxc smb -M coerce_plus: check whether the host can be coerced to "
+                  "authenticate (feeds NTLM relay to an unsigned host or ADCS ESC8).",
+                  "final", args={"protocol": "smb", "module": "coerce_plus"},
+                  severity="High", cvss="8.1",
+                  finding_title="Authentication Coercion (PrinterBug / PetitPotam)",
+                  impact="A DC/host can be coerced into authenticating to an arbitrary "
+                         "target, feeding an NTLM relay to any unsigned host or ADCS ESC8.",
+                  recommendation="Patch MS-RPRN/MS-EFSR/MS-DFSNM, disable the Print Spooler "
+                         "on DCs, enforce SMB signing and channel binding, and disable NTLM."),
         ],
     },
 

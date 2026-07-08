@@ -363,7 +363,14 @@ _STEP_SIGNALS = {
     "certificate": [r"Saved certificate and private key", r"Got hash for '"],
     "mssql_exec": [r"MSSQL[^\n]*\(Pwn3d!\)", r"nt service\\mssqlserver",
                    r"Executed command via", r"xp_cmdshell"],
-    "coerced": [r"\[\+\][^\n]*SMB\s+Auth", r"named pipe[^\n]*efsrpc[^\n]*accessible"],
+    "coerced": [r"\[\+\][^\n]*SMB\s+Auth", r"named pipe[^\n]*efsrpc[^\n]*accessible",
+                r"VULNERABLE,\s*(?:DFSCoerce|PetitPotam|PrinterBug|MSEven|ShadowCoerce)"],
+    # critical AD CVE checks — each requires the module name so they never
+    # cross-fire (all run through netexec_module).
+    "zerologon_vuln": [r"ZEROLOGON[^\n]*(?:VULNERABLE|Success)", r"vulnerable to (?:CVE-2020-1472|[Zz]erologon)"],
+    "nopac_vuln": [r"NOPAC[^\n]*VULNERABLE", r"vulnerable to (?:CVE-2021-4227|no[Pp]ac)"],
+    "printnightmare_vuln": [r"PRINTNIGHTMARE[^\n]*(?:VULNERABLE|[Vv]ulnerable)"],
+    "ms17_vuln": [r"MS17-010[^\n]*VULNERABLE", r"(?:likely )?vulnerable to MS17-010"],
     "delegation": [r"[Uu]nconstrained", r"Constrained w/", r"Resource-Based",
                    r"Protocol Transition", r"AllowedToDelegate"],
     "trust": [r"[Tt]rusted-?Domain", r"trustAttributes", r"trustPartner",
@@ -376,8 +383,9 @@ _STEP_SIGNALS = {
             r"Computer:[^\n]*Password:", r"[Gg]ot LAPS[^\n]*[Pp]assword"],
 }
 _ARTIFACT_ORDER = ["admin", "flag", "certificate", "adcs_vuln", "spn_hash", "ticket",
-                   "asrep_hash", "mssql_exec", "coerced", "delegation", "trust",
-                   "gpp", "acl_write", "hash", "machine_account",
+                   "asrep_hash", "mssql_exec", "coerced", "zerologon_vuln",
+                   "nopac_vuln", "printnightmare_vuln", "ms17_vuln", "delegation",
+                   "trust", "gpp", "acl_write", "hash", "machine_account",
                    "shares", "relay_targets", "userlist", "credential"]
 
 
