@@ -20,6 +20,18 @@ _CHAIN_CRED_RE = re.compile(r"^Credential:\s*([^\s:]+):(\S+?)\s*@\s*(\S+)\s*$", 
 # ("Credentials: a:b, c:d") and, failing that, per-step logs.
 _OLD_CHAIN_SUMMARY_RE = re.compile(r"^Credentials:\s*(.+)$", re.M)
 _OLD_CHAIN_CRED_RE = re.compile(r"valid credential:\s*([^\s:]+):(\S+?)(?:\s|\(|$)", re.I)
+# secretsdump / NTDS / SAM dump lines: "[DOMAIN\]user:rid:lmhash:nthash:::"
+# group(1) is the whole principal ("DOM\user" or "user"); split off the domain in
+# code. The recovered secret is the NT hash (usable via pass-the-hash); machine
+# accounts ($) and built-in accounts are dropped by add_cred.
+_NTDS_RE = re.compile(r"^([^\s:]+):\d+:[a-f0-9]{32}:([a-f0-9]{32}):::", re.M)
+_EMPTY_NT = "31d6cfe0d16ae931b73c59d7e0c089c0"   # NT hash of a blank password
+# Crackable/loot hashes captured during a run (for the "Captured hashes" view).
+_TGS_HASH = re.compile(r"\$krb5tgs\$\S+")
+_TGS_ACCT = re.compile(r"\$krb5tgs\$\d+\$\*?([^$*]+?)\$")
+_ASREP_HASH = re.compile(r"\$krb5asrep\$\S+")
+_ASREP_ACCT = re.compile(r"\$krb5asrep\$\d+\$([^@$:]+)")
+_NTLM_HASH_RE = re.compile(r"^([^\s:]+):\d+:[a-f0-9]{32}:([a-f0-9]{32}):::", re.M)
 _KERBRUTE_RE = re.compile(r"VALID USERNAME:\s+([^@\s]+)@")
 _LDAP_USER_RE = re.compile(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}")
 _RID_USER_RE = re.compile(r"\\([^\\\s]+)\s+\(SidTypeUser\)", re.I)
@@ -50,7 +62,8 @@ def extract_results(transcript, domain: str = "") -> dict:
 
     def add_cred(u, pw, dom, source):
         pw = pw or ""
-        if u.lower() in _NEVER or u.endswith("$"):
+        # skip built-ins, machine accounts (…$) and NTDS artifacts ($DUPLICATE-*).
+        if u.lower() in _NEVER or u.endswith("$") or u.startswith("$"):
             return
         if pw.lower() in _NEVER:            # a built-in account name is never a password
             return
@@ -112,6 +125,13 @@ def extract_results(transcript, domain: str = "") -> dict:
             else:                  # last resort: per-step logs (noisier)
                 for m in _OLD_CHAIN_CRED_RE.finditer(out):
                     add_cred(m.group(1), m.group(2), "", src)
+        for m in _NTDS_RE.finditer(out):   # secretsdump / NTDS / SAM hashes
+            principal, nt = m.group(1), m.group(2)
+            if nt == _EMPTY_NT:
+                continue                    # blank password — not a usable secret
+            dom, _, user = principal.rpartition("\\")   # "DOM\user" -> dom,user
+            user = user or principal
+            add_cred(user, nt, "" if dom.lower() == "builtin" else dom, src)
         for m in _KERBRUTE_RE.finditer(out):
             users.add(m.group(1))
         for m in _LDAP_USER_RE.finditer(out):
@@ -133,6 +153,45 @@ def extract_results(transcript, domain: str = "") -> dict:
         r["note"] = ", ".join(r.get("sources", []))
         out_creds.append(r)
     return {"credentials": out_creds, "users": sorted(users)}
+
+
+def extract_hashes(transcript) -> list[dict]:
+    """Crackable/loot hashes captured during a run — Kerberoast (TGS), AS-REP, and
+    NTLM (NTDS/SAM). For the Findings 'Captured hashes' view. Each entry is
+    {type, account, hash, source}; deduped by (type, account, hash tail)."""
+    seen: set = set()
+    out: list[dict] = []
+
+    def add(htype: str, account: str, h: str, source: str) -> None:
+        key = (htype, (account or "").lower(), h[-32:])
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"type": htype, "account": account or "?",
+                    "hash": h, "source": source})
+
+    for e in transcript or []:
+        text = e.get("output") or e.get("raw_output") or e.get("summary") or ""
+        if not text:
+            continue
+        src = e.get("name") or "tool"
+        if src.startswith("playbook:"):
+            src = "kill-chain"
+        for m in _TGS_HASH.finditer(text):
+            h = m.group(0).rstrip(".,)")
+            am = _TGS_ACCT.search(h)
+            add("Kerberoast", am.group(1) if am else "", h, src)
+        for m in _ASREP_HASH.finditer(text):
+            h = m.group(0).rstrip(".,)")
+            am = _ASREP_ACCT.search(h)
+            add("AS-REP", am.group(1) if am else "", h, src)
+        for m in _NTLM_HASH_RE.finditer(text):
+            principal, nt = m.group(1), m.group(2)
+            if principal.endswith("$") or principal.startswith("$") or nt == _EMPTY_NT:
+                continue                      # machine account / artifact / blank
+            _, _, user = principal.rpartition("\\")
+            add("NTLM", user or principal, nt, src)
+    return out
 
 
 def _open(entry: dict) -> dict[int, dict]:

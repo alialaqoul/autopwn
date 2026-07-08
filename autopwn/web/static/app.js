@@ -648,6 +648,28 @@ async function loadFindings() {
     ? d.users.map(u => `<span class="chip font-monospace">${esc(u)}</span>`).join("")
     : `<div class="text-secondary small">No usernames enumerated yet.</div>`;
 
+  // captured hashes (Kerberoast / AS-REP / NTLM) — feed to hashcat
+  const hashes = d.hashes || [];
+  window._hashes = hashes;
+  $("#hashCount").textContent = hashes.length;
+  $("#hashesCard").hidden = hashes.length === 0;
+  $("#hashesTable tbody").innerHTML = hashes.map((h, i) => {
+    const full = h.hash || "";
+    const short = full.length > 56 ? full.slice(0, 56) + "…" : full;
+    const typeCls = h.type === "Kerberoast" ? "text-bg-warning"
+      : h.type === "AS-REP" ? "text-bg-info" : "text-bg-secondary";
+    return `<tr>
+      <td><span class="badge ${typeCls}">${esc(h.type)}</span></td>
+      <td class="font-monospace">${esc(h.account)}</td>
+      <td class="font-monospace small" title="${esc(full)}">${esc(short)}
+        <button class="btn btn-sm btn-link py-0 px-1" data-copy-hash="${i}" title="Copy full hash">copy</button></td>
+      <td><span class="badge text-bg-light text-secondary border">${esc(h.source)}</span></td></tr>`;
+  }).join("");
+  $$("#hashesTable [data-copy-hash]").forEach(b => b.onclick = () => {
+    navigator.clipboard?.writeText(window._hashes[+b.dataset.copyHash].hash);
+    b.textContent = "copied"; setTimeout(() => b.textContent = "copy", 1200);
+  });
+
   // findings
   const fs = [...d.findings].sort((a, b) => (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9));
   $("#findingCount").textContent = fs.length;

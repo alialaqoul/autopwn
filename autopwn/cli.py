@@ -272,6 +272,7 @@ def cmd_run(args) -> int:
 def _record_run_to_session(cfg, tool_name: str, result) -> None:
     """Append a single ``run`` result to the latest session transcript (or start
     one) so manually-run tools contribute to the engagement's findings."""
+    import json as _json
     log_dir = Path(cfg.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     existing = sorted(log_dir.glob("session-*.json"))

@@ -490,12 +490,22 @@ CATALOG: list[CommandSpec] = [
     ),
     CommandSpec(
         name="secretsdump",
-        description="Dump password hashes (SAM/NTDS/LSA) from a host using valid "
-                    "credentials. Highly intrusive — post-exploitation.",
-        binary="impacket-secretsdump",
-        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH}, ["target", "username", "password"]),
-        build_args=lambda k: [f"{_s(k.get('domain','') )}/{_s(k['username'])}:"
-                              f"{_s(k['password'])}@{_s(k['target'])}"],
+        description="Dump password hashes with valid credentials: local SAM/LSA on a "
+                    "host, or DCSync a whole domain (just_dc=true) against a DC with a "
+                    "Domain-Admin / DC account — via password or pass-the-hash. "
+                    "Highly intrusive — post-exploitation.",
+        binary="impacket-secretsdump", category="credentials",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH_H,
+            "just_dc": {"type": "string", "description": "'true' to DCSync the domain "
+                        "over DRSUAPI (-just-dc-ntlm): fast, DC-only, skips SAM/LSA."}},
+            ["target", "username"]),
+        build_args=lambda k: (
+            [f"{_s(k.get('domain',''))}/{_s(k['username'])}"
+             + (f":{_s(k['password'])}" if k.get("password") else "")
+             + f"@{_s(k['target'])}"]
+            + (["-hashes", f":{_s(k['hash'])}", "-no-pass"] if k.get("hash") else [])
+            + (["-just-dc-ntlm"] if _s(k.get("just_dc", "")).lower()
+               in ("true", "1", "yes") else [])),
         install_hint="pipx install impacket.",
     ),
     CommandSpec(

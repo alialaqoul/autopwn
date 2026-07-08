@@ -555,14 +555,14 @@ def create_app(config_path: str = "config.yaml"):
                 transcript = json.loads(sess[-1].read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 transcript = []
-        from ..analysis import extract_results
+        from ..analysis import extract_results, extract_hashes
         findings = build_findings(hosts, facts, transcript, str(ld))
         # Credentials/users come ONLY from actual tool output (the transcript) —
         # not from the transient username/password facts, which mutate during a
         # run and can pair values that were never a real login.
         _res = extract_results(transcript)
         return {"findings": findings, "credentials": _res["credentials"],
-                "users": _res["users"],
+                "users": _res["users"], "hashes": extract_hashes(transcript),
                 "transcript": sess[-1].name if sess else None}
 
     # ---- tools (actions) -------------------------------------------------- #
