@@ -1040,6 +1040,23 @@ def cmd_autorun(args) -> int:
         if {80, 8080, 8000} & ports:
             _run("http_probe", url=f"http://{host}")
 
+    # 2.5) Automatic AD escalation (ESC8 → DCSync → crack) — best-effort. Runs
+    #      here (before the slow playbook sweep) so a domain compromise surfaces
+    #      fast. Gated: needs a domain credential + root + an ESC8-capable CA + a
+    #      coercible DC; otherwise it skips without touching the assessment.
+    from .escalate import auto_escalate
+
+    def _record_text(name, command, output):
+        transcript.append({"kind": "tool_result", "name": name,
+                           "command": command, "ok": True, "output": output})
+        _save()
+
+    try:
+        auto_escalate(_store.all_hosts(), _run, _record_text,
+                      lambda m: console.print(f"[cyan]═ escalate ═[/] {m}"))
+    except Exception as e:
+        console.print(f"[yellow]AD escalation error (skipped): {e}[/]")
+
     # 3) Run every playbook whose match fires — either a built-in tool SEQUENCE
     #    (the AD kill chain and friends) or a single macro tool.
     from .sequence import run_sequence
@@ -1076,22 +1093,6 @@ def cmd_autorun(args) -> int:
             ran += 1
             if r:
                 console.print(f"    [dim]{r.summary}[/]")
-
-    # 3.5) Automatic AD escalation (ESC8 → DCSync → crack) — best-effort. Runs
-    #      only with a domain credential + root + an ESC8-capable CA + a coercible
-    #      DC; otherwise it skips without touching the assessment.
-    from .escalate import auto_escalate
-
-    def _record_text(name, command, output):
-        transcript.append({"kind": "tool_result", "name": name,
-                           "command": command, "ok": True, "output": output})
-        _save()
-
-    try:
-        auto_escalate(_store.all_hosts(), _run, _record_text,
-                      lambda m: console.print(f"[cyan]═ escalate ═[/] {m}"))
-    except Exception as e:
-        console.print(f"[yellow]AD escalation error (skipped): {e}[/]")
 
     # 4) Report (the transcript was saved incrementally during the run).
     _save()
