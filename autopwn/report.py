@@ -284,59 +284,21 @@ def to_markdown(m: dict) -> str:
 
 # ---- HTML -------------------------------------------------------------------
 
-# Palette + typography mirrored from the IA StageGuard Staging Auditor report
-# (report_export.py): Schneider green header bars, slate ink/borders, a light
-# #F8FAFC zebra, a branded cover, and a "Generated · Confidential" footer.
 _CSS = """
-:root{--g:#00B140;--g7:#007A3D;--ink:#0F172A;--muted:#64748B;--bd:#E2E8F0;--panel:#F8FAFC}
-*{box-sizing:border-box}
-body{font-family:'Inter','Nunito','Segoe UI',Arial,sans-serif;color:var(--ink);margin:0;padding:40px;line-height:1.55;font-size:13px}
-h1{font-size:22px;color:var(--ink);margin:0 0 4px}
-h2{font-size:15px;color:var(--g7);margin:26px 0 8px;padding-bottom:5px;border-bottom:2px solid var(--g)}
-h3{font-size:13.5px;color:var(--ink);margin:16px 0 4px}
-h4{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 3px}
-a{color:var(--g7)}
-.rp-bar{display:flex;align-items:center;justify-content:space-between;background:var(--g);color:#fff;border-radius:10px;padding:12px 18px;margin-bottom:8px}
-.rp-bar .brand{font-weight:700;font-size:15px;letter-spacing:.01em}
-.rp-bar .kind{font-size:12px;color:#D1FAE5;font-weight:600}
-.rp-cover{text-align:center;padding:22px 0 24px;border-bottom:1px solid var(--bd);margin-bottom:18px}
-.rp-cover img{width:64px;height:64px;object-fit:contain;margin-bottom:14px}
-.rp-cover .title{font-size:24px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;color:var(--ink)}
-.rp-cover .sub{font-size:13px;color:#334155;margin-top:6px}
-.rp-cover .gen{font-size:11px;color:#94A3B8;margin-top:8px}
-table{border-collapse:collapse;width:100%;margin:8px 0 14px;font-size:12px;table-layout:fixed}
-th,td{border:1px solid var(--bd);padding:6px 9px;text-align:left;vertical-align:top;word-wrap:break-word}
-th{background:var(--g);color:#fff;font-weight:600}
-tbody tr:nth-child(even){background:var(--panel)}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a1a;margin:40px;line-height:1.5}
+h1{color:#0b5394;border-bottom:3px solid #0b5394;padding-bottom:6px}
+h2{color:#0b5394;margin-top:26px;border-bottom:1px solid #ccc;padding-bottom:3px}
+h3{color:#222;margin-top:18px}h4{color:#444;margin:10px 0 2px}
+table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px;table-layout:fixed}
+th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;word-wrap:break-word}
+th{background:#0b5394;color:#fff}tbody tr:nth-child(even){background:#f4f7fb}
 tr{page-break-inside:avoid}thead{display:table-header-group}
-.meta{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
-.meta td{border:none;border-bottom:1px solid #eef2f6;padding:7px 12px;font-size:12.5px}
-.meta tr:last-child td{border-bottom:none}
-.meta td:first-child{width:150px;color:var(--muted);background:var(--panel)}
-.sev-Critical,.sev-High,.sev-Medium,.sev-Low,.sev-Info{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
-.sev-Critical{color:#fff;background:#7F1D1D}.sev-High{color:#fff;background:#B91C1C}
-.sev-Medium{color:#fff;background:#B45309}.sev-Low{color:#fff;background:#475569}
-.sev-Info{color:#fff;background:#94A3B8}
-pre{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:9px 11px;font-family:ui-monospace,Consolas,'Cascadia Code',monospace;font-size:11px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word}
-code{font-family:ui-monospace,Consolas,monospace;font-size:11px}
-.badge{display:inline-block;background:var(--panel);border:1px solid var(--bd);color:var(--muted);border-radius:999px;padding:0 7px;font-size:11px;font-weight:600}
-.foot{color:#94A3B8;font-size:11px;margin-top:34px;border-top:1px solid var(--bd);padding-top:10px;display:flex;justify-content:space-between}
+.sev-Critical{color:#fff;background:#7b0000;padding:1px 5px;white-space:nowrap}.sev-High{color:#fff;background:#c00;padding:1px 5px;white-space:nowrap}
+.sev-Medium{color:#000;background:#f4b400;padding:1px 5px;white-space:nowrap}.sev-Low{color:#fff;background:#3c78d8;padding:1px 5px;white-space:nowrap}
+.sev-Info{color:#fff;background:#888;padding:1px 5px;white-space:nowrap}
+pre{background:#f5f5f5;border:1px solid #ddd;padding:8px;font-size:11px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word}
+.meta td{border:none;padding:2px 8px}.foot{color:#888;font-size:11px;margin-top:30px;border-top:1px solid #ddd;padding-top:8px}
 """
-
-
-import base64 as _base64
-import functools as _functools
-
-
-@_functools.lru_cache(maxsize=1)
-def _logo_data_uri() -> str:
-    """The Schneider brand mark, inlined as a data URI so a report .html/.docx is
-    fully self-contained (no dependency on the running server)."""
-    try:
-        p = Path(__file__).parent / "web" / "static" / "logo.png"
-        return "data:image/png;base64," + _base64.b64encode(p.read_bytes()).decode("ascii")
-    except Exception:
-        return ""
 
 
 def _e(s):
@@ -395,21 +357,8 @@ def _summary_html(text: str) -> str:
 
 def to_html(m: dict) -> str:
     meta: Engagement = m["meta"]
-    p = [f"<html><head><meta charset='utf-8'><title>Penetration Test Report</title>"
-         f"<style>{_CSS}</style></head><body>"]
-    # Branded header bar + cover (mirrors the auditor's report cover).
-    p.append("<div class='rp-bar'><span class='brand'>Autopwn</span>"
-             "<span class='kind'>Penetration Test Report</span></div>")
-    logo = _logo_data_uri()
-    p.append("<div class='rp-cover'>")
-    if logo:
-        p.append(f"<img src='{logo}' alt='Autopwn'>")
-    p.append(f"<div class='title'>{_e(meta.engagement)}</div>")
-    p.append("<div class='sub'>Penetration Test Report</div>")
-    if meta.client:
-        p.append(f"<div class='sub'>{_e(meta.client)}</div>")
-    p.append(f"<div class='gen'>Generated: {_e(m['generated'])}</div>")
-    p.append("</div>")
+    p = [f"<html><head><meta charset='utf-8'><style>{_CSS}</style></head><body>"]
+    p.append(f"<h1>Penetration Test Report</h1><h2 style='border:none'>{_e(meta.engagement)}</h2>")
     p.append("<table class='meta'>")
     for k, v in meta.rows():
         if v and k != "Engagement":
@@ -496,25 +445,19 @@ def to_html(m: dict) -> str:
     for c in m["command_log"]:
         p.append(f"<h4>{_e(c['tool'])} — <code>{_pre(c['command'])}</code></h4>"
                  f"<pre>{_pre(c['output'][:1000].strip())}</pre>")
-    p.append(f"<div class='foot'><span>Generated by Autopwn on {_e(m['generated'])} "
-             "— for authorized security testing only.</span><span>Confidential</span>"
-             "</div></body></html>")
+    p.append(f"<div class='foot'>Generated by Autopwn on {m['generated']} — "
+             "for authorized security testing only.</div></body></html>")
     return "\n".join(p)
 
 
 # ---- DOCX -------------------------------------------------------------------
-# Palette mirrored from the HTML report (Schneider green + slate) so both match.
-_DX_GREEN = (0x00, 0xB1, 0x40)         # brand green — table header background
-_DX_GREEN7 = (0x00, 0x7A, 0x3D)        # darker green — title / H1
-_DX_INK = (0x0F, 0x17, 0x2A)           # H2
-_DX_SLATE = (0x47, 0x55, 0x69)         # H3
+# Palette mirrored from the HTML report so both look the same.
+_DX_BLUE = (0x0B, 0x53, 0x94)          # headings + table header background
 _DX_WHITE = (0xFF, 0xFF, 0xFF)
-_DX_HEADER_FILL = "00B140"             # green header row fill
-_DX_PANEL_FILL = "F8FAFC"              # light-grey panel / meta / mono fill
 _DX_SEV = {                            # severity -> (fill hex, text rgb) — matches CSS
-    "Critical": ("7F1D1D", _DX_WHITE), "High": ("B91C1C", _DX_WHITE),
-    "Medium": ("B45309", _DX_WHITE), "Low": ("475569", _DX_WHITE),
-    "Info": ("94A3B8", _DX_WHITE),
+    "Critical": ("7B0000", _DX_WHITE), "High": ("C00000", _DX_WHITE),
+    "Medium": ("F4B400", (0, 0, 0)), "Low": ("3C78D8", _DX_WHITE),
+    "Info": ("888888", _DX_WHITE),
 }
 
 
@@ -547,7 +490,7 @@ def _dx_table(doc, headers, widths=None):
     t = doc.add_table(rows=1, cols=len(headers)); t.style = "Table Grid"
     for i, h in enumerate(headers):
         _dx_cell(t.rows[0].cells[i], h, bold=True, rgb=_DX_WHITE)
-        _dx_shade(t.rows[0].cells[i], _DX_HEADER_FILL)
+        _dx_shade(t.rows[0].cells[i], "0B5394")
         if widths and i < len(widths):
             t.rows[0].cells[i].width = Inches(widths[i])
     return t
@@ -571,8 +514,8 @@ def _force_arial(doc) -> None:
             rfonts = OxmlElement("w:rFonts"); rpr.append(rfonts)
         for a in ("w:ascii", "w:hAnsi", "w:cs"):
             rfonts.set(qn(a), "Arial")
-    for name, rgb in (("Title", _DX_GREEN7), ("Heading 1", _DX_GREEN7),
-                      ("Heading 2", _DX_INK), ("Heading 3", _DX_SLATE)):
+    for name, rgb in (("Title", _DX_BLUE), ("Heading 1", _DX_BLUE),
+                      ("Heading 2", (0x22, 0x22, 0x22)), ("Heading 3", (0x44, 0x44, 0x44))):
         try:
             doc.styles[name].font.color.rgb = RGBColor(*rgb)
         except KeyError:
@@ -589,29 +532,13 @@ def to_docx(m: dict, path: Path) -> bool:
         meta: Engagement = m["meta"]
         doc = Document()
         _force_arial(doc)
-        # Branded cover: centered Schneider logo + product name above the title.
-        try:
-            from docx.shared import Inches, Pt, RGBColor
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-            _logo = Path(__file__).parent / "web" / "static" / "logo.png"
-            if _logo.exists():
-                cover_p = doc.add_paragraph()
-                cover_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                cover_p.add_run().add_picture(str(_logo), width=Inches(0.85))
-            brand_p = doc.add_paragraph()
-            brand_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _br = brand_p.add_run("Autopwn")
-            _br.bold = True; _br.font.name = "Arial"; _br.font.size = Pt(16)
-            _br.font.color.rgb = RGBColor(*_DX_GREEN7)
-        except Exception:
-            pass
         doc.add_heading("Penetration Test Report", level=0)
         doc.add_heading(meta.engagement, level=1)
         t = doc.add_table(rows=0, cols=2); t.style = "Table Grid"
         for k, v in meta.rows():
             if v and k != "Engagement":
                 r = t.add_row().cells
-                _dx_cell(r[0], k, bold=True); _dx_shade(r[0], _DX_PANEL_FILL)
+                _dx_cell(r[0], k, bold=True); _dx_shade(r[0], "F4F7FB")
                 _dx_cell(r[1], v)
 
         doc.add_heading("1. Executive Summary", level=1)
@@ -762,7 +689,7 @@ def _mono(doc, text: str):
     cell.text = ""
     run = cell.paragraphs[0].add_run(_xml_safe(text))
     run.font.name = "Consolas"; run.font.size = Pt(8)
-    _dx_shade(cell, _DX_PANEL_FILL)
+    _dx_shade(cell, "F5F5F5")
 
 
 # ---- export -----------------------------------------------------------------
