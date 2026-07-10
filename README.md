@@ -284,7 +284,7 @@ run locally.
 ### `scope.yaml` — what you're allowed to test
 
 ```yaml
-engagement: "Home lab assessment"
+engagement: ""                        # optional; shown as the report title
 authorized_by: "your-name"
 expires: "2026-12-31"                 # tool refuses to run after this date
 allow:

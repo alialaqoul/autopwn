@@ -103,6 +103,11 @@ def create_app(config_path: str = "config.yaml"):
     _ld()  # activate the current session at startup
 
     app = FastAPI(title="Autopwn Console", docs_url=None, redoc_url=None)
+    # Windows registries often lack a woff2 entry, so StaticFiles would serve the
+    # Inter web fonts as text/plain. Register the correct types before mounting.
+    import mimetypes
+    mimetypes.add_type("font/woff2", ".woff2")
+    mimetypes.add_type("font/woff", ".woff")
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.middleware("http")
@@ -716,15 +721,24 @@ def create_app(config_path: str = "config.yaml"):
             raise HTTPException(403, f"'{host}' is on the deny list.")
         if not sc.is_allowed(host):
             sc.add_allow(host)
+        try:
+            cols = int(body.get("cols") or 120)
+            rows = int(body.get("rows") or 34)
+        except (TypeError, ValueError):
+            cols, rows = 120, 34
         return shells.start(host, "winrm" if body.get("protocol") == "winrm" else "smb",
                             username, body.get("secret") or "",
                             "hash" if body.get("auth") == "hash" else "password",
-                            (body.get("domain") or "").strip())
+                            (body.get("domain") or "").strip(), cols=cols, rows=rows)
 
     @app.post("/api/shells/{sid}/send")
     def send_shell(sid: str, body: dict):
         from . import shells
-        if not shells.send(sid, body.get("command", "")):
+        # raw keystrokes from the terminal ("data"); legacy "command" adds a newline
+        data = body.get("data")
+        if data is None:
+            data = (body.get("command") or "") + "\n"
+        if not shells.send(sid, data):
             raise HTTPException(404, "Session not found.")
         return {"ok": True}
 
@@ -736,6 +750,7 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.get("/api/shells/{sid}/stream")
     async def shell_stream(sid: str, request: Request):
+        import base64
         from . import shells
         lp = shells.log_path(sid)
 
@@ -748,16 +763,16 @@ def create_app(config_path: str = "config.yaml"):
             while True:
                 if await request.is_disconnected():
                     break
-                chunk = ""
+                data = b""
                 if lp.exists():
-                    with open(lp, "r", encoding="utf-8", errors="replace") as f:
+                    with open(lp, "rb") as f:
                         f.seek(pos)
-                        chunk = f.read()
+                        data = f.read()
                         pos = f.tell()
-                if chunk:
-                    for line in chunk.split("\n"):
-                        yield f"data: {line}\n\n"
-                await asyncio.sleep(0.4)
+                if data:
+                    # raw terminal bytes, base64-framed (no newlines) for xterm
+                    yield f"data: {base64.b64encode(data).decode('ascii')}\n\n"
+                await asyncio.sleep(0.08)
 
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
@@ -782,7 +797,10 @@ def create_app(config_path: str = "config.yaml"):
     @app.post("/api/listeners/{lid}/send")
     def send_listener(lid: str, body: dict):
         from . import listeners
-        if not listeners.send(lid, body.get("command", "")):
+        data = body.get("data")
+        if data is None:
+            data = (body.get("command") or "") + "\n"
+        if not listeners.send(lid, data):
             raise HTTPException(404, "Listener not found.")
         return {"ok": True}
 
@@ -792,8 +810,16 @@ def create_app(config_path: str = "config.yaml"):
         listeners.stop(lid)
         return {"ok": True}
 
+    @app.delete("/api/listeners/{lid}")
+    def delete_listener(lid: str):
+        from . import listeners
+        if not listeners.delete(lid):
+            raise HTTPException(404, "Listener not found.")
+        return {"ok": True}
+
     @app.get("/api/listeners/{lid}/stream")
     async def listener_stream(lid: str, request: Request):
+        import base64
         from . import listeners
         lp = listeners.log_path(lid)
 
@@ -806,16 +832,15 @@ def create_app(config_path: str = "config.yaml"):
             while True:
                 if await request.is_disconnected():
                     break
-                chunk = ""
+                data = b""
                 if lp.exists():
-                    with open(lp, "r", encoding="utf-8", errors="replace") as f:
+                    with open(lp, "rb") as f:
                         f.seek(pos)
-                        chunk = f.read()
+                        data = f.read()
                         pos = f.tell()
-                if chunk:
-                    for line in chunk.splitlines():
-                        yield f"data: {line}\n\n"
-                await asyncio.sleep(0.5)
+                if data:
+                    yield f"data: {base64.b64encode(data).decode('ascii')}\n\n"
+                await asyncio.sleep(0.1)
 
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",

@@ -1,28 +1,80 @@
-/* Autopwn console — light theme, sidebar layout. Author: Ali Alaqoul */
-:root {
-  --ap-accent: #dc3545;
-  --ap-sidebar-bg: #eef1f5;   /* light sidebar rail */
-  --ap-sidebar-fg: #48505b;
-  --ap-sidebar-border: #dfe3e8;
-  --ap-sidebar-active: #dc3545;
-  --ap-content-bg: #f5f6f8;
+/* Autopwn console — themed to match the IA StageGuard Staging
+   Auditor shell: Inter typeface, Schneider-green accent, white sidebar rail
+   and a slate neutral palette. Author: Ali Alaqoul */
 
-  /* Arial across the whole UI (incl. code/monospace utilities) — the only
-     exception is the job-watch log, which is pinned to a monospace stack below. */
-  --ap-font: Arial, "Helvetica Neue", Helvetica, sans-serif;
-  --bs-font-sans-serif: var(--ap-font);
-  --bs-font-monospace: var(--ap-font);
-  --bs-body-font-family: var(--ap-font);
+/* ── Inter (variable) — same faces the Staging Auditor ships ───────────── */
+@font-face {
+  font-family: "InterVariable";
+  src: url("/static/fonts/Inter-roman.var.woff2") format("woff2-variations");
+  font-weight: 100 900; font-style: normal; font-display: optional;
+}
+@font-face {
+  font-family: "InterVariable";
+  src: url("/static/fonts/Inter-Italic.woff2") format("woff2");
+  font-weight: 100 900; font-style: italic; font-display: optional;
 }
 
-body { font-size: .925rem; background: var(--ap-content-bg);
-  font-family: var(--ap-font); }
-code, pre, kbd, samp, .font-monospace { font-family: var(--ap-font) !important; }
+:root {
+  /* Schneider Electric brand green — the accent used across the shell */
+  --ap-accent:        #00B140;   /* brand green */
+  --ap-accent-hover:  #009a38;
+  --ap-accent-700:    #007A3D;   /* darker — text/active */
+  --ap-accent-100:    #E6F5EC;   /* light tint — hovers/active nav */
+  --ap-accent-200:    #D0EFDF;
+  --ap-accent-rgb:    0,177,64;
+
+  /* slate neutrals (match the auditor's f8fafc / slate borders).
+     Outer canvas is white; the light grey is used inside frames only. */
+  --ap-content-bg:    #ffffff;
+  --ap-panel-grey:    #f8fafc;
+  --ap-sidebar-bg:    #ffffff;
+  --ap-sidebar-fg:    #64748b;
+  --ap-sidebar-border:#e2e8f0;
+  --ap-sidebar-active:var(--ap-accent-100);
+
+  /* Inter for the UI; a real monospace stack only for code/terminals */
+  --ap-font: InterVariable, system-ui, -apple-system, "Segoe UI", Roboto,
+             "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --ap-mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", Consolas,
+             "Liberation Mono", "Courier New", monospace;
+
+  /* re-tint Bootstrap so every semantic component follows the brand.
+     app.css loads after bootstrap.min.css, so these win. */
+  --bs-primary: #00B140;
+  --bs-primary-rgb: 0,177,64;
+  --bs-success: #00B140;
+  --bs-success-rgb: 0,177,64;
+  --bs-body-bg: var(--ap-content-bg);
+  --bs-body-color: #0f172a;
+  --bs-border-color: #e2e8f0;
+  --bs-secondary-color: #64748b;
+  --bs-secondary-bg: #f1f5f9;
+  --bs-tertiary-bg: #f8fafc;
+  --bs-link-color: #007A3D;
+  --bs-link-color-rgb: 0,122,61;
+  --bs-link-hover-color: #00B140;
+
+  --bs-font-sans-serif: var(--ap-font);
+  --bs-body-font-family: var(--ap-font);
+  --bs-font-monospace: var(--ap-mono);
+}
+
+/* Keep a vertical scrollbar reserved at all times so switching between short
+   and tall views doesn't shift the layout sideways by the scrollbar width. */
+html { overflow-y: scroll; }
+body {
+  font-size: .9rem;
+  background: var(--ap-content-bg);
+  color: #0f172a;
+  font-family: var(--ap-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv02','cv03','cv04','cv11';
+}
+code, pre, kbd, samp, .font-monospace { font-family: var(--ap-mono) !important; }
 
 /* the job-watch (live log) window stays monospace */
-.console-log, .console-log * {
-  font-family: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace !important;
-}
+.console-log, .console-log * { font-family: var(--ap-mono) !important; }
 
 /* ===================================================================== */
 /*  Buttons — a cohesive, tactile system across every view               */
@@ -32,12 +84,12 @@ code, pre, kbd, samp, .font-monospace { font-family: var(--ap-font) !important; 
   --bs-btn-font-weight: 600;
   --bs-btn-padding-y: .4rem;
   --bs-btn-padding-x: .9rem;
-  letter-spacing: .01em;
+  letter-spacing: .005em;
   transition: background-color .15s ease, border-color .15s ease,
               color .15s ease, box-shadow .15s ease, transform .06s ease;
 }
 .btn:active { transform: translateY(1px); }
-.btn:focus-visible { box-shadow: 0 0 0 .2rem rgba(220,53,69,.28); outline: 0; }
+.btn:focus-visible { box-shadow: 0 0 0 .2rem rgba(var(--ap-accent-rgb),.28); outline: 0; }
 
 .btn-sm {
   --bs-btn-border-radius: .45rem;
@@ -48,57 +100,64 @@ code, pre, kbd, samp, .font-monospace { font-family: var(--ap-font) !important; 
 /* action buttons in tables use .py-0 — give them a little breathing room */
 .btn.py-0 { padding-top: .22rem !important; padding-bottom: .22rem !important; }
 
-/* Solid accent — the strong actions (Launch / Run / Save) */
-.btn-danger {
-  --bs-btn-bg: #dc3545;       --bs-btn-border-color: #dc3545;
-  --bs-btn-hover-bg: #c32b3b; --bs-btn-hover-border-color: #c32b3b;
-  --bs-btn-active-bg: #a8232f; --bs-btn-active-border-color: #a8232f;
-  box-shadow: 0 1px 2px rgba(220,53,69,.22);
-}
-.btn-danger:hover { box-shadow: 0 4px 12px rgba(220,53,69,.30); transform: translateY(-1px); }
-.btn-danger:active { transform: translateY(0); }
-
+/* Solid brand green — the strong actions (Launch / Run / Save) */
 .btn-primary {
-  --bs-btn-bg: #2b6cff;       --bs-btn-border-color: #2b6cff;
-  --bs-btn-hover-bg: #1f5ae0; --bs-btn-hover-border-color: #1f5ae0;
-  --bs-btn-active-bg: #1a4fc4;
-  box-shadow: 0 1px 2px rgba(43,108,255,.22);
+  --bs-btn-bg: #00B140;        --bs-btn-border-color: #00B140;
+  --bs-btn-color: #fff;
+  --bs-btn-hover-bg: #009a38;  --bs-btn-hover-border-color: #009a38;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #007A3D; --bs-btn-active-border-color: #007A3D;
+  --bs-btn-active-color: #fff;
+  --bs-btn-disabled-bg: #00B140; --bs-btn-disabled-border-color: #00B140;
+  box-shadow: 0 1px 2px rgba(var(--ap-accent-rgb),.22);
 }
-.btn-primary:hover { box-shadow: 0 4px 12px rgba(43,108,255,.28); transform: translateY(-1px); }
+.btn-primary:hover { box-shadow: 0 4px 12px rgba(var(--ap-accent-rgb),.30); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+/* Solid danger stays red — reserved for genuinely destructive actions */
+.btn-danger {
+  --bs-btn-bg: #e11d48;        --bs-btn-border-color: #e11d48;
+  --bs-btn-hover-bg: #be123c;  --bs-btn-hover-border-color: #be123c;
+  --bs-btn-active-bg: #9f1239; --bs-btn-active-border-color: #9f1239;
+  box-shadow: 0 1px 2px rgba(225,29,72,.22);
+}
+.btn-danger:hover { box-shadow: 0 4px 12px rgba(225,29,72,.28); transform: translateY(-1px); }
+.btn-danger:active { transform: translateY(0); }
 
 /* Neutral outline — the workhorse (View / Edit / watch / add…) */
 .btn-outline-secondary {
-  --bs-btn-color: #5b6470;         --bs-btn-border-color: #d5dae1;
+  --bs-btn-color: #475569;         --bs-btn-border-color: #e2e8f0;
   --bs-btn-bg: #fff;
-  --bs-btn-hover-bg: #eef1f5;       --bs-btn-hover-color: #1f2937;
-  --bs-btn-hover-border-color: #c3cbd4;
-  --bs-btn-active-bg: #e6eaef;      --bs-btn-active-color: #1f2937;
-  --bs-btn-active-border-color: #c3cbd4;
+  --bs-btn-hover-bg: #f1f5f9;       --bs-btn-hover-color: #0f172a;
+  --bs-btn-hover-border-color: #cbd5e1;
+  --bs-btn-active-bg: #e2e8f0;      --bs-btn-active-color: #0f172a;
+  --bs-btn-active-border-color: #cbd5e1;
 }
-.btn-outline-secondary:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(16,24,40,.08); }
+.btn-outline-secondary:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(2,6,23,.08); }
 
 .btn-outline-primary {
-  --bs-btn-color: #2b6cff;   --bs-btn-border-color: #bcd0ff;
-  --bs-btn-hover-bg: #2b6cff; --bs-btn-hover-border-color: #2b6cff;
-  --bs-btn-active-bg: #1f5ae0;
+  --bs-btn-color: #007A3D;   --bs-btn-border-color: #b7e3c8;
+  --bs-btn-hover-bg: #00B140; --bs-btn-hover-border-color: #00B140;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #007A3D; --bs-btn-active-border-color: #007A3D;
 }
-.btn-outline-primary:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(43,108,255,.22); }
+.btn-outline-primary:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(var(--ap-accent-rgb),.22); }
 
 .btn-outline-success {
-  --bs-btn-color: #157347;   --bs-btn-border-color: #a9d5bd;
-  --bs-btn-hover-bg: #198754; --bs-btn-hover-border-color: #198754;
-  --bs-btn-active-bg: #146c43;
+  --bs-btn-color: #007A3D;   --bs-btn-border-color: #a9d5bd;
+  --bs-btn-hover-bg: #00B140; --bs-btn-hover-border-color: #00B140;
+  --bs-btn-active-bg: #007A3D;
 }
-.btn-outline-success:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(25,135,84,.20); }
+.btn-outline-success:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(var(--ap-accent-rgb),.20); }
 
 .btn-outline-danger {
-  --bs-btn-color: #dc3545;   --bs-btn-border-color: #f0b6bc;
-  --bs-btn-hover-bg: #dc3545; --bs-btn-hover-border-color: #dc3545;
-  --bs-btn-active-bg: #c32b3b;
+  --bs-btn-color: #e11d48;   --bs-btn-border-color: #f3b4c2;
+  --bs-btn-hover-bg: #e11d48; --bs-btn-hover-border-color: #e11d48;
+  --bs-btn-active-bg: #be123c;
 }
-.btn-outline-danger:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(220,53,69,.22); }
+.btn-outline-danger:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(225,29,72,.22); }
 
-.btn-link { --bs-btn-color: #dc3545; --bs-btn-hover-color: #a8232f;
+.btn-link { --bs-btn-color: #007A3D; --bs-btn-hover-color: #00B140;
   text-decoration: none; font-weight: 600; }
 .btn-link:hover { text-decoration: underline; }
 
@@ -114,14 +173,25 @@ code, pre, kbd, samp, .font-monospace { font-family: var(--ap-font) !important; 
 
 /* inputs pick up the accent focus ring to match the buttons */
 .form-control:focus, .form-select:focus {
-  border-color: #f1a7ad;
-  box-shadow: 0 0 0 .2rem rgba(220,53,69,.18);
+  border-color: #7fd9a3;
+  box-shadow: 0 0 0 .2rem rgba(var(--ap-accent-rgb),.16);
+}
+.form-control, .form-select { border-color: #e2e8f0; }
+
+/* accent the switches / checkboxes so they match the brand */
+.form-check-input:checked {
+  background-color: var(--ap-accent);
+  border-color: var(--ap-accent);
+}
+.form-check-input:focus {
+  border-color: #7fd9a3;
+  box-shadow: 0 0 0 .2rem rgba(var(--ap-accent-rgb),.16);
 }
 
 /* placeholder hints in a lighter, softer color across all inputs */
 .form-control::placeholder, .form-select::placeholder,
 textarea::placeholder, input::placeholder {
-  color: #aab2bd !important;
+  color: #94a3b8 !important;
   opacity: 1;               /* Firefox lowers placeholder opacity by default */
 }
 
@@ -132,37 +202,48 @@ textarea::placeholder, input::placeholder {
   width: 236px; flex: 0 0 236px; position: sticky; top: 0; height: 100vh;
   background: var(--ap-sidebar-bg); color: var(--ap-sidebar-fg);
   border-right: 1px solid var(--ap-sidebar-border);
+  box-shadow: 1px 0 0 0 #f1f5f9;
   display: flex; flex-direction: column; padding: 1rem .75rem;
 }
 .ap-brand { display: flex; align-items: center; gap: .55rem; padding: .3rem .3rem 1rem;
-  font-size: 1.55rem; font-weight: 700; color: #1f2937; }
+  font-size: 1.35rem; font-weight: 700; color: #0f172a; letter-spacing: -.015em;
+  border-bottom: 1px solid #f1f5f9; margin-bottom: .35rem; }
 .brand-svg { flex: 0 0 auto; }
-.brand-name { letter-spacing: .01em; line-height: 1; }
+img.brand-svg { width: 36px; height: 36px; object-fit: contain; display: block; }
+.brand-name { letter-spacing: -.015em; line-height: 1.05; }
 
 .ap-session { padding: 0 .35rem .75rem; margin-bottom: .5rem;
   border-bottom: 1px solid var(--ap-sidebar-border); }
-.ap-session-lbl { text-transform: uppercase; letter-spacing: .05em; font-size: .66rem;
-  font-weight: 700; color: var(--bs-secondary-color); margin-bottom: .2rem; display: block; }
+.ap-session-lbl { text-transform: uppercase; letter-spacing: .09em; font-size: .62rem;
+  font-weight: 700; color: #94a3b8; margin-bottom: .25rem; display: block; }
 
-.ap-nav { display: flex; flex-direction: column; gap: .15rem; }
+.ap-nav { display: flex; flex-direction: column; gap: .1rem; }
 .ap-nav-link {
   display: flex; align-items: center; gap: .65rem; width: 100%;
   border: 0; background: transparent; color: var(--ap-sidebar-fg);
-  padding: .55rem .7rem; border-radius: .5rem; text-align: left;
-  font-size: .92rem; cursor: pointer; transition: background .12s, color .12s;
+  padding: .5rem .7rem; border-radius: .5rem; text-align: left;
+  font-size: .88rem; font-weight: 500; cursor: pointer;
+  transition: background .12s, color .12s;
 }
-.ap-nav-link .ico { width: 18px; height: 18px; flex: 0 0 18px;
+.ap-nav-link .ico { width: 17px; height: 17px; flex: 0 0 17px;
   fill: none; stroke: currentColor; stroke-width: 2;
-  stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+  stroke-linecap: round; stroke-linejoin: round; opacity: .7; }
 .ap-nav-link[data-view="launch"] .ico { fill: currentColor; stroke: none; }
-.ap-nav-link:hover { background: rgba(0,0,0,.05); color: #1f2937; }
-.ap-nav-link.active { background: var(--ap-sidebar-active); color: #fff; }
+.ap-nav-link:hover { background: #f8fafc; color: #1e293b; }
+.ap-nav-link:hover .ico { opacity: 1; }
+.ap-nav-link.active { background: var(--ap-accent-100); color: var(--ap-accent-700); font-weight: 600; }
 .ap-nav-link.active .ico { opacity: 1; }
 
-.ap-sidebar-foot { margin-top: auto; padding: .75rem .6rem 0; font-size: .82rem;
-  border-top: 1px solid var(--ap-sidebar-border); }
-.ap-sidebar-foot a { color: #1f2937; text-decoration: none; font-weight: 600; }
-.ap-sidebar-foot a:hover { text-decoration: underline; }
+.ap-sidebar-foot { margin-top: auto; padding: .75rem .6rem 0; font-size: .78rem;
+  color: #64748b; border-top: 1px solid var(--ap-sidebar-border); }
+.ap-sidebar-foot a { color: #334155; text-decoration: none; font-weight: 600; }
+.ap-sidebar-foot a:hover { color: var(--ap-accent-700); text-decoration: underline; }
+
+/* version / team / author credits — mirrors the auditor's sidebar footer */
+.ap-credits { text-align: center;
+  font-size: .62rem; line-height: 1.65; letter-spacing: .02em; color: #94a3b8; }
+.ap-credits .ver { font-weight: 600; color: #64748b; }
+.ap-credits .dot { margin: 0 4px; opacity: .5; }
 
 /* ---- main ----------------------------------------------------------- */
 .ap-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
@@ -171,77 +252,95 @@ textarea::placeholder, input::placeholder {
   padding: .7rem 1.25rem; background: #fff;
   border-bottom: 1px solid var(--bs-border-color); position: sticky; top: 0; z-index: 5;
 }
+.ap-topbar #viewTitle { font-weight: 600; color: #0f172a; letter-spacing: -.01em; }
 .ap-content { padding: 1.25rem; }
 
 /* ---- widgets -------------------------------------------------------- */
 .stat-card .display-6 { font-weight: 600; line-height: 1; }
-.stat-card .stat-label { text-transform: uppercase; letter-spacing: .04em;
-  font-size: .72rem; color: var(--bs-secondary-color); }
+.stat-card .stat-label { text-transform: uppercase; letter-spacing: .05em;
+  font-size: .7rem; color: #94a3b8; }
 
-.card { box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+.card {
+  --bs-card-border-color: #e8edf2;
+  --bs-card-border-radius: .9rem;
+  --bs-card-inner-border-radius: calc(.9rem - 1px);
+  --bs-card-bg: #ffffff;
+  --bs-card-cap-bg: var(--ap-panel-grey);   /* light-grey header band inside the frame */
+  box-shadow: 0 1px 2px rgba(2,6,23,.04), 0 1px 3px rgba(2,6,23,.03);
+}
+.card-header { border-bottom-color: #e8edf2; color: #0f172a; }
 
-.badge-port { font-family: ui-monospace, monospace; }
+/* light grey inside frames on the white canvas: header bands, table heads,
+   stat tiles and row hovers all pick up the same soft slate tint */
+.stat-card { --bs-card-bg: var(--ap-panel-grey); }
+.table > thead th, table thead th { background: var(--ap-panel-grey); color: #475569; }
+.table-hover > tbody > tr:hover > * { background-color: var(--ap-panel-grey); }
+
+.badge-port { font-family: var(--ap-mono); }
 
 .chip { display: inline-flex; align-items: center; gap: .35rem;
   padding: .12rem .55rem; margin: .15rem; border-radius: 1rem;
   background: var(--bs-secondary-bg); font-size: .8rem; border: 1px solid var(--bs-border-color); }
-.chip button { border: 0; background: transparent; color: var(--bs-danger);
+.chip button { border: 0; background: transparent; color: #e11d48;
   line-height: 1; cursor: pointer; padding: 0; }
 
 /* ---- live log stays a dark terminal (readable for streaming output) -- */
 .console-log {
   height: 62vh; overflow-y: auto; margin: 0; padding: .85rem 1rem;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-family: var(--ap-mono);
   font-size: .8rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
-  background: #0b0e11; color: #d6d9dc; border-radius: 0 0 .375rem .375rem;
+  background: #0b1220; color: #cbd5e1; border-radius: 0 0 .9rem .9rem;
 }
-.console-log .l-think  { color: #6ea8fe; }
-.console-log .l-run    { color: #ffd666; }
-.console-log .l-result { color: #75d18a; }
-.console-log .l-warn   { color: #ff7b7b; }
+.console-log .l-think  { color: #7dd3fc; }
+.console-log .l-run    { color: #fbbf24; }
+.console-log .l-result { color: #4ade80; }
+.console-log .l-warn   { color: #fb7185; }
 .console-log .l-final  { color: #fff; font-weight: 600; }
 
-/* ---- interactive terminal (C2 console) ------------------------------ */
-.terminal {
-  background: #0b0e11; color: #d6d9dc; cursor: text; overflow-y: auto;
-  padding: .75rem 1rem; border-radius: .375rem;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: .8rem; line-height: 1.45;
+/* NOTE: the old custom `.terminal` widget CSS was removed — xterm.js gives its
+   root element the class `terminal xterm`, so any `.terminal` rule here would
+   pollute it (padding/overflow) and force spurious scrollbars. Style only via
+   `.xterm-host` and the xterm classes below. */
+
+/* ---- xterm.js host — real interactive terminal (C2 console) ---------- */
+.xterm-host { background: #0b1220; border-radius: .5rem; padding: .5rem .6rem;
+  overflow: hidden; border: 1px solid #1e293b; }
+.xterm-host .xterm { height: 100%; }
+/* xterm defaults the viewport to overflow-y:scroll (a permanent scrollbar) and
+   that stolen width also triggers a horizontal bar. Show a vertical scrollbar
+   ONLY when output overflows, and never scroll sideways (the terminal wraps). */
+.xterm-host .xterm-viewport {
+  background-color: transparent !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
 }
-.terminal .t-out { white-space: pre-wrap; word-break: break-word; }
-.terminal .term-line { display: flex; align-items: baseline; }
-.term-prompt { color: #75d18a; margin-right: .45rem; user-select: none; flex: 0 0 auto; }
-.term-input {
-  flex: 1 1 auto; min-width: 0; background: transparent; border: 0; outline: none;
-  color: #fff; font: inherit; padding: 0; caret-color: #75d18a;
-}
-.term-input:disabled { color: #6b7280; }
-.terminal .l-run { color: #ffd666; }
-.terminal .l-result { color: #75d18a; }
-.terminal .l-warn { color: #ff7b7b; }
+.xterm-host .xterm-screen { overflow: hidden; }
+.xterm-host .xterm-viewport::-webkit-scrollbar { width: 9px; }
+.xterm-host .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.xterm-host .xterm-viewport::-webkit-scrollbar-thumb { background: #334155; border-radius: 9px; }
 
 /* ---- AI call log ---------------------------------------------------- */
 .ai-row:hover { background: var(--bs-tertiary-bg); }
 .ai-io { padding: .25rem .25rem .5rem; }
 .ai-body {
-  background: #0b0e11; color: #d6d9dc; border-radius: .4rem;
+  background: #0b1220; color: #cbd5e1; border-radius: .4rem;
   padding: .6rem .8rem; margin: .25rem 0 0; font-size: .78rem;
   max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-family: var(--ap-mono);
 }
 
 /* ---- findings ------------------------------------------------------- */
 .finding-item { padding: .8rem 0; border-bottom: 1px solid var(--bs-border-color); }
 .finding-item:last-child { border-bottom: 0; }
-.finding-ev { background: #0b0e11; color: #d6d9dc; border-radius: .4rem;
+.finding-ev { background: #0b1220; color: #cbd5e1; border-radius: .4rem;
   padding: .6rem .8rem; margin: .35rem 0 0; font-size: .78rem; max-height: 240px;
   overflow: auto; white-space: pre-wrap; word-break: break-word;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+  font-family: var(--ap-mono); }
 
 /* ---- playbooks ------------------------------------------------------ */
 .pb-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-.pb-section-label { text-transform: uppercase; letter-spacing: .04em;
-  font-size: .7rem; font-weight: 700; color: var(--bs-secondary-color); margin-bottom: .35rem; }
+.pb-section-label { text-transform: uppercase; letter-spacing: .05em;
+  font-size: .68rem; font-weight: 700; color: #94a3b8; margin-bottom: .35rem; }
 .pb-match { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color);
   border-radius: .5rem; padding: .55rem .75rem; }
 .pb-match code { color: var(--bs-body-color); }
@@ -250,10 +349,10 @@ textarea::placeholder, input::placeholder {
 .pb-flow-row { display: flex; flex-wrap: wrap; gap: .3rem; margin: .2rem 0 .1rem; }
 .pb-flow-tag { font-size: .72rem; padding: .02rem .4rem; border-radius: .35rem;
   border: 1px solid var(--bs-border-color); white-space: nowrap; }
-.pb-flow-tag.trig { background: #fff3cd; border-color: #ffe69c; color: #664d03; }
-.pb-flow-tag.cons { background: #e2e3e5; color: #41464b; }
-.pb-flow-tag.prod { background: #d1e7dd; border-color: #a3cfbb; color: #0f5132; }
-.pb-flow-tag.nxt  { background: #cfe2ff; border-color: #9ec5fe; color: #084298; }
+.pb-flow-tag.trig { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+.pb-flow-tag.cons { background: #f1f5f9; border-color: #e2e8f0; color: #475569; }
+.pb-flow-tag.prod { background: var(--ap-accent-100); border-color: var(--ap-accent-200); color: var(--ap-accent-700); }
+.pb-flow-tag.nxt  { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
 
 /* builder */
 /* Tinted card + accent edge so each step reads as a distinct block against the
@@ -261,42 +360,43 @@ textarea::placeholder, input::placeholder {
 .pb-build-step { border: 1px solid var(--bs-border-color);
   border-left: 3px solid var(--ap-accent); border-radius: .55rem;
   padding: .85rem 1rem; background: var(--bs-tertiary-bg);
-  box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+  box-shadow: 0 1px 3px rgba(2,6,23,.05); }
 .pb-build-step .form-control, .pb-build-step .form-select,
-.pb-build-step textarea { background: var(--bs-body-bg); }
+.pb-build-step textarea { background: #fff; }
 .pb-step-head { border-bottom: 1px solid var(--bs-border-color);
   padding-bottom: .4rem; margin-bottom: .6rem !important; }
 .pb-step-badge { font-weight: 600; background: var(--ap-accent); color: #fff;
   border-radius: .35rem; padding: .1rem .5rem; font-size: .82rem; }
-/* nested "report as finding" panel — solid body-bg so it separates from the
+/* nested "report as finding" panel — solid white so it separates from the
    tinted step card around it. */
-.pb-finding-box { background: var(--bs-body-bg); }
+.pb-finding-box { background: #fff; }
 /* highlighted "Inputs" panel — the launch-time inputs (target + optional seeds)
    that feed the whole playbook, called out so they're not confused with the
    per-step Consumes/Produces artifacts. */
 .pb-inputs { border: 1px solid var(--ap-accent); border-left: 4px solid var(--ap-accent);
   border-radius: .5rem; padding: .6rem .8rem;
-  background: var(--bs-tertiary-bg);
-  background: color-mix(in srgb, var(--ap-accent) 8%, var(--bs-body-bg)); }
+  background: color-mix(in srgb, var(--ap-accent) 8%, #fff); }
 .pb-inputs-sub { text-transform: none; letter-spacing: 0; font-weight: 400;
   color: var(--bs-secondary-color); }
 .pb-input-chip { display: inline-block; font-size: .78rem; padding: .1rem .55rem;
   border-radius: 1rem; margin: .1rem .2rem .1rem 0; border: 1px solid var(--bs-border-color);
-  background: var(--bs-body-bg); color: var(--bs-secondary-color); }
+  background: #fff; color: var(--bs-secondary-color); }
 .pb-input-chip.req { background: var(--ap-accent); border-color: var(--ap-accent);
   color: #fff; font-weight: 600; }
 .pb-lbl { font-size: .74rem; font-weight: 600; color: var(--bs-secondary-color);
   margin-bottom: .1rem; display: block; }
 .pb-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
 .pb-chip { font-size: .76rem; padding: .1rem .55rem; border-radius: 1rem;
-  border: 1px solid var(--bs-border-color); background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color); background: #fff;
   color: var(--bs-secondary-color); cursor: pointer; }
 .pb-chip.on { background: var(--ap-accent); border-color: var(--ap-accent); color: #fff; }
 
 @media (prefers-color-scheme: dark) {
-  .pb-flow-tag.trig { background: #332701; border-color: #664d03; color: #ffe69c; }
-  .pb-flow-tag.prod { background: #051b11; border-color: #0f5132; color: #a3cfbb; }
-  .pb-flow-tag.nxt  { background: #031633; border-color: #084298; color: #9ec5fe; }
+  /* the console renders light (data-bs-theme=light); these only affect the
+     informational flow tags if the OS forces dark rendering of unthemed bits */
+  .pb-flow-tag.trig { background: #3a2408; border-color: #9a3412; color: #fed7aa; }
+  .pb-flow-tag.prod { background: #052e16; border-color: var(--ap-accent-700); color: #86efac; }
+  .pb-flow-tag.nxt  { background: #0b1e42; border-color: #1d4ed8; color: #bfdbfe; }
 }
 .pb-flow { display: flex; flex-direction: column; }
 .pb-step { display: flex; gap: .75rem; padding: .1rem 0; }
@@ -324,8 +424,9 @@ textarea::placeholder, input::placeholder {
 @media (max-width: 768px) {
   .ap-shell { flex-direction: column; }
   .ap-sidebar { width: 100%; flex-basis: auto; height: auto; position: static;
-    flex-direction: row; flex-wrap: wrap; align-items: center; gap: .25rem; }
-  .ap-brand { padding: .25rem .5rem; }
+    flex-direction: row; flex-wrap: wrap; align-items: center; gap: .25rem;
+    box-shadow: none; }
+  .ap-brand { padding: .25rem .5rem; border-bottom: 0; margin-bottom: 0; }
   .ap-nav { flex-direction: row; flex-wrap: wrap; }
   .ap-sidebar-foot { display: none; }
 }

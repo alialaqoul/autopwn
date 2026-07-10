@@ -474,7 +474,92 @@ async function pbReset() {
 }
 
 /* ---- console (C2: credentialed exec + reverse-shell listeners) -------- */
+/* Real interactive terminals (xterm.js): raw keystrokes are forwarded to a
+   server-side PTY and raw output streamed back, so the remote prompt, colours,
+   tab-completion, arrow-key history and Ctrl+C behave like a hands-on shell. */
+let _exTerm = null, _exFit = null, _lstTerm = null, _lstFit = null;
+let _shellId = null, _shellES = null, _execConnected = false;
+let _lstES = null, _lstActive = null;
+
+const _termOpts = () => ({
+  fontFamily: 'ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace',
+  fontSize: 12.5, lineHeight: 1.15, cursorBlink: true, scrollback: 5000,
+  theme: { background: "#0b1220", foreground: "#cbd5e1", cursor: "#4ade80",
+           selectionBackground: "rgba(51,65,85,.6)" },
+});
+
+function _b64ToBytes(b64) {
+  const bin = atob(b64), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+async function _sendRaw(url, data) {   // forward raw keystrokes (fire-and-forget)
+  try {
+    await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data }) });
+  } catch { }
+}
+
+function initTerminals() {
+  if (!window.Terminal) return;
+  if (!_exTerm) {
+    _exTerm = new Terminal(_termOpts());
+    _exFit = new FitAddon.FitAddon(); _exTerm.loadAddon(_exFit);
+    _exTerm.open($("#exTerm"));
+    _keepFitted(_exTerm, _exFit, $("#exTerm"));
+    _exTerm.writeln("\x1b[38;5;245mSet a target + credential above, then Connect — this is a real TTY.\x1b[0m");
+    _exTerm.onData(d => { if (_execConnected && _shellId) _sendRaw(`/api/shells/${_shellId}/send`, d); });
+  }
+  if (!_lstTerm) {
+    _lstTerm = new Terminal(_termOpts());
+    _lstFit = new FitAddon.FitAddon(); _lstTerm.loadAddon(_lstFit);
+    _lstTerm.open($("#lstTerm"));
+    _keepFitted(_lstTerm, _lstFit, $("#lstTerm"));
+    _lstTerm.writeln("\x1b[38;5;245mSelect a listener to interact with its shell.\x1b[0m");
+    _lstTerm.onData(d => { if (_lstActive) _sendRaw(`/api/listeners/${_lstActive}/send`, d); });
+  }
+  fitTerminals();
+}
+
+// Refit whenever the panel actually has a size. The console section starts
+// hidden (0×0), so a one-off fit races the layout and leaves the terminal at
+// its 80-col default (→ spurious scrollbars); a ResizeObserver fits it the
+// moment it becomes visible and on every resize thereafter.
+// One fit attempt: only succeeds once the panel is visible AND the font cell
+// has been measured (proposeDimensions returns undefined until then).
+function _fitNow(term, fit, host) {
+  if (!fit || !host || host.clientWidth <= 0 || host.clientHeight <= 0) return false;
+  try {
+    // The terminal is opened before the browser lays the panel out, so xterm
+    // measures a 0-width character cell and proposeDimensions() bails forever.
+    // Now that the host has a real size, force a re-measure of the cell.
+    const css = term && term._core && term._core._charSizeService;
+    if (css && !css.hasValidSize && typeof css.measure === "function") css.measure();
+    const d = fit.proposeDimensions();
+    if (d && d.cols >= 2 && d.rows >= 1) { fit.fit(); return true; }
+  } catch { }
+  return false;
+}
+// Retry until a fit actually applies (both the visibility and the cell-measure
+// race page load), then keep the terminal fitted on every later resize.
+function _keepFitted(term, fit, host) {
+  let n = 0;
+  const tick = () => { if (!_fitNow(term, fit, host) && n++ < 40) setTimeout(tick, 80); };
+  tick();
+  if (window.ResizeObserver) new ResizeObserver(() => _fitNow(term, fit, host)).observe(host);
+}
+
+function fitTerminals() {
+  requestAnimationFrame(() => {
+    _fitNow(_exTerm, _exFit, $("#exTerm"));
+    _fitNow(_lstTerm, _lstFit, $("#lstTerm"));
+  });
+}
+
 async function loadConsole() {
+  initTerminals();
+  fitTerminals();
   try {
     const hosts = await api("/api/hosts");
     const sel = $("#ex_host"), keep = sel.value;
@@ -502,52 +587,41 @@ function updateSecretLabel() {
   $("#ex_secret").placeholder = hash ? "aad3b435...:<nthash> or <nthash>" : "password";
 }
 
-let _execConnected = false;
 function execSetStatus(text, cls) {
   const b = $("#ex_status"); b.textContent = text; b.className = "badge " + cls;
 }
 function execFields() {
   return ["ex_host", "ex_proto", "ex_auth", "ex_user", "ex_secret", "ex_domain"];
 }
-let _shellId = null, _shellES = null;
-// strip terminal control/colour codes and evil-winrm noise; collapse repeated prompts
-function cleanShell(line) {
-  let s = line
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")   // OSC
-    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")               // CSI (colours, cursor)
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");        // stray control chars
-  // keep only the last of several repeated "*Evil-WinRM* PS …>" prompts on a line
-  s = s.replace(/(?:\*Evil-WinRM\*\s+PS\s+[^>\n]*>\s*)+(?=\*Evil-WinRM\*\s+PS)/g, "");
-  return s.replace(/\s+$/, "");
-}
 
 async function execConnect() {
+  initTerminals();
   const host = $("#ex_host").value.trim();
   if (!host) { alert("Select a target host first."); return; }
-  const btn = $("#ex_connect"), out = $("#ex_out"), term = $("#exTerm");
+  const btn = $("#ex_connect");
   btn.disabled = true; execSetStatus("connecting…", "text-bg-secondary");
-  out.insertAdjacentHTML("beforeend", `<span class="l-run">[*] opening ${$("#ex_proto").value.toUpperCase()} session to ${esc(host)} as ${esc($("#ex_user").value || "?")}…</span>\n`);
+  try { _exFit.fit(); } catch { }
+  const cols = _exTerm.cols || 120, rows = _exTerm.rows || 34;
+  _exTerm.writeln(`\x1b[33m[*] opening ${$("#ex_proto").value.toUpperCase()} session to ${host} as ${$("#ex_user").value || "?"}…\x1b[0m`);
   try {
     const r = await api("/api/shells", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ host, protocol: $("#ex_proto").value, auth: $("#ex_auth").value,
         username: $("#ex_user").value.trim(), secret: $("#ex_secret").value,
-        domain: $("#ex_domain").value.trim() }),
+        domain: $("#ex_domain").value.trim(), cols, rows }),
     });
     _shellId = r.id; _execConnected = true;
     execSetStatus("connected", "text-bg-success");
     execFields().forEach(id => $("#" + id).disabled = true);
     $("#ex_disconnect").disabled = false;
-    const cmd = $("#ex_cmd"); cmd.disabled = false; cmd.placeholder = "type into the session (Enter)"; cmd.focus();
     if (_shellES) _shellES.close();
     const es = new EventSource(`/api/shells/${_shellId}/stream`); _shellES = es;
-    es.onmessage = (ev) => { out.insertAdjacentHTML("beforeend", esc(cleanShell(ev.data)) + "\n"); term.scrollTop = term.scrollHeight; };
+    es.onmessage = (ev) => { if (ev.data) _exTerm.write(_b64ToBytes(ev.data)); };
     es.onerror = () => { if (_execConnected) execSetStatus("stream lost", "text-bg-warning"); };
+    _exTerm.focus();
   } catch (e) {
-    out.insertAdjacentHTML("beforeend", `<span class="l-warn">[!] ${esc(e.message)}</span>\n`);
+    _exTerm.writeln(`\x1b[31m[!] ${e.message}\x1b[0m`);
     execSetStatus("error", "text-bg-danger"); btn.disabled = false;
-  } finally {
-    term.scrollTop = term.scrollHeight;
   }
 }
 
@@ -558,64 +632,54 @@ async function execDisconnect() {
   execSetStatus("disconnected", "text-bg-secondary");
   $("#ex_connect").disabled = false; $("#ex_disconnect").disabled = true;
   execFields().forEach(id => $("#" + id).disabled = false);
-  const c = $("#ex_cmd"); c.disabled = true; c.value = ""; c.placeholder = "Connect to start a session…";
-  $("#ex_out").insertAdjacentHTML("beforeend", `<span class="text-secondary">[*] session closed</span>\n`);
+  if (_exTerm) _exTerm.writeln("\r\n\x1b[38;5;245m[*] session closed\x1b[0m");
 }
 
-async function execRun() {   // send a command into the persistent session
-  const input = $("#ex_cmd"), cmd = input.value;
-  if (!_execConnected || !_shellId || !cmd) return;
-  input.value = "";
-  $("#ex_out").insertAdjacentHTML("beforeend", `<span class="l-run">&gt; ${esc(cmd)}</span>\n`);
-  $("#exTerm").scrollTop = $("#exTerm").scrollHeight;
-  try { await api(`/api/shells/${_shellId}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: cmd }) }); }
-  catch (e) { alert(e.message); }
-  input.focus();
-}
+function execClear() { if (_exTerm) _exTerm.clear(); }
 
-function execClear() { $("#ex_out").innerHTML = ""; }
-
-let _lstES = null, _lstActive = null;
 async function loadListeners() {
   let ls;
   try { ls = await api("/api/listeners"); } catch { return; }
   const cls = { listening: "text-bg-secondary", connected: "text-bg-success",
     closed: "text-bg-light", stopped: "text-bg-warning" };
+  const stopped = s => s === "stopped" || s === "closed";
   $("#listenersList").innerHTML = ls.length ? ls.map(l => `
     <div class="d-flex align-items-center justify-content-between border rounded px-2 py-1 mb-1">
       <span class="small">:${l.port} <span class="badge ${cls[l.status] || "text-bg-secondary"}">${esc(l.status)}</span></span>
       <span class="text-nowrap">
-        <button class="btn btn-sm btn-outline-secondary py-0 me-1" data-watch-lst="${esc(l.id)}">watch</button>
-        <button class="btn btn-sm btn-outline-danger py-0" data-stop-lst="${esc(l.id)}">stop</button>
+        <button class="btn btn-sm btn-outline-secondary py-0 me-1" data-watch-lst="${esc(l.id)}"${stopped(l.status) ? " disabled" : ""}>watch</button>
+        ${stopped(l.status)
+          ? `<button class="btn btn-sm btn-outline-danger py-0" data-del-lst="${esc(l.id)}">delete</button>`
+          : `<button class="btn btn-sm btn-outline-danger py-0" data-stop-lst="${esc(l.id)}">stop</button>`}
       </span></div>`).join("") : `<div class="text-secondary small">No listeners.</div>`;
-  $$("#listenersList [data-watch-lst]").forEach(b => b.onclick = () => watchListener(b.dataset.watchLst));
+  $$("#listenersList [data-watch-lst]").forEach(b => b.onclick = () => { if (!b.disabled) watchListener(b.dataset.watchLst); });
   $$("#listenersList [data-stop-lst]").forEach(b => b.onclick = async () => {
     try { await api(`/api/listeners/${b.dataset.stopLst}/stop`, { method: "POST" }); } catch (e) { alert(e.message); }
+    loadListeners();
+  });
+  $$("#listenersList [data-del-lst]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.delLst;
+    if (!confirm("Delete this listener? This frees the port and removes it from the list.")) return;
+    if (_lstActive === id) {
+      if (_lstES) { _lstES.close(); _lstES = null; }
+      _lstActive = null; $("#lstActive").textContent = "";
+      $("#lstStatus").textContent = "idle"; $("#lstStatus").className = "badge text-bg-secondary";
+    }
+    try { await api(`/api/listeners/${id}`, { method: "DELETE" }); } catch (e) { alert(e.message); }
     loadListeners();
   });
 }
 
 function watchListener(id) {
+  initTerminals();
   if (_lstES) { _lstES.close(); _lstES = null; }
   _lstActive = id;
   $("#lstActive").textContent = "#" + id;
-  const out = $("#lst_out"), term = $("#lstTerm"), input = $("#lst_cmd");
-  out.innerHTML = "";
   $("#lstStatus").textContent = "streaming"; $("#lstStatus").className = "badge text-bg-success";
-  input.disabled = false; input.placeholder = "type into the shell (Enter to send)"; input.focus();
-  const es = new EventSource(`/api/listeners/${id}/stream`);
-  _lstES = es;
-  es.onmessage = (ev) => { out.insertAdjacentHTML("beforeend", esc(ev.data) + "\n"); term.scrollTop = term.scrollHeight; };
+  if (_lstTerm) { _lstTerm.clear(); fitTerminals(); _lstTerm.focus(); }
+  const es = new EventSource(`/api/listeners/${id}/stream`); _lstES = es;
+  es.onmessage = (ev) => { if (ev.data && _lstTerm) _lstTerm.write(_b64ToBytes(ev.data)); };
   es.onerror = () => { $("#lstStatus").textContent = "disconnected"; $("#lstStatus").className = "badge text-bg-warning"; };
-}
-
-async function sendListenerCmd() {
-  const input = $("#lst_cmd"), cmd = input.value;
-  if (!_lstActive || !cmd) return;
-  input.value = "";
-  try { await api(`/api/listeners/${_lstActive}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: cmd }) }); }
-  catch (e) { alert(e.message); }
-  input.focus();
 }
 
 /* ---- findings / results ----------------------------------------------- */
@@ -661,14 +725,9 @@ async function loadFindings() {
     return `<tr>
       <td><span class="badge ${typeCls}">${esc(h.type)}</span></td>
       <td class="font-monospace">${esc(h.account)}</td>
-      <td class="font-monospace small" title="${esc(full)}">${esc(short)}
-        <button class="btn btn-sm btn-link py-0 px-1" data-copy-hash="${i}" title="Copy full hash">copy</button></td>
+      <td class="font-monospace small" title="${esc(full)}">${esc(short)}</td>
       <td><span class="badge text-bg-light text-secondary border">${esc(h.source)}</span></td></tr>`;
   }).join("");
-  $$("#hashesTable [data-copy-hash]").forEach(b => b.onclick = () => {
-    navigator.clipboard?.writeText(window._hashes[+b.dataset.copyHash].hash);
-    b.textContent = "copied"; setTimeout(() => b.textContent = "copy", 1200);
-  });
 
   // findings
   const fs = [...d.findings].sort((a, b) => (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9));
@@ -1302,9 +1361,7 @@ $("#sessionNewBtn").addEventListener("click", newSession);
 $("#testAiBtn").addEventListener("click", testAi);
 $("#aiLogRefresh").addEventListener("click", loadAiLog);
 
-// interactive terminals: click anywhere focuses the inline input; Enter runs
-$("#ex_cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); execRun(); } });
-$("#exTerm").addEventListener("mouseup", () => { if (!getSelection().toString() && !$("#ex_cmd").disabled) $("#ex_cmd").focus(); });
+// interactive terminals (xterm) — connect/disconnect + start listener
 $("#ex_auth").addEventListener("change", updateSecretLabel);
 $("#ex_connect").addEventListener("click", execConnect);
 $("#ex_disconnect").addEventListener("click", execDisconnect);
@@ -1316,8 +1373,8 @@ $("#listenerForm").addEventListener("submit", async (e) => {
   catch (err) { return alert(err.message); }
   e.target.reset(); loadListeners();
 });
-$("#lst_cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendListenerCmd(); } });
-$("#lstTerm").addEventListener("mouseup", () => { if (!getSelection().toString() && !$("#lst_cmd").disabled) $("#lst_cmd").focus(); });
+// keep the terminals sized to their panels when the window changes
+window.addEventListener("resize", () => { if (!$('section[data-panel="console"]').hidden) fitTerminals(); });
 $$('#launchForm input[name="mode"]').forEach(r => r.addEventListener("change", updateMode));
 updateMode();
 

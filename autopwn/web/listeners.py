@@ -7,6 +7,7 @@ operator types by appending them to the listener's .cmd file.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import signal
@@ -109,11 +110,14 @@ def list_listeners() -> list:
     return out
 
 
-def send(lid: str, command: str) -> bool:
+def send(lid: str, data: str) -> bool:
+    """Forward raw keystrokes to the connected shell (base64-framed one-per-line
+    so control chars survive)."""
     if _load(lid) is None:
         return False
+    b64 = base64.b64encode((data or "").encode("utf-8", "surrogatepass")).decode("ascii")
     with open(_cmd_path(lid), "a", encoding="utf-8") as f:
-        f.write(command.rstrip("\n") + "\n")
+        f.write(b64 + "\n")
     return True
 
 
@@ -130,6 +134,24 @@ def stop(lid: str) -> bool:
         pass
     d["status"] = "stopped"
     _meta(lid).write_text(json.dumps(d, indent=2), encoding="utf-8")
+    return True
+
+
+def delete(lid: str) -> bool:
+    """Stop the listener (if still running) and remove its port/sidecar entirely
+    so the operator can free the port and clear it from the list."""
+    d = _load(lid)
+    if not d:
+        return False
+    if _alive(d.get("pid", -1)):
+        stop(lid)
+    for p in (_meta(lid), log_path(lid), _cmd_path(lid)):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
     return True
 
 
