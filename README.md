@@ -21,39 +21,39 @@ vendored, so it runs fully offline on an isolated lab network. Launch an
 assessment (AI **or** deterministic no-AI mode), watch findings build in real
 time, drive playbooks/tools, open interactive sessions, and export reports.
 
-<p align="center"><img src="assets/dashboard.png" alt="Dashboard — host inventory and service matrix" width="90%"></p>
+<p align="center"><img src="assets/screens/dashboard.png" alt="Dashboard — host inventory and service matrix" width="90%"></p>
 
 **Findings** — recovered credentials (cracked plaintext *or* NT hash for
 pass-the-hash), **captured hashes** (Kerberoast / AS-REP / NTLM), engagement
 **artifacts** (certificates, ccaches, NTDS dumps), enumerated users, and
 severity-rated findings with CVSS, **ATT&CK technique IDs**, and evidence:
 
-<p align="center"><img src="assets/findings.png" alt="Findings — credentials, captured hashes, artifacts, and CVSS-rated findings" width="90%"></p>
+<p align="center"><img src="assets/screens/findings.png" alt="Findings — credentials, captured hashes, artifacts, and CVSS-rated findings" width="90%"></p>
 
 **Console (C2)** — open a **real interactive TTY** (xterm.js) from a recovered
 credential over WinRM (evil-winrm) or SMB (impacket) with a password or
 **pass-the-hash** — the remote prompt, tab-completion, arrow-key history and
 `Ctrl-C` all work — plus a netcat-style reverse-shell listener:
 
-<p align="center"><img src="assets/console.png" alt="Console — real xterm TTY over WinRM/SMB (password or pass-the-hash) and a reverse-shell listener" width="90%"></p>
+<p align="center"><img src="assets/screens/console.png" alt="Console — real xterm TTY over WinRM/SMB (password or pass-the-hash) and a reverse-shell listener" width="90%"></p>
 
 **Playbooks** — the attack paths *and* the report findings, unified and editable:
 each step names the **tool that runs**, its trigger, arguments, and the
 data it consumes/produces; give a step a **severity** and it becomes a report
 finding (with CVSS/impact/recommendation) when it actually fires:
 
-<p align="center"><img src="assets/playbooks.png" alt="Playbooks — editable attack paths and findings" width="90%"></p>
+<p align="center"><img src="assets/screens/playbooks.png" alt="Playbooks — editable attack paths and findings" width="90%"></p>
 
 <p align="center">
-  <img src="assets/gui-tools.png" alt="Tools library — every action and how it runs" width="49%">
-  <img src="assets/settings.png" alt="Settings — AI model config, connection test, and AI call log" width="49%">
+  <img src="assets/screens/gui-tools.png" alt="Tools library — every action and how it runs" width="49%">
+  <img src="assets/screens/settings.png" alt="Settings — AI model config, connection test, and AI call log" width="49%">
 </p>
 
 **Attack Paths (offline BloodHound)** — parse a `bloodhound-python` collection
 into an AD graph and surface the foothold's directly-abusable objects and the
 shortest path to Domain Admin — no Neo4j / Docker / CE server needed:
 
-<p align="center"><img src="assets/paths.png" alt="Attack Paths — offline BloodHound escalation-path analysis" width="90%"></p>
+<p align="center"><img src="assets/screens/paths.png" alt="Attack Paths — offline BloodHound escalation-path analysis" width="90%"></p>
 
 **MITRE ATT&CK** — every finding and tool maps to ATT&CK techniques: the
 foothold→domain-compromise attack path, coverage gaps (applicable-but-untested
@@ -61,7 +61,7 @@ techniques), and a Navigator-style coverage matrix — exported as a **Navigator
 layer** or **VECTR CSV**. Ships with the full offline ATT&CK catalogue (697
 techniques), no internet required:
 
-<p align="center"><img src="assets/attack.png" alt="MITRE ATT&CK — technique coverage, attack path, and Navigator/VECTR export" width="90%"></p>
+<p align="center"><img src="assets/screens/attack.png" alt="MITRE ATT&CK — technique coverage, attack path, and Navigator/VECTR export" width="90%"></p>
 
 ---
 
