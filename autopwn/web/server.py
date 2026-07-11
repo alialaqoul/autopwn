@@ -116,7 +116,7 @@ def create_app(config_path: str = "config.yaml"):
         resp = await call_next(request)
         # Never serve a stale console: always revalidate the SPA assets.
         path = request.url.path
-        if path == "/" or path.startswith("/static"):
+        if path == "/" or path.startswith("/static") or path.startswith("/api"):
             resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return resp
 
@@ -151,6 +151,17 @@ def create_app(config_path: str = "config.yaml"):
 
     @app.post("/api/sessions/{name}/clear")
     def clear_session(name: str):
+        # Stop any still-running job in this session BEFORE wiping — otherwise a
+        # live run keeps writing hosts/creds back into the store right after the
+        # clear, so the "cleared" data reappears in the dashboard/findings.
+        sess = next((s for s in sessions.list_sessions() if s["name"] == name), None)
+        if sess:
+            for j in jobs.list_jobs(sess["dir"]):
+                if j.get("status") == "running":
+                    try:
+                        jobs.stop(j["id"], sess["dir"])
+                    except Exception:
+                        pass
         try:
             sessions.clear(name)
         except KeyError:
@@ -245,7 +256,13 @@ def create_app(config_path: str = "config.yaml"):
     @app.get("/api/ai-log")
     def ai_log():
         from ..llm import calllog
-        return calllog.tail(f"{_ld()}/ai_calls.jsonl", n=200)
+        return calllog.tail(f"{_ld()}/ai_calls.jsonl", n=10)
+
+    @app.delete("/api/ai-log")
+    def clear_ai_log():
+        from ..llm import calllog
+        calllog.clear(f"{_ld()}/ai_calls.jsonl")
+        return {"cleared": True}
 
     # ---- engagement snapshot --------------------------------------------- #
     @app.get("/api/summary")
@@ -432,8 +449,11 @@ def create_app(config_path: str = "config.yaml"):
         sc.add_deny(e.entry.strip())
         return {"allow": sc.allow, "deny": sc.deny}
 
-    @app.delete("/api/scope/allow/{entry}")
+    @app.delete("/api/scope/allow")
     def scope_remove_allow(entry: str):
+        # `entry` is a query parameter, not a path segment, so a CIDR's slash
+        # (e.g. 192.168.130.0/24) doesn't break route matching (a path param
+        # can't contain '/', which 404'd every CIDR delete).
         sc = _scope()
         sc.remove_allow(entry)
         return {"allow": sc.allow, "deny": sc.deny}
@@ -569,6 +589,99 @@ def create_app(config_path: str = "config.yaml"):
         return {"findings": findings, "credentials": _res["credentials"],
                 "users": _res["users"], "hashes": extract_hashes(transcript),
                 "transcript": sess[-1].name if sess else None}
+
+    # ---- MITRE ATT&CK coverage / Navigator layer ------------------------- #
+    def _findings_and_transcript():
+        """(findings, transcript) for the current session — shared by the
+        ATT&CK endpoints (mirrors how get_findings loads the latest run)."""
+        from ..analysis import build_findings
+        ld = Path(_ld())
+        sess = sorted(ld.glob("session-*.json"))
+        transcript = []
+        if sess:
+            try:
+                transcript = json.loads(sess[-1].read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                transcript = []
+        findings = build_findings(store.all_hosts(), store.facts(), transcript, str(ld))
+        return findings, transcript
+
+    @app.get("/api/attack")
+    def attack_coverage():
+        """Per-technique ATT&CK coverage for this assessment (attempted vs
+        confirmed), plus detection guidance, applicable-but-untested gaps, and the
+        reconstructed attack-path narrative — powers the ATT&CK view + reports."""
+        from .. import attack
+        from ..analysis import attack_path
+        findings, transcript = _findings_and_transcript()
+        cov = attack.coverage(findings, transcript)
+        confirmed = sum(1 for r in cov if r["confirmed"])
+        return {"engagement": _scope().engagement, "techniques": len(cov),
+                "confirmed": confirmed, "coverage": cov,
+                "gaps": attack.gaps(cov, store.service_matrix()),
+                "path": attack_path(transcript, findings, store.facts())}
+
+    @app.get("/api/attack/trend")
+    def attack_trend():
+        """Techniques touched per past run (each session-*.json transcript), so
+        coverage growth/regression across runs is visible."""
+        from .. import attack
+        out = []
+        for sp in sorted(Path(_ld()).glob("session-*.json")):
+            try:
+                tr = json.loads(sp.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            out.append({"run": sp.stem.replace("session-", ""),
+                        "techniques": len(attack.coverage([], tr))})
+        return {"runs": out}
+
+    @app.get("/api/attack/vectr")
+    def attack_vectr():
+        """Download a VECTR-importable purple-team test-case CSV for this run."""
+        from .. import attack
+        findings, transcript = _findings_and_transcript()
+        cov = attack.coverage(findings, transcript)
+        return PlainTextResponse(attack.vectr_csv(cov, _scope().engagement),
+                                 media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="autopwn-vectr-testcases.csv"'})
+
+    @app.get("/api/bloodhound")
+    def bloodhound_paths():
+        """BloodHound-collection-driven escalation paths from the foothold to a
+        high-value target + a data-driven recommendation (offline, no CE server)."""
+        from .. import bloodhound
+        return bloodhound.analyze([str(Path(_ld())), "."], store.facts().get("username"))
+
+    @app.get("/api/attack/navigator")
+    def attack_navigator():
+        """Download a MITRE ATT&CK Navigator layer (v4.5) for this assessment —
+        the interchange format for Navigator, VECTR, Caldera and OpenBAS."""
+        from .. import attack
+        findings, transcript = _findings_and_transcript()
+        layer = attack.navigator_layer(_scope().engagement, findings, transcript)
+        return JSONResponse(layer, headers={
+            "Content-Disposition": 'attachment; filename="autopwn-attack-layer.json"'})
+
+    @app.get("/api/attack/status")
+    def attack_status():
+        """Which ATT&CK technique catalogue is active (built-in offline baseline
+        vs. a refreshed MITRE release)."""
+        from .. import attack
+        return attack.catalog_status()
+
+    @app.post("/api/attack/update")
+    def attack_update(body: dict):
+        """Refresh the ATT&CK catalogue to the latest MITRE release. Online by
+        default (needs internet); pass {"path": "/…/enterprise-attack.json"} to
+        update OFFLINE from a downloaded STIX bundle placed on the appliance."""
+        from .. import attack
+        body = body or {}
+        try:
+            return attack.update(url=body.get("url") or None,
+                                 from_path=body.get("path") or None)
+        except Exception as e:
+            raise HTTPException(502, f"ATT&CK update failed: {e}")
 
     # ---- tools (actions) -------------------------------------------------- #
     def _introspect_tool(tool, custom_names) -> dict:
@@ -873,6 +986,42 @@ def create_app(config_path: str = "config.yaml"):
                           "wordprocessingml.document")}[p.suffix.lstrip(".")]
         return FileResponse(str(p), media_type=media,
                             filename=name if download else None)
+
+    # ---- artifacts vault (engagement loot) ------------------------------- #
+    _ARTIFACT_EXTS = (".pfx", ".ccache", ".kirbi", ".ntds", ".pot", ".cache", ".dit")
+
+    def _artifact_dirs():
+        return [Path(_ld()).resolve(), Path(".").resolve()]
+
+    @app.get("/api/artifacts")
+    def list_artifacts():
+        """Loot produced during the engagement (machine certs, Kerberos ccaches,
+        NTDS/SAM dumps, hashcat potfiles) — collected from the session dir and the
+        app working dir so it isn't scattered on disk."""
+        seen = {}
+        for base in _artifact_dirs():
+            try:
+                for p in base.iterdir():
+                    if p.is_file() and p.suffix.lower() in _ARTIFACT_EXTS:
+                        st = p.stat()
+                        seen[p.name] = {"name": p.name, "type": p.suffix.lstrip("."),
+                                        "size": st.st_size, "modified": st.st_mtime}
+            except (OSError, FileNotFoundError):
+                pass
+        return sorted(seen.values(), key=lambda a: -a["modified"])
+
+    @app.get("/artifacts/{name}")
+    def get_artifact(name: str):
+        if "/" in name or "\\" in name or ".." in name:
+            raise HTTPException(400, "Invalid artifact name.")
+        dirs = _artifact_dirs()
+        for base in dirs:
+            p = base / name
+            if (p.is_file() and p.suffix.lower() in _ARTIFACT_EXTS
+                    and p.resolve().parent in dirs):
+                return FileResponse(str(p), filename=name,
+                                    media_type="application/octet-stream")
+        raise HTTPException(404, "Artifact not found.")
 
     return app
 

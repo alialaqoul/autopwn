@@ -35,6 +35,17 @@ def record(entry: dict) -> None:
         pass
 
 
+def clear(path) -> None:
+    """Wipe the AI call log for this session."""
+    p = Path(path)
+    try:
+        with _LOCK:
+            if p.exists():
+                p.write_text("", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def tail(path, n: int = 100) -> list:
     """Return the last *n* records from a given ai_calls.jsonl (newest first)."""
     p = Path(path)

@@ -110,6 +110,22 @@ def auto_escalate(hosts: dict, run_fn: Callable[..., object],
     if not dc:
         return False
 
+    # BloodHound-collection-driven: surface the shortest ACL path / recommended
+    # abuse from the collected graph to inform the escalation (the ESC8 chain
+    # below is the executor). Non-fatal.
+    try:
+        from . import bloodhound as _bh
+        _a = _bh.analyze(["."], user)
+        if _a.get("collected"):
+            say(f"BloodHound: {_a.get('summary', '')}")
+            _rec = _a.get("recommendation")
+            if _rec:
+                say(f"BloodHound recommends: {_rec['action']} "
+                    f"({_rec['first_edge']} on {_rec['path_to']}"
+                    + (f", via {_rec['tool']}" if _rec.get("tool") else "") + ")")
+    except Exception:
+        pass
+
     say(f"AD escalation: probing {dc} for an AD CS ESC8 path")
     # DNS -> the DC, so certipy/hostname resolution works on an air-gapped box.
     try:

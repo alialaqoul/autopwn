@@ -40,3 +40,7 @@ Thumbs.db
 /*.docx
 /*.pdf
 .claude/
+
+# In-place edit/port backups
+*.portbak*
+.port-bak.*/

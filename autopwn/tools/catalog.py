@@ -599,7 +599,11 @@ CATALOG: list[CommandSpec] = [
                               "-l", _s(k.get("listener") or _local_ip_for(_s(k["target"])))]
                              + (["-u", _s(k["username"]), "-p", _s(k.get("password", "")),
                                  "-d", _s(k.get("domain", ""))] if k.get("username") else [])
-                             + ["-v"],
+                             # --always-continue: run every coercion method without the
+                             # interactive "Continue/Skip/Stop?" prompt, which stalls in a
+                             # detached job (no TTY) after the first NO_AUTH_RECEIVED and
+                             # blocks the relay from ever receiving the coerced auth.
+                             + ["--always-continue", "-v"],
         timeout=300, install_hint="pipx install coercer.",
     ),
     CommandSpec(

@@ -337,3 +337,28 @@ table td, table th { vertical-align: middle; }
    p-0 card bodies, so without this the first column is flush against the edge) */
 .table > :not(caption) > * > *:first-child { padding-left: 1rem; }
 .table > :not(caption) > * > *:last-child { padding-right: 1rem; }
+
+/* ---- ATT&CK coverage matrix (Navigator-style, sequential green ramp) ---- */
+.attack-matrix { display: flex; gap: .45rem; align-items: flex-start;
+  overflow-x: auto; padding-bottom: .35rem; }
+.attack-col { flex: 1 1 0; min-width: 7.5rem; display: flex; flex-direction: column; gap: .3rem; }
+.attack-col-head { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+  font-weight: 600; color: #475569; padding: .15rem .1rem .1rem; white-space: nowrap; }
+.attack-cell { border-radius: .4rem; padding: .4rem .55rem; border: 1px solid transparent;
+  display: grid; grid-template-columns: 1fr auto; grid-template-areas: "id count" "name name";
+  gap: .05rem .4rem; }
+.attack-cell .ac-id { grid-area: id; font-family: var(--ap-mono, ui-monospace, monospace); font-weight: 700; font-size: .76rem; }
+.attack-cell .ac-count { grid-area: count; align-self: center; font-size: .66rem; font-weight: 700;
+  line-height: 1; padding: .1rem .38rem; border-radius: 10px; background: rgba(255,255,255,.28); }
+.attack-cell .ac-name { grid-area: name; font-size: .72rem; line-height: 1.12; opacity: .95;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.attack-cell.confirmed { background: #007A3D; color: #fff; }
+.attack-cell.attempted { background: #D0EFDF; color: #0f172a; border-color: #b7e4cd; }
+.attack-cell.attempted .ac-count { background: rgba(0,122,61,.14); }
+.attack-legend { display: inline-flex; align-items: center; gap: .35rem; color: var(--bs-secondary-color, #64748b); }
+.attack-swatch { width: .8rem; height: .8rem; border-radius: 3px; display: inline-block; }
+.attack-swatch.confirmed { background: #007A3D; }
+.attack-swatch.attempted { background: #D0EFDF; border: 1px solid #b7e4cd; }
+.attack-path { margin: 0; padding-left: 1.15rem; }
+.attack-path li { margin-bottom: .55rem; }
+.attack-path li::marker { color: #007A3D; font-weight: 700; }

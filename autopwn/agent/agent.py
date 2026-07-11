@@ -150,7 +150,8 @@ class Agent:
             base_sys = (STRUCTURED_SYSTEM.replace("{tools}", tool_signatures(active))
                         if self._structured else SYSTEM_PROMPT)
             messages[0] = Message(role="system",
-                                  content=base_sys + kb_text + self._ledger_text())
+                                  content=base_sys + kb_text + self._ledger_text()
+                                  + self._attack_text())
 
             calls, finish_text, raw, native = self._decide(messages, tool_specs)
 
@@ -285,6 +286,31 @@ class Agent:
             return ""
         return ("\n\nACTIONS ALREADY TRIED (do not repeat these; choose a NEW "
                 "branch or finish):\n" + "\n".join(lines[-10:]))
+
+    def _attack_text(self) -> str:
+        """ATT&CK-awareness injected each step: which techniques are already
+        confirmed vs. the still-applicable, untested ones — so the model plans in
+        ATT&CK terms and prioritises covering the untested attack surface."""
+        try:
+            from .. import attack, store
+            from ..analysis import build_findings
+            findings = build_findings(store.all_hosts(), store.facts(), self.transcript)
+            cov = attack.coverage(findings, self.transcript)
+            gaps = attack.gaps(cov, store.service_matrix())
+        except Exception:
+            return ""
+        lines = []
+        confirmed = [f"{r['technique']} {r['name']}" for r in cov if r["confirmed"]]
+        if confirmed:
+            lines.append("Confirmed so far: " + ", ".join(confirmed[:12]))
+        if gaps:
+            lines.append("Applicable but UNTESTED (prefer actions that cover one of these): "
+                         + ", ".join(f"{x['technique']} {x['name']}" for x in gaps[:10]))
+        if not lines:
+            return ""
+        return ("\n\nMITRE ATT&CK COVERAGE (reason in ATT&CK terms; prefer an action "
+                "that covers an untested technique over repeating covered ground):\n"
+                + "\n".join(lines))
 
     @staticmethod
     def _is_real_findings(text: str) -> bool:

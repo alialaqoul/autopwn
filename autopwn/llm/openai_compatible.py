@@ -122,6 +122,10 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Return embedding vectors for texts (OpenAI-compatible /embeddings)."""
+        # An empty batch makes some /v1/embeddings servers 400 — nothing to do.
+        texts = [t for t in (texts or []) if (t or "").strip()]
+        if not texts:
+            return []
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

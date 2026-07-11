@@ -144,6 +144,16 @@ def clear(name: str) -> None:
     for sub in ("chain", "jobs"):          # chain workdir + background jobs
         shutil.rmtree(d / sub, ignore_errors=True)
     shutil.rmtree(d / "results.lock", ignore_errors=True)
+    # Engagement loot (certs/ccaches/dumps + BloodHound collections) is written to
+    # the app working dir, NOT the session dir, so a clear must remove it too —
+    # otherwise leftover loot from a previous run shows up in a fresh session.
+    for pat in ("*.pfx", "*.ccache", "*.kirbi", "*.ntds", "*.pot", "*.dit",
+                "*_bloodhound.zip"):
+        for lp in _ROOT.glob(pat):
+            try:
+                lp.unlink()
+            except OSError:
+                pass
 
 
 def delete(name: str) -> None:

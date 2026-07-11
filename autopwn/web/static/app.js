@@ -7,7 +7,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  const r = await fetch(path, { cache: "no-store", ...opts });
   if (!r.ok) {
     let msg = r.statusText;
     try { msg = (await r.json()).detail || msg; } catch { }
@@ -18,8 +18,9 @@ async function api(path, opts) {
 
 /* ---- view switching --------------------------------------------------- */
 const TITLES = { dashboard: "Dashboard", launch: "Launch Assessment",
-  findings: "Findings", console: "Console", playbooks: "Playbooks", tools: "Tools",
-  jobs: "Jobs", reports: "Reports", scope: "Scope & Vars", settings: "Settings" };
+  findings: "Findings", attack: "ATT&CK", paths: "Attack Paths", console: "Console",
+  playbooks: "Playbooks", tools: "Tools", jobs: "Jobs", reports: "Reports",
+  scope: "Scope & Vars", settings: "Settings" };
 
 function show(view) {
   if (!TITLES[view]) view = "dashboard";
@@ -28,9 +29,9 @@ function show(view) {
   $("#viewTitle").textContent = TITLES[view] || view;
   // remember the view in the URL so a refresh stays put (no history spam)
   try { history.replaceState(null, "", "#" + view); } catch { }
-  const loaders = { dashboard: loadDashboard, findings: loadFindings,
-    console: loadConsole, playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
-    reports: loadReports, scope: loadScope, settings: loadSettings };
+  const loaders = { dashboard: loadDashboard, findings: loadFindings, attack: loadAttack,
+    paths: loadPaths, console: loadConsole, playbooks: loadPlaybooks, tools: loadTools,
+    jobs: loadJobs, reports: loadReports, scope: loadScope, settings: loadSettings };
   loaders[view]?.();
 }
 $$("#mainNav .ap-nav-link").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
@@ -735,6 +736,7 @@ async function loadFindings() {
   $("#findingsList").innerHTML = fs.length ? fs.map(f => {
     const sev = `<span class="badge ${SEV_CLASS[f.severity] || "text-bg-secondary"}">${esc(f.severity)}</span>`;
     const hosts = (f.hosts || []).map(h => `<span class="badge text-bg-light text-secondary border font-monospace">${esc(h)}</span>`).join(" ");
+    const att = (f.attack || []).map(t => `<span class="badge text-bg-light text-secondary border" title="MITRE ATT&CK technique">${esc(t)}</span>`).join(" ");
     const ev = f.evidence_out ? `<div class="pb-section-label mt-2">Evidence${f.evidence_cmd ? " — <code>" + esc(f.evidence_cmd) + "</code>" : ""}</div>
       <pre class="finding-ev">${esc(f.evidence_out)}</pre>` : "";
     return `<div class="finding-item">
@@ -743,6 +745,7 @@ async function loadFindings() {
         <div class="text-nowrap">${sev}${f.cvss ? ` <span class="badge text-bg-light text-secondary border">CVSS ${esc(f.cvss)}</span>` : ""}</div>
       </div>
       ${hosts ? `<div class="mt-1">${hosts}</div>` : ""}
+      ${att ? `<div class="mt-1">${att}</div>` : ""}
       <div class="text-secondary small mt-1">${esc(f.description || "")}</div>
       ${f.impact ? `<div class="small mt-1"><b>Impact:</b> ${esc(f.impact)}</div>` : ""}
       ${f.recommendation ? `<div class="small mt-1"><b>Recommendation:</b> ${esc(f.recommendation)}</div>` : ""}
@@ -753,6 +756,158 @@ async function loadFindings() {
   $("#findingsSource").textContent = d.transcript
     ? `Derived from the latest run (${d.transcript}) and the results store.`
     : "Derived from the results store (no run transcript in this session yet).";
+
+  // artifacts / loot (certs, ccaches, dumps)
+  try {
+    const arts = await api("/api/artifacts");
+    $("#artifactCount").textContent = arts.length;
+    $("#artifactsCard").hidden = arts.length === 0;
+    $("#artifactsTable tbody").innerHTML = arts.map(a => {
+      const sz = a.size < 1024 ? a.size + " B" : (a.size / 1024).toFixed(1) + " KB";
+      return `<tr><td class="font-monospace">${esc(a.name)}</td>
+        <td><span class="badge text-bg-light text-secondary border">${esc(a.type)}</span></td>
+        <td class="small text-secondary">${sz}</td>
+        <td class="text-end"><a class="btn btn-sm btn-outline-secondary py-0" href="/artifacts/${encodeURIComponent(a.name)}" download>Download</a></td></tr>`;
+    }).join("");
+  } catch { $("#artifactsCard").hidden = true; }
+}
+
+/* ---- ATT&CK coverage matrix ------------------------------------------- */
+const _TACTIC_ORDER = ["reconnaissance", "resource-development", "initial-access",
+  "execution", "persistence", "privilege-escalation", "stealth", "defense-impairment",
+  "defense-evasion", "credential-access", "discovery", "lateral-movement", "collection",
+  "command-and-control", "exfiltration", "impact"];
+const _tacticLabel = t => t.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+async function loadAttack() {
+  let d;
+  try { d = await api("/api/attack"); } catch { return; }
+  const cov = d.coverage || [];
+  const confirmed = cov.filter(r => r.confirmed).length;
+  const tactics = [...new Set(cov.map(r => r.tactic).filter(Boolean))];
+
+  const cards = [["Techniques", cov.length], ["Confirmed", confirmed],
+    ["Tactics covered", tactics.length]];
+  $("#attackStats").innerHTML = cards.map(([label, val]) => `
+    <div class="col-6 col-xl-3"><div class="card stat-card text-center py-3">
+      <div class="display-6">${val}</div><div class="stat-label">${label}</div>
+    </div></div>`).join("");
+
+  if (!cov.length) {
+    $("#attackMatrix").innerHTML = `<div class="text-secondary py-4 text-center">No techniques yet — run an assessment.</div>`;
+  } else {
+    const byTactic = {};
+    cov.forEach(r => { (byTactic[r.tactic || "other"] ||= []).push(r); });
+    const order = _TACTIC_ORDER.filter(t => byTactic[t])
+      .concat(Object.keys(byTactic).filter(t => !_TACTIC_ORDER.includes(t)));
+    $("#attackMatrix").innerHTML = order.map(t => {
+      const rows = byTactic[t].sort((a, b) =>
+        (b.confirmed - a.confirmed) || a.technique.localeCompare(b.technique));
+      const cells = rows.map(r => {
+        const n = (r.findings || []).length;
+        const src = [];
+        if (r.findings && r.findings.length) src.push("Confirmed by: " + r.findings.join("; "));
+        if (r.tools && r.tools.length) src.push("Tools: " + r.tools.join(", "));
+        const det = (r.detection && r.detection.guidance) ? `  ||  Detect: ${r.detection.guidance}` : "";
+        const tip = `${r.technique} · ${r.name}${src.length ? " — " + src.join(" | ") : ""}${det}`;
+        return `<div class="attack-cell ${r.confirmed ? "confirmed" : "attempted"}" title="${esc(tip)}">
+          <span class="ac-id">${esc(r.technique)}</span>
+          ${n ? `<span class="ac-count">${n}</span>` : ""}
+          <span class="ac-name">${esc(r.name)}</span>
+        </div>`;
+      }).join("");
+      return `<div class="attack-col">
+        <div class="attack-col-head">${esc(_tacticLabel(t))} <span class="text-secondary">${rows.length}</span></div>
+        ${cells}
+      </div>`;
+    }).join("");
+  }
+  $("#attackSource").textContent = (d.engagement
+    ? `${cov.length} technique${cov.length === 1 ? "" : "s"} exercised in "${d.engagement}"`
+    : `${cov.length} technique${cov.length === 1 ? "" : "s"} exercised`)
+    + " · hover a cell for its detection guidance · download the layer for the full Navigator / VECTR matrix.";
+
+  // attack-path narrative
+  const path = d.path || [];
+  $("#attackPathBox").innerHTML = path.length
+    ? `<ol class="attack-path">` + path.map(s =>
+        `<li><div class="fw-semibold">${esc(s.title)}</div><div class="text-secondary small">${esc(s.detail)}</div></li>`).join("") + `</ol>`
+    : `<div class="text-secondary small py-2">No attack path reconstructed for this run yet.</div>`;
+
+  // coverage gaps (applicable but untested)
+  const gaps = d.gaps || [];
+  $("#attackGapsBox").innerHTML = gaps.length
+    ? `<p class="text-secondary small mb-2">Exposed techniques that weren't confirmed — recommended next tests &amp; detections:</p>`
+      + `<div class="d-flex flex-wrap gap-1">` + gaps.map(g =>
+        `<span class="chip" title="${esc((g.tactic || '').replace(/-/g, ' '))}"><span class="font-monospace">${esc(g.technique)}</span> ${esc(g.name)}</span>`).join("") + `</div>`
+    : `<div class="text-secondary small py-2">No untested applicable techniques — good coverage of the exposed surface.</div>`;
+
+  // coverage trend across runs
+  try {
+    const tr = await api("/api/attack/trend");
+    const runs = tr.runs || [];
+    if (runs.length) {
+      const vals = runs.map(r => r.techniques);
+      $("#attackTrend").innerHTML = `across ${runs.length} run${runs.length === 1 ? "" : "s"}: `
+        + `<span class="font-monospace">${_sparkline(vals)}</span> ${vals[vals.length - 1]}`;
+    } else $("#attackTrend").textContent = "";
+  } catch { $("#attackTrend").textContent = ""; }
+}
+
+function _sparkline(vals) {
+  if (!vals.length) return "";
+  const bars = "▁▂▃▄▅▆▇█", mx = Math.max(...vals, 1);
+  return vals.map(v => bars[Math.min(bars.length - 1, Math.round((v / mx) * (bars.length - 1)))]).join("");
+}
+
+/* ---- Attack Paths (BloodHound-collection-driven) ---------------------- */
+async function loadPaths() {
+  let d;
+  try { d = await api("/api/bloodhound"); } catch { return; }
+  if (!d.collected) {
+    $("#pathsStats").innerHTML = ""; $("#pathsRec").innerHTML = ""; $("#pathsList").innerHTML = "";
+    $("#pathsSource").textContent = "";
+    $("#pathsControl").innerHTML = `<div class="text-secondary small p-3">No BloodHound collection in this session yet — run an assessment (it collects the domain via <span class="font-monospace">bloodhound-python</span>).</div>`;
+    return;
+  }
+  const c = d.counts || {};
+  const cards = [["Principals", c.nodes], ["Abusable edges", c.edges],
+    ["High-value targets", c.high_value], ["ACL paths to DA", (d.paths || []).length]];
+  $("#pathsStats").innerHTML = cards.map(([l, v]) => `
+    <div class="col-6 col-xl-3"><div class="card stat-card text-center py-3">
+      <div class="display-6">${v}</div><div class="stat-label">${l}</div></div></div>`).join("");
+
+  const r = d.recommendation;
+  $("#pathsRec").innerHTML = `<div class="card mb-3"><div class="card-body">
+      <div class="small">${esc(d.summary || "")}</div>
+      ${r ? `<div class="mt-2 small"><b>Recommended next escalation:</b> ${esc(r.action)} —
+        <span class="font-monospace">${esc(r.first_edge)}</span> on
+        <span class="font-monospace">${esc(r.path_to)}</span>${r.tool ? ` <span class="badge text-bg-light text-secondary border">${esc(r.tool)}</span>` : ""}</div>` : ""}
+    </div></div>`;
+
+  const ctrl = d.foothold_control || [];
+  $("#pathsControl").innerHTML = ctrl.length
+    ? `<div class="table-responsive"><table class="table table-sm mb-0">
+        <thead><tr><th>Target</th><th>Right</th><th>Abuse</th><th>Tool</th></tr></thead><tbody>`
+      + ctrl.map(x => `<tr><td class="font-monospace small">${esc(x.target)}</td>
+          <td><span class="badge text-bg-light text-secondary border">${esc(x.right)}</span></td>
+          <td class="small text-secondary">${esc(x.action)}</td>
+          <td>${x.tool ? `<span class="badge text-bg-light text-secondary border">${esc(x.tool)}</span>` : "—"}</td></tr>`).join("")
+      + `</tbody></table></div>`
+    : `<div class="text-secondary small p-3">The foothold holds no directly abusable rights.</div>`;
+
+  const paths = d.paths || [];
+  $("#pathsList").innerHTML = paths.length
+    ? paths.map(p => `<div class="mb-2"><div class="small fw-semibold">${esc(p.target_label)}
+        <span class="text-secondary">(${p.length} hop${p.length === 1 ? "" : "s"})</span></div>
+        <div class="small">` + p.edges.map(e =>
+          `<span class="font-monospace">${esc(e.from)}</span> <span class="text-secondary">—${esc(e.right)}→</span> `).join("")
+        + `<span class="font-monospace">${esc(p.edges[p.edges.length - 1].to)}</span></div></div>`).join("")
+    : `<div class="text-secondary small py-2">No pure-ACL path to Domain Admin — the domain fell via coercion → ESC8 relay (see the ATT&CK view's attack path).</div>`;
+
+  $("#pathsSource").textContent = d.collection
+    ? `BloodHound collection: ${d.collection} · domain ${d.domain} · foothold ${d.foothold || "?"}${d.foothold_found ? "" : " (not found in collection)"}.`
+    : "";
 }
 
 /* ---- tools (actions) -------------------------------------------------- */
@@ -1087,7 +1242,7 @@ async function loadScope() {
       : `<div class="text-secondary small">No allow entries.</div>`) +
     (sc.deny.length ? `<div class="mt-2 small text-secondary">Deny: ${sc.deny.map(esc).join(", ")}</div>` : "");
   $$("#scopeList [data-allow]").forEach(b => b.onclick = async () => {
-    try { await api(`/api/scope/allow/${encodeURIComponent(b.dataset.allow)}`, { method: "DELETE" }); } catch (e) { alert(e.message); }
+    try { await api(`/api/scope/allow?entry=${encodeURIComponent(b.dataset.allow)}`, { method: "DELETE" }); } catch (e) { alert(e.message); }
     loadScope();
   });
 
@@ -1157,6 +1312,36 @@ async function loadSettings() {
   reflectAi();
   loadAiLog();
   loadSessionsAdmin();
+  loadAttackData();
+}
+
+async function loadAttackData() {
+  const el = $("#attackDataStatus"), btn = $("#attackUpdateBtn");
+  try {
+    const st = await api("/api/attack/status");
+    const src = st.source === "file"
+      ? `refreshed${st.attack_version ? " to ATT&CK v" + esc(st.attack_version) : ""}` +
+        `${st.updated ? " on " + new Date(st.updated * 1000).toLocaleDateString() : ""}`
+      : "built-in offline catalogue";
+    if (el) el.innerHTML = `<b>${st.techniques}</b> techniques loaded — <span class="text-secondary">${src}</span>`;
+  } catch { if (el) el.textContent = "—"; }
+  if (btn && !btn._wired) {
+    btn._wired = true;
+    btn.onclick = async () => {
+      const old = btn.textContent;
+      btn.disabled = true; btn.textContent = "Updating…";
+      if (el) el.innerHTML = `<span class="text-secondary">Fetching the latest MITRE ATT&CK…</span>`;
+      try {
+        const r = await api("/api/attack/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        if (el) el.innerHTML = `<span class="text-success">Updated — ${r.techniques} techniques${r.attack_version ? " (ATT&CK v" + esc(r.attack_version) + ")" : ""}.</span>`;
+      } catch (e) {
+        if (el) el.innerHTML = `<span class="text-danger">Update failed:</span> <span class="text-secondary">${esc(e.message)} — likely offline. Download <code>enterprise-attack.json</code> on a connected machine, copy it to the box, and POST its path to <code>/api/attack/update</code>. The built-in catalogue stays in effect meanwhile.</span>`;
+      } finally {
+        btn.disabled = false; btn.textContent = old;
+        loadAttackData();
+      }
+    };
+  }
 }
 
 async function loadSessionsAdmin() {
@@ -1184,6 +1369,7 @@ async function clearSession(name) {
   await loadSessions();
   loadSettings();
   loadDashboard();
+  loadFindings();
 }
 
 async function deleteSession(name) {
@@ -1360,6 +1546,11 @@ $("#sessionSelect").addEventListener("change", (e) => selectSession(e.target.val
 $("#sessionNewBtn").addEventListener("click", newSession);
 $("#testAiBtn").addEventListener("click", testAi);
 $("#aiLogRefresh").addEventListener("click", loadAiLog);
+$("#aiLogClear").addEventListener("click", async () => {
+  if (!confirm("Clear the AI API call log for this session?")) return;
+  try { await api("/api/ai-log", { method: "DELETE" }); } catch (e) { return alert(e.message); }
+  loadAiLog();
+});
 
 // interactive terminals (xterm) — connect/disconnect + start listener
 $("#ex_auth").addEventListener("change", updateSecretLabel);
@@ -1391,8 +1582,8 @@ show((location.hash || "").slice(1) || "dashboard");
 /* Seamless auto-refresh: silently reload the active view's data in place. Skips
    form-heavy views (Launch/Settings) and pauses while a modal is open, so it
    never clobbers what the operator is typing. */
-const _AUTO = { dashboard: loadDashboard, findings: loadFindings,
-  playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
+const _AUTO = { dashboard: loadDashboard, findings: loadFindings, attack: loadAttack,
+  paths: loadPaths, playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
   reports: loadReports, scope: loadScope };
 setInterval(() => {
   if (document.hidden || document.querySelector(".modal.show")) return;

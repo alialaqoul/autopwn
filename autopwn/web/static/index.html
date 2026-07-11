@@ -42,6 +42,12 @@
       <button class="ap-nav-link" data-view="findings">
         <svg class="ico" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
         Findings</button>
+      <button class="ap-nav-link" data-view="attack">
+        <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        ATT&amp;CK</button>
+      <button class="ap-nav-link" data-view="paths">
+        <svg class="ico" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.7" x2="15.4" y2="6.3"/><line x1="8.6" y1="13.3" x2="15.4" y2="17.7"/></svg>
+        Attack Paths</button>
       <button class="ap-nav-link" data-view="console">
         <svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         Console</button>
@@ -197,14 +203,76 @@
             <thead><tr><th>Type</th><th>Account</th><th>Hash</th><th>Source</th></tr></thead>
             <tbody></tbody></table></div></div>
         </div>
+        <div class="card mb-3" id="artifactsCard" hidden>
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Artifacts <span class="text-secondary small">— engagement loot (certs, ccaches, dumps)</span></span>
+            <span class="badge text-bg-secondary" id="artifactCount">0</span>
+          </div>
+          <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm mb-0" id="artifactsTable">
+            <thead><tr><th>File</th><th>Type</th><th>Size</th><th></th></tr></thead>
+            <tbody></tbody></table></div></div>
+        </div>
         <div class="card">
           <div class="card-header d-flex justify-content-between align-items-center">
             <span class="fw-semibold">Security findings</span>
-            <span class="badge text-bg-secondary" id="findingCount">0</span>
+            <div class="d-flex align-items-center gap-2">
+              <a class="btn btn-sm btn-outline-secondary py-0" id="attackLayerBtn"
+                 href="/api/attack/navigator" download
+                 title="Download a MITRE ATT&CK Navigator layer (v4.5) for this assessment">ATT&amp;CK layer</a>
+              <span class="badge text-bg-secondary" id="findingCount">0</span>
+            </div>
           </div>
           <div class="card-body" id="findingsList"></div>
         </div>
         <p class="text-secondary small mt-2" id="findingsSource"></p>
+      </section>
+
+      <section data-panel="attack" hidden>
+        <div class="row g-2 mb-3" id="attackStats"></div>
+        <div class="row g-3 mb-3">
+          <div class="col-lg-6"><div class="card h-100">
+            <div class="card-header fw-semibold">Attack path <span class="text-secondary small">— foothold to domain compromise</span></div>
+            <div class="card-body" id="attackPathBox"></div>
+          </div></div>
+          <div class="col-lg-6"><div class="card h-100">
+            <div class="card-header fw-semibold">Coverage gaps <span class="text-secondary small">— applicable but untested</span></div>
+            <div class="card-body" id="attackGapsBox"></div>
+          </div></div>
+        </div>
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-3 small flex-wrap">
+              <span class="fw-semibold">Technique coverage</span>
+              <span class="attack-legend"><span class="attack-swatch confirmed"></span> Confirmed by a finding</span>
+              <span class="attack-legend"><span class="attack-swatch attempted"></span> Attempted (tool ran)</span>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <span class="small text-secondary me-1" id="attackTrend"></span>
+              <a class="btn btn-outline-secondary btn-sm py-0" href="/api/attack/vectr" download>VECTR CSV</a>
+              <a class="btn btn-outline-secondary btn-sm py-0" href="/api/attack/navigator" download>Navigator layer</a>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="attack-matrix" id="attackMatrix"></div>
+            <p class="text-secondary small mt-2 mb-0" id="attackSource"></p>
+          </div>
+        </div>
+      </section>
+
+      <section data-panel="paths" hidden>
+        <div class="row g-2 mb-3" id="pathsStats"></div>
+        <div id="pathsRec"></div>
+        <div class="row g-3">
+          <div class="col-lg-7"><div class="card h-100">
+            <div class="card-header fw-semibold">Foothold control <span class="text-secondary small">— objects the foothold can directly abuse (BloodHound)</span></div>
+            <div class="card-body p-0" id="pathsControl"></div>
+          </div></div>
+          <div class="col-lg-5"><div class="card h-100">
+            <div class="card-header fw-semibold">Shortest paths to Domain Admin</div>
+            <div class="card-body" id="pathsList"></div>
+          </div></div>
+        </div>
+        <p class="text-secondary small mt-2" id="pathsSource"></p>
       </section>
 
       <!-- CONSOLE (C2) -->
@@ -430,12 +498,31 @@
 
           <div class="card mt-3">
             <div class="card-header d-flex justify-content-between align-items-center">
-              <span class="fw-semibold">AI API call log</span>
-              <button class="btn btn-sm btn-outline-secondary py-0" id="aiLogRefresh">Refresh</button>
+              <span class="fw-semibold">AI API call log <span class="text-secondary small">— last 10</span></span>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary py-0" id="aiLogRefresh">Refresh</button>
+                <button class="btn btn-sm btn-outline-danger py-0" id="aiLogClear">Clear</button>
+              </div>
             </div>
             <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm table-hover mb-0" id="aiLogTable">
               <thead><tr><th>Time</th><th>Kind</th><th>Model</th><th>Status</th><th>Latency</th><th>Detail</th></tr></thead>
               <tbody></tbody></table></div></div>
+          </div>
+
+          <div class="card mt-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span class="fw-semibold">MITRE ATT&amp;CK data</span>
+              <button class="btn btn-sm btn-outline-secondary py-0" type="button" id="attackUpdateBtn">Update to latest</button>
+            </div>
+            <div class="card-body">
+              <p class="text-secondary small mb-2">
+                Findings and the exported Navigator layer are tagged from a <b>built-in offline
+                catalogue</b> — no internet needed. Optionally refresh it to the latest MITRE release
+                (needs internet), or drop a downloaded <code>enterprise-attack.json</code> on the
+                appliance and update from that file for a fully offline refresh.
+              </p>
+              <div class="small" id="attackDataStatus">—</div>
+            </div>
           </div>
 
           <div class="card mt-3">

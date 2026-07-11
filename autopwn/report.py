@@ -112,9 +112,16 @@ def _variables(facts: dict) -> list:
     return rows
 
 
+# ATT&CK tactic order for the coverage section (kill-chain order).
+_ATTACK_TACTIC_ORDER = ["reconnaissance", "resource-development", "initial-access",
+    "execution", "persistence", "privilege-escalation", "stealth", "defense-impairment",
+    "defense-evasion", "credential-access", "discovery", "lateral-movement", "collection",
+    "command-and-control", "exfiltration", "impact"]
+
+
 def build_model(meta: Engagement, transcript: list, hosts: dict,
                 facts: dict, final: str, log_dir=None) -> dict:
-    from .analysis import assess, build_findings, extract_results
+    from .analysis import assess, attack_path, build_findings, extract_results
 
     hosts = _routable_hosts(hosts)
     analysis = assess(hosts, facts or {})
@@ -164,11 +171,32 @@ def build_model(meta: Engagement, transcript: list, hosts: dict,
     cleaned = _clean_summary(final)
     exec_summary = cleaned if _real(cleaned) else _auto_summary(analysis, counts)
 
+    # MITRE ATT&CK coverage (techniques exercised), ordered by kill-chain tactic
+    # then confirmed-first — shared by all three report formats.
+    from . import attack as _attack
+    coverage = _attack.coverage(findings, transcript)
+    _torder = {t: i for i, t in enumerate(_ATTACK_TACTIC_ORDER)}
+    coverage.sort(key=lambda r: (_torder.get(r["tactic"], 99), not r["confirmed"],
+                                 r["technique"]))
+    from . import store as _store
+    try:
+        _services = _store.service_matrix()
+    except Exception:
+        _services = []
+    attack_gaps = _attack.gaps(coverage, _services)
+    path = attack_path(transcript, findings, facts or {})
+    from . import bloodhound as _bh
+    try:
+        bh = _bh.analyze([str(log_dir) if log_dir else ".", "."], (facts or {}).get("username"))
+    except Exception:
+        bh = {"collected": False}
+
     return {
         "meta": meta, "exec_summary": exec_summary, "analysis": analysis,
         "findings": findings, "counts": counts, "scope": scope,
         "tools_used": tools_used, "methodology": _METHODOLOGY,
-        "recommendations": recs,
+        "recommendations": recs, "attack": coverage,
+        "attack_gaps": attack_gaps, "attack_path": path, "bloodhound": bh,
         "variables": _variables(facts or {}),
         "credentials": results["credentials"], "users": results["users"],
         "command_log": [{"tool": e.get("name", ""),
@@ -214,6 +242,24 @@ def to_markdown(m: dict) -> str:
             o.append(f"- **{k}:** {v}")
 
     o += ["", "## 1. Executive Summary", "", m["exec_summary"] or "_None._", ""]
+    if m.get("attack_path"):
+        o += ["### 1.1 Attack Path", "",
+              "The assessment progressed to domain compromise through the following chain:", ""]
+        for stp in m["attack_path"]:
+            o.append(f"{stp['n']}. **{stp['title']}** — {stp['detail']}")
+        o.append("")
+    _bh = m.get("bloodhound") or {}
+    if _bh.get("collected"):
+        o += ["### 1.2 Escalation Opportunities (BloodHound)", "", _bh.get("summary", ""), ""]
+        _rec = _bh.get("recommendation")
+        if _rec:
+            o += [f"**Recommended next escalation:** {_rec['action']} — `{_rec['first_edge']}` on "
+                  f"`{_rec['path_to']}`" + (f" (tool: {_rec['tool']})" if _rec.get("tool") else ""), ""]
+        if _bh.get("foothold_control"):
+            o += ["| Target | Right | Abuse |", "|---|---|---|"]
+            for x in _bh["foothold_control"][:12]:
+                o.append(f"| {x['target']} | {x['right']} | {x['action']} |")
+            o.append("")
 
     o += ["## 2. Finding Summary", "", "| Severity | Count |", "|---|---|"]
     for s in _SEV_ORDER:
@@ -258,8 +304,10 @@ def to_markdown(m: dict) -> str:
     o += ["", "## 5. Findings", ""]
     for f in m["findings"]:
         _cv = f" · CVSS {f['cvss']}" if f.get("cvss") else ""
-        o += [f"### {f['id']} — {f['title']} ({f['severity']}{_cv})", "",
-              "**Description**", "", f["description"], ""]
+        o += [f"### {f['id']} — {f['title']} ({f['severity']}{_cv})", ""]
+        if f.get("attack"):
+            o += [f"**MITRE ATT&CK:** {', '.join(f['attack'])}", ""]
+        o += ["**Description**", "", f["description"], ""]
         if f["evidence_cmd"]:
             o += ["**Evidence — Command**", "", "```", f["evidence_cmd"], "```", ""]
         if f["evidence_out"]:
@@ -269,7 +317,45 @@ def to_markdown(m: dict) -> str:
     if not m["findings"]:
         o += ["_No findings were identified in this assessment._", ""]
 
-    o += ["## 6. Recommendations (Prioritised)", "",
+    # ATT&CK coverage
+    cov = m.get("attack") or []
+    conf = sum(1 for r in cov if r["confirmed"])
+    tac = len({r["tactic"] for r in cov if r["tactic"]})
+    o += ["", "## 6. MITRE ATT&CK Coverage", ""]
+    if cov:
+        o += [f"This assessment exercised **{len(cov)} technique(s)** across **{tac} tactic(s)** "
+              f"(**{conf} confirmed** by a finding, **{len(cov) - conf} attempted**). Import the "
+              "JSON layer (Console → ATT&CK → *Download Navigator layer*) into the MITRE "
+              "ATT&CK Navigator or VECTR for the full matrix.", "",
+              "| Tactic | Technique | Name | Status |", "|---|---|---|---|"]
+        for r in cov:
+            o.append(f"| {(r['tactic'] or '').replace('-', ' ').title()} | {r['technique']} "
+                     f"| {r['name']} | {'Confirmed' if r['confirmed'] else 'Attempted'} |")
+        o.append("")
+        confirmed_rows = [r for r in cov if r["confirmed"]]
+        if confirmed_rows:
+            o += ["### 6.1 Detection Guidance", "",
+                  "What a defender should have observed for each confirmed technique:", "",
+                  "| Technique | Data sources | Detection guidance |", "|---|---|---|"]
+            for r in confirmed_rows:
+                det = r.get("detection") or {}
+                o.append(f"| {r['technique']} — {r['name']} | {det.get('data_sources', '')} "
+                         f"| {det.get('guidance', '')} |")
+            o.append("")
+    else:
+        o += ["_No ATT&CK techniques were exercised in this assessment._", ""]
+    _gaps = m.get("attack_gaps") or []
+    if _gaps:
+        o += ["### 6.2 Coverage Gaps — Applicable but Untested", "",
+              "Techniques this environment is exposed to that were not confirmed — recommended "
+              "as the next round of testing (and detection engineering):", "",
+              "| Tactic | Technique | Name |", "|---|---|---|"]
+        for g in _gaps:
+            o.append(f"| {(g['tactic'] or '').replace('-', ' ').title()} | {g['technique']} "
+                     f"| {g['name']} |")
+        o.append("")
+
+    o += ["## 7. Recommendations (Prioritised)", "",
           "| Priority | Action | Finding |", "|---|---|---|"]
     for r in m["recommendations"]:
         o.append(f"| {r['priority']} | {r['action']} | {r['finding']} |")
@@ -367,6 +453,28 @@ def to_html(m: dict) -> str:
 
     p.append("<h2>1. Executive Summary</h2>")
     p.append(_summary_html(m['exec_summary']))
+    if m.get("attack_path"):
+        p.append("<h3>1.1 Attack Path</h3>")
+        p.append("<p>The assessment progressed to domain compromise through the following chain:</p><ol>")
+        for stp in m["attack_path"]:
+            p.append(f"<li><b>{_e(stp['title'])}</b> — {_e(stp['detail'])}</li>")
+        p.append("</ol>")
+    _bh = m.get("bloodhound") or {}
+    if _bh.get("collected"):
+        p.append("<h3>1.2 Escalation Opportunities (BloodHound)</h3>")
+        p.append(f"<p>{_e(_bh.get('summary', ''))}</p>")
+        _rec = _bh.get("recommendation")
+        if _rec:
+            p.append(f"<p><b>Recommended next escalation:</b> {_e(_rec['action'])} — "
+                     f"<code>{_e(_rec['first_edge'])}</code> on <code>{_e(_rec['path_to'])}</code>"
+                     + (f" (tool: {_e(_rec['tool'])})" if _rec.get("tool") else "") + "</p>")
+        if _bh.get("foothold_control"):
+            p.append("<table><thead><tr><th width='30%'>Target</th><th width='22%'>Right</th>"
+                     "<th width='48%'>Abuse</th></tr></thead><tbody>")
+            for x in _bh["foothold_control"][:12]:
+                p.append(f"<tr><td><code>{_e(x['target'])}</code></td><td>{_e(x['right'])}</td>"
+                         f"<td>{_e(x['action'])}</td></tr>")
+            p.append("</tbody></table>")
 
     p.append("<h2>2. Finding Summary</h2>")
     p.append("<table><thead><tr><th width='60%'>Severity</th><th width='40%'>Count</th></tr></thead><tbody>")
@@ -423,6 +531,9 @@ def to_html(m: dict) -> str:
         _cv = f" <span class='badge'>CVSS {_e(f['cvss'])}</span>" if f.get("cvss") else ""
         p.append(f"<h3>{f['id']} — {_e(f['title'])} "
                  f"<span class='sev-{f['severity']}'>{f['severity']}</span>{_cv}</h3>")
+        if f.get("attack"):
+            _att = " ".join(f"<span class='badge'>{_e(t)}</span>" for t in f["attack"])
+            p.append(f"<p class='attack'><b>MITRE ATT&amp;CK:</b> {_att}</p>")
         p.append(f"<h4>Description</h4><p>{_e(f['description'])}</p>")
         if f["evidence_cmd"]:
             p.append(f"<h4>Evidence — Command</h4><pre>{_pre(f['evidence_cmd'])}</pre>")
@@ -433,7 +544,54 @@ def to_html(m: dict) -> str:
     if not m["findings"]:
         p.append("<p><i>No findings were identified in this assessment.</i></p>")
 
-    p.append("<h2>6. Recommendations (Prioritised)</h2>")
+    cov = m.get("attack") or []
+    p.append("<h2>6. MITRE ATT&amp;CK Coverage</h2>")
+    if cov:
+        conf = sum(1 for r in cov if r["confirmed"])
+        tac = len({r["tactic"] for r in cov if r["tactic"]})
+        p.append(f"<p>This assessment exercised <b>{len(cov)}</b> technique(s) across <b>{tac}</b> "
+                 f"tactic(s) — <b>{conf}</b> confirmed by a finding, <b>{len(cov) - conf}</b> "
+                 "attempted. Import the JSON layer (Console &rarr; ATT&amp;CK &rarr; "
+                 "<i>Download Navigator layer</i>) into the MITRE ATT&amp;CK Navigator or VECTR "
+                 "for the full matrix.</p>")
+        p.append("<table><thead><tr><th width='22%'>Tactic</th><th width='14%'>Technique</th>"
+                 "<th width='48%'>Name</th><th width='16%'>Status</th></tr></thead><tbody>")
+        for r in cov:
+            tac_lbl = _e((r["tactic"] or "").replace("-", " ").title())
+            pill = ("<span style='background:#007A3D;color:#fff;padding:1px 8px;border-radius:10px;"
+                    "font-size:11px'>Confirmed</span>" if r["confirmed"] else
+                    "<span style='background:#D0EFDF;color:#0f172a;padding:1px 8px;border-radius:10px;"
+                    "font-size:11px'>Attempted</span>")
+            p.append(f"<tr><td>{tac_lbl}</td><td><code>{_e(r['technique'])}</code></td>"
+                     f"<td>{_e(r['name'])}</td><td>{pill}</td></tr>")
+        p.append("</tbody></table>")
+        _cr = [r for r in cov if r["confirmed"]]
+        if _cr:
+            p.append("<h3>6.1 Detection Guidance</h3>")
+            p.append("<p>What a defender should have observed for each confirmed technique:</p>")
+            p.append("<table><thead><tr><th width='24%'>Technique</th><th width='30%'>Data sources</th>"
+                     "<th width='46%'>Detection guidance</th></tr></thead><tbody>")
+            for r in _cr:
+                det = r.get("detection") or {}
+                p.append(f"<tr><td><code>{_e(r['technique'])}</code> {_e(r['name'])}</td>"
+                         f"<td>{_e(det.get('data_sources', ''))}</td>"
+                         f"<td>{_e(det.get('guidance', ''))}</td></tr>")
+            p.append("</tbody></table>")
+    else:
+        p.append("<p><i>No ATT&amp;CK techniques were exercised in this assessment.</i></p>")
+    _gaps = m.get("attack_gaps") or []
+    if _gaps:
+        p.append("<h3>6.2 Coverage Gaps — Applicable but Untested</h3>")
+        p.append("<p>Techniques this environment is exposed to that were not confirmed — "
+                 "recommended as the next round of testing and detection engineering:</p>")
+        p.append("<table><thead><tr><th width='24%'>Tactic</th><th width='16%'>Technique</th>"
+                 "<th width='60%'>Name</th></tr></thead><tbody>")
+        for g in _gaps:
+            p.append(f"<tr><td>{_e((g['tactic'] or '').replace('-', ' ').title())}</td>"
+                     f"<td><code>{_e(g['technique'])}</code></td><td>{_e(g['name'])}</td></tr>")
+        p.append("</tbody></table>")
+
+    p.append("<h2>7. Recommendations (Prioritised)</h2>")
     p.append("<table><thead><tr><th width='14%'>Priority</th><th width='72%'>Action</th>"
              "<th width='14%'>Finding</th></tr></thead><tbody>")
     for r in m["recommendations"]:
@@ -550,6 +708,27 @@ def to_docx(m: dict, path: Path) -> bool:
                 doc.add_paragraph(s[2:].strip(), style="List Bullet")
             else:
                 doc.add_paragraph(s)
+        if m.get("attack_path"):
+            doc.add_heading("1.1 Attack Path", level=2)
+            doc.add_paragraph("The assessment progressed to domain compromise through the "
+                              "following chain:")
+            for stp in m["attack_path"]:
+                doc.add_paragraph(f"{stp['title']} — {stp['detail']}", style="List Number")
+        _bh = m.get("bloodhound") or {}
+        if _bh.get("collected"):
+            doc.add_heading("1.2 Escalation Opportunities (BloodHound)", level=2)
+            doc.add_paragraph(_bh.get("summary", ""))
+            _rec = _bh.get("recommendation")
+            if _rec:
+                doc.add_paragraph(f"Recommended next escalation: {_rec['action']} — "
+                                  f"{_rec['first_edge']} on {_rec['path_to']}"
+                                  + (f" (tool: {_rec['tool']})" if _rec.get("tool") else ""))
+            if _bh.get("foothold_control"):
+                bt = _dx_table(doc, ["Target", "Right", "Abuse"])
+                for x in _bh["foothold_control"][:12]:
+                    c = bt.add_row().cells
+                    _dx_cell(c[0], x["target"]); _dx_cell(c[1], x["right"])
+                    _dx_cell(c[2], x["action"])
 
         doc.add_heading("2. Finding Summary", level=1)
         st = _dx_table(doc, ["Severity", "Count"])
@@ -615,6 +794,9 @@ def to_docx(m: dict, path: Path) -> bool:
             _dx_run_shade(badge, fill)
             if f.get("cvss"):
                 h.add_run(f"  CVSS {f['cvss']}").italic = True
+            if f.get("attack"):
+                ap = doc.add_paragraph("MITRE ATT&CK: " + ", ".join(f["attack"]))
+                ap.runs[0].italic = True
             doc.add_heading("Description", level=3)
             doc.add_paragraph(f["description"])
             if f["evidence_cmd"]:
@@ -630,7 +812,50 @@ def to_docx(m: dict, path: Path) -> bool:
         if not m["findings"]:
             doc.add_paragraph("No findings were identified in this assessment.")
 
-        doc.add_heading("6. Recommendations (Prioritised)", level=1)
+        doc.add_heading("6. MITRE ATT&CK Coverage", level=1)
+        cov = m.get("attack") or []
+        if cov:
+            conf = sum(1 for r in cov if r["confirmed"])
+            tac = len({r["tactic"] for r in cov if r["tactic"]})
+            doc.add_paragraph(
+                f"This assessment exercised {len(cov)} technique(s) across {tac} tactic(s) — "
+                f"{conf} confirmed by a finding, {len(cov) - conf} attempted. Import the JSON "
+                "layer (Console → ATT&CK → Download Navigator layer) into the MITRE "
+                "ATT&CK Navigator or VECTR for the full matrix.")
+            at = _dx_table(doc, ["Tactic", "Technique", "Name", "Status"])
+            for r in cov:
+                c = at.add_row().cells
+                _dx_cell(c[0], (r["tactic"] or "").replace("-", " ").title())
+                _dx_cell(c[1], r["technique"]); _dx_cell(c[2], r["name"])
+                if r["confirmed"]:
+                    _dx_cell(c[3], "Confirmed", bold=True, rgb=_DX_WHITE)
+                    _dx_shade(c[3], "007A3D")
+                else:
+                    _dx_cell(c[3], "Attempted")
+            _cr = [r for r in cov if r["confirmed"]]
+            if _cr:
+                doc.add_heading("6.1 Detection Guidance", level=2)
+                doc.add_paragraph("What a defender should have observed for each confirmed technique:")
+                dt = _dx_table(doc, ["Technique", "Data sources", "Detection guidance"])
+                for r in _cr:
+                    det = r.get("detection") or {}
+                    c = dt.add_row().cells
+                    _dx_cell(c[0], f"{r['technique']} — {r['name']}")
+                    _dx_cell(c[1], det.get("data_sources", "")); _dx_cell(c[2], det.get("guidance", ""))
+        else:
+            doc.add_paragraph("No ATT&CK techniques were exercised in this assessment.")
+        _gaps = m.get("attack_gaps") or []
+        if _gaps:
+            doc.add_heading("6.2 Coverage Gaps — Applicable but Untested", level=2)
+            doc.add_paragraph("Techniques this environment is exposed to that were not confirmed — "
+                              "recommended as the next round of testing and detection engineering:")
+            gt = _dx_table(doc, ["Tactic", "Technique", "Name"])
+            for g in _gaps:
+                c = gt.add_row().cells
+                _dx_cell(c[0], (g["tactic"] or "").replace("-", " ").title())
+                _dx_cell(c[1], g["technique"]); _dx_cell(c[2], g["name"])
+
+        doc.add_heading("7. Recommendations (Prioritised)", level=1)
         rt = _dx_table(doc, ["Priority", "Action", "Finding"])
         for r in m["recommendations"]:
             c = rt.add_row().cells

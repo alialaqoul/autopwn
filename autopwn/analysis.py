@@ -320,6 +320,52 @@ def _evidence(transcript, tool_names, hosts=None):
 # Generic finding rules. Each: predicate over a host's open ports + facts =>
 # a finding dict. Severity/impact/recommendation are standard and NOT tied to
 # any specific environment.
+def attack_path(transcript, findings, facts) -> list[dict]:
+    """Reconstruct the end-to-end attack path (foothold → Domain Admin) as an
+    ordered narrative from the run transcript + findings — the story a reader
+    wants in the executive summary, not a flat finding list."""
+    t = [e for e in (transcript or []) if e.get("kind") == "tool_result"]
+
+    def has_tool(*names):
+        return any(e.get("name") in names for e in t)
+
+    def out_has(sub):
+        s = sub.lower()
+        return any(s in ((e.get("output") or e.get("summary") or "")).lower() for e in t)
+
+    ft = " ".join(f.get("title", "") for f in findings or []).lower()
+    steps: list[tuple[str, str]] = []
+
+    if has_tool("nmap_scan"):
+        steps.append(("Reconnaissance", "Scanned the in-scope range and fingerprinted hosts, "
+                      "identifying the Active Directory domain and its domain controllers."))
+    user = (facts or {}).get("username")
+    if user:
+        dom = (facts or {}).get("domain", "")
+        who = f"{user}@{dom}" if dom else user
+        steps.append(("Initial foothold", f"Authenticated to the domain with the low-privileged "
+                      f"account '{who}'."))
+    if has_tool("coercer", "ntlm_relay") or "coercion" in ft:
+        steps.append(("Authentication coercion", "Coerced a domain controller into authenticating "
+                      "to the attacker (PetitPotam / PrinterBug / DFSCoerce)."))
+    if (has_tool("ntlm_relay") or out_has("got certificate") or "esc8" in ft
+            or "machine certificate obtained" in ft):
+        steps.append(("NTLM relay to AD CS (ESC8)", "Relayed the coerced DC authentication to AD "
+                      "CS HTTP web enrollment and obtained a certificate for the DC machine account."))
+    if has_tool("certipy_auth") or out_has("got hash for"):
+        steps.append(("Certificate authentication", "Authenticated with the machine certificate "
+                      "(PKINIT) to recover the domain controller's NT hash and a Kerberos TGT."))
+    if out_has("dumping domain credentials") or out_has("krbtgt:") or "dcsync" in ft:
+        steps.append(("Domain compromise (DCSync)", "Replicated the directory as the DC account "
+                      "(DCSync), dumping every domain secret including krbtgt and Administrator — "
+                      "Domain Admin equivalent, full domain compromise."))
+    if has_tool("crack_hashes") or out_has("cracked ntlm") or out_has("cracked hashes"):
+        steps.append(("Credential cracking", "Cracked recovered NT hashes offline against the "
+                      "wordlist, yielding plaintext domain passwords."))
+
+    return [{"n": i + 1, "title": ti, "detail": de} for i, (ti, de) in enumerate(steps)]
+
+
 def build_findings(hosts: dict, facts: dict, transcript=None,
                    log_dir=None) -> list[dict]:
     """Generate report findings from the finding playbooks (those with a
@@ -411,6 +457,11 @@ def build_findings(hosts: dict, facts: dict, transcript=None,
         f["id"] = f"F-{fid:02d}"
         findings.append(f)
         fid += 1
+
+    # Tag each finding with its MITRE ATT&CK technique IDs (centralised map).
+    from . import attack
+    for f in findings:
+        f["attack"] = attack.for_finding(f.get("title", ""))
 
     findings.sort(key=lambda f: SEV_ORDER.get(f.get("severity"), 9))
     return findings
