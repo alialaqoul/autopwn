@@ -23,16 +23,19 @@ time, drive playbooks/tools, open interactive sessions, and export reports.
 
 <p align="center"><img src="assets/dashboard.png" alt="Dashboard — host inventory and service matrix" width="90%"></p>
 
-**Findings** — recovered credentials (with their domain), enumerated users, and
-severity-rated security findings with CVSS and evidence:
+**Findings** — recovered credentials (cracked plaintext *or* NT hash for
+pass-the-hash), **captured hashes** (Kerberoast / AS-REP / NTLM), engagement
+**artifacts** (certificates, ccaches, NTDS dumps), enumerated users, and
+severity-rated findings with CVSS, **ATT&CK technique IDs**, and evidence:
 
-<p align="center"><img src="assets/findings.png" alt="Findings — credentials, users, and CVSS-rated findings" width="90%"></p>
+<p align="center"><img src="assets/findings.png" alt="Findings — credentials, captured hashes, artifacts, and CVSS-rated findings" width="90%"></p>
 
-**Console (C2)** — open an interactive session from a recovered credential
-(evil-winrm / impacket over password or pass-the-hash, with a persistent shell
-where `cd`/state carry), and a netcat-style reverse-shell listener:
+**Console (C2)** — open a **real interactive TTY** (xterm.js) from a recovered
+credential over WinRM (evil-winrm) or SMB (impacket) with a password or
+**pass-the-hash** — the remote prompt, tab-completion, arrow-key history and
+`Ctrl-C` all work — plus a netcat-style reverse-shell listener:
 
-<p align="center"><img src="assets/console.png" alt="Console — credentialed sessions and reverse-shell listener" width="90%"></p>
+<p align="center"><img src="assets/console.png" alt="Console — real xterm TTY over WinRM/SMB (password or pass-the-hash) and a reverse-shell listener" width="90%"></p>
 
 **Playbooks** — the attack paths *and* the report findings, unified and editable:
 each step names the **tool that runs**, its trigger, arguments, and the
@@ -45,6 +48,20 @@ finding (with CVSS/impact/recommendation) when it actually fires:
   <img src="assets/gui-tools.png" alt="Tools library — every action and how it runs" width="49%">
   <img src="assets/settings.png" alt="Settings — AI model config, connection test, and AI call log" width="49%">
 </p>
+
+**Attack Paths (offline BloodHound)** — parse a `bloodhound-python` collection
+into an AD graph and surface the foothold's directly-abusable objects and the
+shortest path to Domain Admin — no Neo4j / Docker / CE server needed:
+
+<p align="center"><img src="assets/paths.png" alt="Attack Paths — offline BloodHound escalation-path analysis" width="90%"></p>
+
+**MITRE ATT&CK** — every finding and tool maps to ATT&CK techniques: the
+foothold→domain-compromise attack path, coverage gaps (applicable-but-untested
+techniques), and a Navigator-style coverage matrix — exported as a **Navigator
+layer** or **VECTR CSV**. Ships with the full offline ATT&CK catalogue (697
+techniques), no internet required:
+
+<p align="center"><img src="assets/attack.png" alt="MITRE ATT&CK — technique coverage, attack path, and Navigator/VECTR export" width="90%"></p>
 
 ---
 
@@ -68,9 +85,22 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   toggle) picks the **AI autopilot** (LLM agent) or the **Playbook autopilot
   (no AI)**: recon a target/range, run every matching playbook deterministically,
   and report. Reliable and reproducible without any model.
-- **Interactive credentialed sessions (C2)** — from a recovered credential, open
-  a **persistent** shell over WinRM (evil-winrm) or SMB (impacket) with a password
-  or **pass-the-hash**; `cd` and state persist. Plus a reverse-shell **listener**.
+- **Interactive credentialed sessions (C2)** — from a recovered credential, open a
+  **real interactive TTY** (xterm.js) over WinRM (evil-winrm) or SMB (impacket)
+  with a password or **pass-the-hash** — remote prompt, tab-completion, arrow-key
+  history and `Ctrl-C` all work; `cd`/state persist. Plus a reverse-shell **listener**.
+- **Automatic AD escalation** — from a single domain user, an assessment runs the
+  no-fix chain end to end and feeds the loot back into the session: coerce a DC →
+  NTLM-relay to AD CS web enrollment (**ESC8**) → DC certificate → DCSync → crack
+  the NT hashes. Hard-gated (root + credential + ESC8 CA + coercible DC) and
+  best-effort, so it skips cleanly where it doesn't apply.
+- **Offline BloodHound path analysis** — parse a `bloodhound-python` collection
+  into an AD graph and compute the foothold's abusable objects and the shortest
+  path to Domain Admin, entirely offline (no Neo4j / Docker / CE server).
+- **MITRE ATT&CK mapping** — every finding and tool maps to ATT&CK techniques;
+  export a **Navigator layer** or **VECTR CSV** with technique-level coverage and
+  applicable-but-untested gaps. Ships with the full offline ATT&CK catalogue (697
+  techniques) — no internet required.
 - **Isolated sessions** — each engagement is a self-contained data directory,
   switchable from the console; launched jobs stay scoped to it.
 - **Pluggable AI backends** — OpenAI, Ollama, AnythingLLM, LM Studio, or any
