@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 16
+_BUILTIN_VERSION = 17
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -567,9 +567,57 @@ DEFAULT_PLAYBOOKS = [
                   recommendation="Restrict replication (DS-Replication-Get-Changes) to DCs, "
                          "tier admin accounts, and rotate krbtgt twice."),
             _step(2, "Forge a golden ticket", "have hashes",
-                  "ticketer (set krbtgt hash + domain SID)", ["hash"], ["ticket", "admin"],
+                  "ticketer (set krbtgt hash + domain SID)", ["hash"], ["golden"],
                   "ticketer -nthash <krbtgt> -domain-sid <SID> Administrator → golden TGT "
-                  "for full-domain persistence.", "final"),
+                  "for full-domain persistence.", "final",
+                  severity="Critical", cvss="9.8",
+                  finding_title="Golden Ticket Possible — krbtgt Compromised",
+                  impact="A recovered krbtgt hash lets an attacker forge Kerberos tickets for "
+                         "any identity indefinitely — persistence that survives a password "
+                         "reset of every other account.",
+                  recommendation="Rotate the krbtgt password TWICE (with the recommended "
+                         "interval) and treat krbtgt exposure as a full-domain compromise."),
+        ],
+    },
+    {
+        "id": "domain-persistence",
+        "name": "Domain persistence & backdoors (post-Domain Admin)",
+        "summary": "After Domain Admin, plant durable persistence — and find backdoors an "
+                   "attacker may have left: Silver/Diamond tickets, a DCSync-rights backdoor, "
+                   "a Golden Certificate (stolen CA key), AdminSDHolder, DCShadow and Skeleton "
+                   "Key. (The Golden Ticket finding fires from the DCSync step.)",
+        "match": {"any_ports": [88, 389], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Silver Ticket — service / computer account", "have hashes",
+                  "ticketer -nthash <machine/svc hash> -spn <spn> (forge service ticket)",
+                  ["hash"], [],
+                  "With a service or computer account hash, forge a service ticket (silver) "
+                  "for that SPN and access the service as any user — never touches the DC, so "
+                  "quieter than a golden ticket."),
+            _step(2, "Backdoor: grant DCSync rights", "have credential",
+                  "dacledit / bloodyAD add DS-Replication-Get-Changes[-All] to a controlled user",
+                  ["credential"], [],
+                  "Grant a low-profile account replication rights on the domain object so it "
+                  "can DCSync forever with NO privileged-group membership — a stealthy backdoor "
+                  "to hunt for and remove."),
+            _step(3, "Backdoor: AdminSDHolder ACE", "have credential",
+                  "bloodyAD / dacledit add an ACE on CN=AdminSDHolder,CN=System",
+                  ["credential"], [],
+                  "A rogue ACE on AdminSDHolder is re-applied by SDProp to every protected "
+                  "group (Domain Admins, …) every ~60 min, restoring the attacker's rights "
+                  "even after cleanup."),
+            _step(4, "Golden Certificate — steal the CA key", "have credential",
+                  "certipy ca -backup → certipy forge (offline cert for any user)",
+                  ["credential"], [],
+                  "Back up the CA's private key (certipy ca -backup) then forge authentication "
+                  "certificates for ANY user offline — survives password resets AND krbtgt "
+                  "rotation; only fixed by re-keying the CA."),
+            _step(5, "DCShadow / Skeleton Key", "have credential",
+                  "mimikatz lsadump::dcshadow / misc::skeleton (on the DC)", ["credential"], [],
+                  "DCShadow registers a rogue DC to push legitimate-looking directory changes "
+                  "(SID history, ACLs); Skeleton Key patches LSASS on the DC so a master "
+                  "password authenticates as anyone (in-memory, until reboot).", "final"),
         ],
     },
     {

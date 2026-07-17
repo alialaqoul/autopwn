@@ -134,6 +134,13 @@ _FINDING_RULES: list[tuple[str, list[str]]] = [
     ("host credentials recovered", ["T1003.001", "T1003.002", "T1003.004"]),
     ("lsass", ["T1003.001"]),
     ("lsa secret", ["T1003.004"]),
+    # domain persistence
+    ("golden ticket", ["T1558.001"]),
+    ("silver ticket", ["T1558.002"]),
+    ("golden certificate", ["T1649"]),
+    ("dcshadow", ["T1207"]),
+    ("skeleton key", ["T1556.001"]),
+    ("adminsdholder", ["T1098"]),
 ]
 
 # --------------------------------------------------------------------------- #
@@ -180,6 +187,7 @@ TOOL_TECHNIQUES: dict[str, list[str]] = {
     "win_privesc": ["T1134.001", "T1548.002", "T1574.009", "T1552.002"],
     "lsassy": ["T1003.001"],
     "win_creds": ["T1003.001", "T1003.002", "T1003.004"],
+    "ticketer": ["T1558.001", "T1558.002"],
 }
 
 
