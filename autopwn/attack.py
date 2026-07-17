@@ -119,6 +119,17 @@ _FINDING_RULES: list[tuple[str, list[str]]] = [
     ("pass-the-hash", ["T1550.002"]),
     ("pass the hash", ["T1550.002"]),
     ("rbcd", ["T1098"]),
+    # local privilege escalation (win_privesc)
+    ("token privilege", ["T1134.001"]),
+    ("seimpersonate", ["T1134.001"]),
+    ("sebackup", ["T1003.002"]),
+    ("alwaysinstallelevated", ["T1548.002"]),
+    ("unquoted service", ["T1574.009"]),
+    ("autologon", ["T1552.002"]),
+    ("uac disabled", ["T1548.002"]),
+    # IPv6 DNS takeover (mitm6)
+    ("ipv6", ["T1557.001"]),
+    ("dns takeover", ["T1557.001"]),
 ]
 
 # --------------------------------------------------------------------------- #
@@ -161,6 +172,8 @@ TOOL_TECHNIQUES: dict[str, list[str]] = {
     "searchsploit": ["T1190"],
     "spray": ["T1110.003"],
     "netexec_spray": ["T1110.003"],
+    "mitm6": ["T1557.001", "T1557"],
+    "win_privesc": ["T1134.001", "T1548.002", "T1574.009", "T1552.002"],
 }
 
 

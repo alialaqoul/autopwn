@@ -97,6 +97,14 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
 - **Offline BloodHound path analysis** — parse a `bloodhound-python` collection
   into an AD graph and compute the foothold's abusable objects and the shortest
   path to Domain Admin, entirely offline (no Neo4j / Docker / CE server).
+- **Local privilege escalation triage** — `win_privesc` runs an automated
+  post-foothold host audit (SeImpersonate → potato, SeBackup/SeRestore,
+  AlwaysInstallElevated, unquoted service paths, autologon credentials, UAC) and
+  parses each abusable vector into an ATT&CK-tagged finding — the WinPEAS pass,
+  structured.
+- **IPv6 DNS takeover (`mitm6`)** — with **no credentials**, poison IPv6 DNS/WPAD
+  to coerce NTLM off the wire and feed it to the relay (LDAP RBCD / AD CS ESC8) —
+  the classic on-the-wire internal foothold, alongside Responder-style poisoning.
 - **MITRE ATT&CK mapping** — every finding and tool maps to ATT&CK techniques;
   export a **Navigator layer** or **VECTR CSV** with technique-level coverage and
   applicable-but-untested gaps. Ships with the full offline ATT&CK catalogue (697
@@ -126,7 +134,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   its arguments; Autopwn parses every tool's output into shared variables that
   auto-fill the next step. The full no-creds → Domain Admin AD chain, Kerberoast,
   ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, privilege
-  escalation, and critical-CVE checks ship as 27 playbooks — each editable in the
+  escalation, and critical-CVE checks ship as 28 playbooks — each editable in the
   console and driven from real output, not an LLM. A step with a severity becomes a
   report finding when it actually fires.
 - **Lab-validated for accuracy** — a built-in verify harness (`autopwn verify`)
@@ -481,7 +489,7 @@ The 27 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `trust-abuse`, `creds-in-ad`, `relay-adcs-esc8` (coerce→relay→ESC8→DA — the
 built-in **`ntlm_relay`** tool orchestrates the whole listener+coercion end to
 end against the in-scope target; run as root via `sudo autopwn run --tool
-ntlm_relay`),
+ntlm_relay`), `ipv6-relay` (mitm6 IPv6/WPAD takeover → relay, no creds),
 `ad-cve-check` (ZeroLogon/noPac/PrintNightmare/MS17-010/coercion — non-destructive
 checks), `sccm-attack` (SCCM/MECM enum + abuse), `password-policy`, `dpapi-loot`, `unauth-ad-roast` (pre2k/timeroast, no
 creds), and — from a single unprivileged domain user — **`privesc-ad`** (enumerate
@@ -574,7 +582,7 @@ install status):
 |---|---|
 | **recon** | `nmap_scan`, `native_port_scan`, `masscan`, `dns_recon`, `subfinder`, `amass`, `theharvester`, `httpx`, `gau` |
 | **web** | `whatweb`, `http_probe`, `nikto`, `nuclei`, `ffuf`, `gobuster_dir`, `feroxbuster`, `katana`, `wpscan`, `sqlmap`, `arjun`, `testssl`, `subzy` |
-| **ad-smb** | `netexec_smb`, `netexec_rid_brute`, `netexec_spray`, `netexec_winrm`, `netexec_ldap`, `netexec_mssql`, `netexec_module`, `smb_get`, `smb_loot`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `targeted_kerberoast`, `bloodhound_python`, `bloodyad`, `dacledit`, `finddelegation`, `add_computer`, `rbcd`, `get_st`, `ticketer`, `lookupsid`, `raisechild`, `coercer`, `certipy_find`, `certipy_req`, `certipy_auth`, `certipy_shadow`, `secretsdump` |
+| **ad-smb** | `netexec_smb`, `netexec_rid_brute`, `netexec_spray`, `netexec_winrm`, `netexec_ldap`, `netexec_mssql`, `netexec_module`, `smb_get`, `smb_loot`, `enum4linux`, `smbmap`, `smbclient_shares`, `ldapsearch_anon`, `kerbrute_userenum`, `asrep_roast`, `kerberoast`, `targeted_kerberoast`, `bloodhound_python`, `bloodyad`, `dacledit`, `finddelegation`, `add_computer`, `rbcd`, `get_st`, `ticketer`, `lookupsid`, `raisechild`, `coercer`, `certipy_find`, `certipy_req`, `certipy_auth`, `certipy_shadow`, `secretsdump`, `ntlm_relay`, `mitm6`, `win_privesc` |
 | **credentials** | `crack_hashes`, `spray_cracked`, `hydra`, `john`, `hashcat`, `hashid` |
 | **exploit** | `searchsploit` |
 

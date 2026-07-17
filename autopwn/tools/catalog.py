@@ -607,6 +607,26 @@ CATALOG: list[CommandSpec] = [
         timeout=300, install_hint="pipx install coercer.",
     ),
     CommandSpec(
+        name="mitm6",
+        description="IPv6 DNS takeover: answer Windows DHCPv6 / IPv6 name resolution so "
+                    "segment hosts use YOU as their DNS, then reply to WPAD and internal "
+                    "lookups to coerce NTLM authentication — feed it to a running "
+                    "ntlmrelayx (LDAP / AD CS) for domain takeover. The classic "
+                    "no-credentials, on-the-wire internal foothold. INTRUSIVE: poisons "
+                    "the whole segment — authorized use only, alongside a relay listener.",
+        binary="mitm6", category="ad-smb", active=True,
+        parameters=_params({**_DOMAIN,
+            "interface": {"type": "string", "description": "Attacker NIC to bind (e.g. eth0)."},
+            "target_domain": {"type": "string", "description": "AD domain to spoof (fqdn); "
+                              "defaults to the engagement 'domain'."}},
+            []),
+        build_args=lambda k: (["-i", _s(k["interface"])] if k.get("interface") else [])
+                             + (["-d", _s(k.get("target_domain") or k.get("domain"))]
+                                if (k.get("target_domain") or k.get("domain")) else [])
+                             + ["--ignore-nofqdn"],
+        timeout=600, install_hint="pipx install mitm6.",
+    ),
+    CommandSpec(
         name="finddelegation",
         description="Enumerate Kerberos delegation across the domain: unconstrained, "
                     "constrained (AllowedToDelegate), and resource-based (RBCD). Needs a "

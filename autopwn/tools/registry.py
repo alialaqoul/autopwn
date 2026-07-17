@@ -70,6 +70,8 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     reg.register(SprayCredTool())
     from .relay import NtlmRelayTool
     reg.register(NtlmRelayTool())
+    from .privesc import WinPrivescTool
+    reg.register(WinPrivescTool())
 
     # Catalogued external tools.
     for spec in CATALOG:

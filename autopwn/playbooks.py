@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 14
+_BUILTIN_VERSION = 15
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -324,6 +324,40 @@ DEFAULT_PLAYBOOKS = [
                   "--set relay_to=<signing:False host> --set mode=smb. Both hosts must be in "
                   "scope. (In-console it stays documentation because the web service is "
                   "non-root and can't bind 445.)",
+                  "final"),
+        ],
+    },
+    {
+        "id": "ipv6-relay",
+        "name": "IPv6 DNS takeover (mitm6) → NTLM relay → domain",
+        "summary": "With NO credentials, poison IPv6 DNS with mitm6 so Windows hosts use "
+                   "you as their DNS, coerce NTLM via WPAD, and relay it to LDAP / AD CS "
+                   "for a domain foothold or full takeover — the classic on-the-wire "
+                   "internal attack.",
+        "match": {"any_ports": [445, 389], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Poison IPv6 DNS (mitm6)", "start",
+                  "mitm6 (run as root: mitm6 -d <domain> -i <iface>)",
+                  [], ["coerced"],
+                  "mitm6 answers DHCPv6 / IPv6 name resolution so segment hosts set YOU "
+                  "as their DNS, then serves WPAD → hosts authenticate to you. Runs "
+                  "continuously; start the relay listener first, then mitm6 feeds it. "
+                  "Intrusive — poisons the whole segment; authorized use only.",
+                  severity="High", cvss="8.1",
+                  finding_title="IPv6 DNS Takeover Possible (mitm6 / WPAD)",
+                  impact="An unauthenticated attacker on the segment can become the hosts' "
+                         "DNS over IPv6 and coerce NTLM authentication (WPAD), feeding an "
+                         "NTLM relay to LDAP/AD CS for escalation up to Domain Admin.",
+                  recommendation="Disable IPv6 if unused (or filter DHCPv6/RA-guard), turn "
+                         "off WPAD, enforce LDAP signing + channel binding and SMB signing, "
+                         "and disable NTLM."),
+            _step(2, "Relay the coerced auth (LDAP RBCD / AD CS ESC8)", "start",
+                  "ntlm_relay (mode=ldap or adcs — run as root)",
+                  ["coerced"], ["machine_account", "certificate", "admin", "flag"],
+                  "Relay the mitm6-coerced NTLM to LDAP (write RBCD / add a computer → "
+                  "impersonate) or to AD CS web enrollment (ESC8 → certificate → DCSync). "
+                  "The built-in ntlm_relay tool automates the listener; run as root.",
                   "final"),
         ],
     },
@@ -693,10 +727,11 @@ DEFAULT_PLAYBOOKS = [
         "run": {},
         "steps": [
             _step(1, "Host privilege & config triage", "have credential",
-                  "winPEAS / Seatbelt (upload + run on the host)", ["credential"], [],
-                  "Once you have a shell (evil-winrm as a local admin, or an MSSQL "
-                  "xp_cmdshell foothold), run winPEAS/Seatbelt: token privileges, services, "
-                  "AlwaysInstallElevated, autologon creds, unquoted paths, scheduled tasks."),
+                  "win_privesc", ["credential"], [],
+                  "Automated local-privesc enumeration on the host (needs local admin via "
+                  "SMB 'Pwn3d!' or WinRM membership): token privileges (SeImpersonate → "
+                  "potato, SeBackup), AlwaysInstallElevated, unquoted service paths, "
+                  "autologon credentials, and UAC state — each reported as a finding."),
             _step(2, "Abuse SeImpersonatePrivilege → SYSTEM", "have credential",
                   "PrintSpoofer / GodPotato (on the host)", ["credential"], ["admin"],
                   "Service accounts (IIS/MSSQL) usually hold SeImpersonatePrivilege — "
