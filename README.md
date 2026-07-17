@@ -504,8 +504,8 @@ unlock the rest of the network), plus detection playbooks (SMB signing/null-auth
 RDP, WSUS, …). All are editable in the web console.
 
 And **`net-device-audit`** extends the same idea to the network fabric —
-recognises Cisco IOS & ASA/FTD, Extreme EXOS, Fortinet FortiGate and Juniper
-JunOS from SSH/HTTP/SNMP fingerprints, then non-destructively tests each:
+recognises Cisco IOS & ASA/FTD, Extreme EXOS, Fortinet FortiGate, Juniper JunOS
+and pfSense/Netgate from SSH/HTTP/SNMP fingerprints, then non-destructively tests each:
 readable/writable SNMP communities, device CVEs, read-only auth-bypass PoCs
 (FortiOS CVE-2018-13379 & ASA CVE-2020-3452 path traversals), and an exposed
 Cisco Smart Install (TCP 4786). Driven by **`net_device_recon`** and

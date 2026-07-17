@@ -309,6 +309,23 @@ PRODUCTS += [
         attack=("T1190", "T1552.001", "T1602.002"),
     ),
     Product(
+        id="pfsense", name="pfSense / Netgate firewall", kind="netdev",
+        ports=(443, 80, 8443),
+        patterns=(r"pfsense", r"netgate"),
+        web_port=443,
+        default_creds=(("admin", "pfsense"),),
+        login=None,   # CSRF-token form + lockout — detect + note, don't auto-spray
+        cves=("Default admin credentials 'admin:pfsense'",
+              "CVE-2022-31814 — pfBlockerNG unauthenticated RCE",
+              "CVE-2021-41282 — diag_routes.php authenticated RCE",
+              "CVE-2023-42325 — pfSense XSS"),
+        loot="The pfSense config (config.xml / Diagnostics > Backup) holds every "
+             "firewall rule, IPsec/OpenVPN PSKs + user credentials, RADIUS/LDAP "
+             "secrets and CARP keys — the keys to the perimeter and the VPN.",
+        severity="High", cvss="8.1",
+        attack=("T1190", "T1552.001", "T1078"),
+    ),
+    Product(
         id="cisco_asa", name="Cisco ASA / FTD firewall", kind="netdev",
         ports=(443, 8443, 22),
         patterns=(r"cisco\s*asa", r"adaptive\s*security", r"firepower",

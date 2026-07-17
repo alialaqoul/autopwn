@@ -32,6 +32,12 @@ from .mgmt import _http, _base, _TITLE   # reuse the safe HTTP helpers
 
 # Community strings worth a non-destructive sweep. Names in _RW_HINT typically
 # denote a read-WRITE community (config push) when they answer.
+# Web ports to pull an HTTP title/Server header from for fingerprinting — many
+# appliances serve their UI on a non-default port (e.g. pfSense on 80), so probe
+# every open one rather than a single per-product default.
+_WEB_PORTS = {80: "http", 443: "https", 8080: "http", 8443: "https",
+              8000: "http", 10443: "https", 8081: "http"}
+
 _COMMUNITIES = ["public", "private", "community", "cisco", "manager", "secret",
                 "admin", "read", "write", "snmp", "default", "monitor",
                 "network", "security", "root"]
@@ -92,15 +98,16 @@ class NetDeviceReconTool(MacroTool):
         entry = (store.all_hosts() or {}).get(host, {})
         open_ports = signatures._host_open_ports(entry)
 
-        # 1) evidence: SSH banner + HTTP titles + one quick SNMP sysDescr
+        # 1) evidence: SSH banner + HTTP titles from every open web port + SNMP
         evidence = [_ssh_banner(host)]
-        for prod in signatures.by_kind("netdev"):
-            if prod.web_port and (open_ports & set(prod.ports)):
-                st, hdrs, body = _http("GET", _base(prod, host, prod.url_port) + "/")
-                if st:
-                    t = _TITLE.search(body)
-                    evidence.append((t.group(1).strip() if t else "")
-                                    + " " + hdrs.get("Server", ""))
+        for port, scheme in _WEB_PORTS.items():
+            if port not in open_ports:
+                continue
+            st, hdrs, body = _http("GET", f"{scheme}://{host}:{port}/")
+            if st:
+                t = _TITLE.search(body)
+                evidence.append((t.group(1).strip() if t else "")
+                                + " " + hdrs.get("Server", ""))
         sysdescr = self._snmp_sysdescr(host, ["public"])
         if sysdescr:
             evidence.append(sysdescr)
