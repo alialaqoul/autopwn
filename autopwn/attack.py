@@ -473,10 +473,14 @@ def gaps(coverage_rows: Iterable[dict], services) -> list[dict]:
     for sig in _signals(services):
         expected.update(EXPECTED_BY_SIGNAL.get(sig, []))
     out = []
-    for tech in sorted(expected - confirmed):
+    # "Untested" means genuinely untried: a technique a mapped tool actually
+    # exercised WAS tested — it simply wasn't confirmed vulnerable (e.g.
+    # Kerberoasting returned "no SPN accounts") — so it belongs in the coverage
+    # matrix as "attempted", not in the untested-gaps list. Exclude attempted.
+    for tech in sorted(expected - confirmed - attempted):
         name, tactic = name_of(tech)
         out.append({"technique": tech, "name": name, "tactic": tactic,
-                    "attempted": tech in attempted})
+                    "attempted": False})
     out.sort(key=lambda r: (r["tactic"], r["technique"]))
     return out
 
