@@ -1,8 +1,9 @@
 # Autopwn
 
 **An AI agent that orchestrates real security tools to test the security of
-networks, web applications, Active Directory, and other systems — driven by a
-local or cloud LLM, and gated by an explicit authorization scope.**
+networks, web applications, Active Directory, enterprise management platforms,
+network infrastructure, and other systems — driven by a local or cloud LLM, and
+gated by an explicit authorization scope.**
 
 Autopwn does not reinvent scanners. It *orchestrates* the industry-standard
 ones — nmap, netexec, nuclei, impacket, ffuf, and more — the way a human operator
@@ -62,6 +63,22 @@ layer** or **VECTR CSV**. Ships with the full offline ATT&CK catalogue (697
 techniques), no internet required:
 
 <p align="center"><img src="assets/screens/attack.png" alt="MITRE ATT&CK — technique coverage, attack path, and Navigator/VECTR export" width="90%"></p>
+
+**Enterprise management servers & network devices** — beyond AD, Autopwn
+*recognises* the platforms that actually run an estate and non-destructively
+tests each (default credentials, notable CVEs via nuclei, and read-only
+proof-of-access PoCs). Cluster A management/monitoring servers: **Trellix/McAfee
+ePO, SolarWinds NPM/Orion, Splunk, Acronis Cyber Protect, Tripwire, ExtremeCloud
+IQ Site Engine, WSUS, NPS**. Cluster B network gear & firewalls: **Cisco IOS &
+ASA/FTD, Extreme EXOS, Fortinet FortiGate, Juniper JunOS, pfSense/Netgate** —
+SNMP RO/RW community audit, Cisco Smart Install, FortiOS/ASA read-only
+path-traversal confirmations. These boxes store the credentials that unlock the
+rest of the network — the product catalogue in
+[`autopwn/signatures.py`](autopwn/signatures.py) is data-only, so adding a
+product is one entry. Driven by the `mgmt-server-audit` and `net-device-audit`
+playbooks:
+
+<p align="center"><img src="assets/screens/mgmt-audit.png" alt="Management-server audit playbook — fingerprint (product_recon) → default credentials → pivot, matched live against a Trellix ePO at :8443" width="90%"></p>
 
 ---
 
