@@ -627,6 +627,21 @@ CATALOG: list[CommandSpec] = [
         timeout=600, install_hint="pipx install mitm6.",
     ),
     CommandSpec(
+        name="lsassy",
+        description="Remotely dump and parse LSASS on a host you have local admin on to "
+                    "recover logged-on credentials (plaintext passwords, NT hashes) and "
+                    "Kerberos material — without dropping mimikatz on disk. "
+                    "Post-exploitation; needs local admin (Pwn3d!).",
+        binary="lsassy", category="credentials",
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN}, ["target"]),
+        build_args=lambda k: (["-d", _s(k["domain"])] if k.get("domain") else [])
+                             + (["-u", _s(k["username"])] if k.get("username") else [])
+                             + (["-p", _s(k["password"])] if k.get("password") else [])
+                             + (["-H", _s(k["hash"])] if k.get("hash") else [])
+                             + [_s(k["target"])],
+        install_hint="pipx install lsassy.",
+    ),
+    CommandSpec(
         name="finddelegation",
         description="Enumerate Kerberos delegation across the domain: unconstrained, "
                     "constrained (AllowedToDelegate), and resource-based (RBCD). Needs a "

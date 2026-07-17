@@ -130,6 +130,10 @@ _FINDING_RULES: list[tuple[str, list[str]]] = [
     # IPv6 DNS takeover (mitm6)
     ("ipv6", ["T1557.001"]),
     ("dns takeover", ["T1557.001"]),
+    # live-host credential harvest (win_creds / lsassy)
+    ("host credentials recovered", ["T1003.001", "T1003.002", "T1003.004"]),
+    ("lsass", ["T1003.001"]),
+    ("lsa secret", ["T1003.004"]),
 ]
 
 # --------------------------------------------------------------------------- #
@@ -174,6 +178,8 @@ TOOL_TECHNIQUES: dict[str, list[str]] = {
     "netexec_spray": ["T1110.003"],
     "mitm6": ["T1557.001", "T1557"],
     "win_privesc": ["T1134.001", "T1548.002", "T1574.009", "T1552.002"],
+    "lsassy": ["T1003.001"],
+    "win_creds": ["T1003.001", "T1003.002", "T1003.004"],
 }
 
 
