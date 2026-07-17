@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 15
+_BUILTIN_VERSION = 16
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -417,31 +417,112 @@ DEFAULT_PLAYBOOKS = [
     },
     {
         "id": "adcs-esc",
-        "name": "AD CS abuse (ESC escalation)",
-        "summary": "Find a vulnerable certificate template and enroll a certificate as a "
-                   "privileged user, then authenticate with it to recover their hash/TGT.",
+        "name": "AD CS abuse — full ESC audit → Domain Admin",
+        "summary": "Enumerate every AD CS misconfiguration (ESC1-ESC15) with certipy and "
+                   "report each as its own finding, then for the enrollable classes "
+                   "(ESC1/2/3/9/13) enroll a certificate as a Domain Admin and authenticate "
+                   "with it to recover their NT hash / TGT. ESC8 (HTTP relay) has its own "
+                   "playbook (relay-adcs-esc8).",
         "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
         "run": {},
         "steps": [
-            _step(1, "Find vulnerable templates", "have credential", "certipy_find",
+            _step(1, "Enumerate CAs + vulnerable templates", "have credential", "certipy_find",
                   ["credential", "domain"], ["adcs_vuln"],
-                  "certipy find -vulnerable: enumerate CAs and flag ESC1-ESC8 templates.",
+                  "certipy find -vulnerable: enumerate every CA and certificate template and "
+                  "flag the ESC1-ESC16 misconfigurations. Harvests the CA name + a vulnerable "
+                  "template for the exploitation steps. (Needs DNS pointed at a DC.)"),
+            _step(2, "ESC1 — enrollee-supplies-subject + client auth", "have credential",
+                  "certipy req -template <t> -upn administrator@<domain>", ["adcs_vuln"], ["adcs_esc1"],
+                  "A template allows the enrollee to supply the subject and has a client-auth "
+                  "EKU — enroll a certificate as ANY user (a Domain Admin). Directly exploited "
+                  "by steps 10-11.",
+                  severity="Critical", cvss="9.8",
+                  finding_title="AD CS ESC1 — Enrollee-Supplied Subject (Domain Admin Cert)",
+                  impact="Any principal with enrollment rights can obtain a certificate "
+                         "impersonating a Domain Admin — full domain compromise.",
+                  recommendation="Remove CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT, require CA "
+                         "manager approval, and restrict enrollment rights."),
+            _step(3, "ESC2 — Any Purpose / no EKU template", "have credential",
+                  "certipy req (Any-Purpose cert) → authenticate", ["adcs_vuln"], ["adcs_esc2"],
+                  "A template with the Any-Purpose EKU (or no EKU) issues a cert usable for "
+                  "client authentication (and more) — enroll and authenticate as a privileged "
+                  "user.",
                   severity="High", cvss="8.1",
-                  finding_title="AD CS Misconfiguration (Vulnerable Certificate Template)",
-                  impact="A vulnerable AD CS template lets a low-privileged user enroll a "
-                         "certificate as another user (e.g. Domain Admin), leading to full "
-                         "domain compromise.",
-                  recommendation="Remove enrollee-supplied-subject (ESC1), restrict "
-                         "enrollment rights, enable manager approval, and audit templates."),
-            _step(2, "Enroll a certificate as Domain Admin", "have credential",
+                  finding_title="AD CS ESC2 — Any-Purpose / No-EKU Certificate Template",
+                  impact="An over-permissive EKU lets an enrolled certificate be used for "
+                         "domain authentication, enabling impersonation.",
+                  recommendation="Scope template EKUs tightly; remove Any-Purpose; require "
+                         "approval."),
+            _step(4, "ESC3 — Enrollment Agent template", "have credential",
+                  "certipy req -on-behalf-of <DA> (enrollment agent)", ["adcs_vuln"], ["adcs_esc3"],
+                  "A template grants the Certificate Request Agent EKU — request a cert ON "
+                  "BEHALF OF a Domain Admin and authenticate as them.",
+                  severity="High", cvss="8.1",
+                  finding_title="AD CS ESC3 — Enrollment Agent Certificate",
+                  impact="An enrollment-agent certificate lets the holder enroll on behalf of "
+                         "any user, including Domain Admins.",
+                  recommendation="Restrict enrollment-agent templates and enrollment-agent "
+                         "rights; enable manager approval."),
+            _step(5, "ESC4 — writable template ACL", "have credential",
+                  "certipy template -write (make it ESC1) / bloodyAD", ["adcs_vuln"], ["adcs_esc4"],
+                  "The account has write access over a certificate template's object — "
+                  "reconfigure it into an ESC1 template (enrollee-supplies-subject + client "
+                  "auth), then enroll as a Domain Admin.",
+                  severity="High", cvss="8.1",
+                  finding_title="AD CS ESC4 — Writable Certificate Template ACL",
+                  impact="Write access over a template allows turning it into an ESC1 "
+                         "escalation vector at will.",
+                  recommendation="Audit and remove dangerous ACEs (Write/WriteDacl/"
+                         "WriteOwner/FullControl) on certificate templates."),
+            _step(6, "ESC6 — EDITF_ATTRIBUTESUBJECTALTNAME2 on the CA", "have credential",
+                  "certipy req -upn administrator@<domain> (SAN)", ["adcs_vuln"], ["adcs_esc6"],
+                  "The CA has EDITF_ATTRIBUTESUBJECTALTNAME2 enabled, so a SAN can be supplied "
+                  "in ANY request — enroll a cert with a Domain Admin UPN in the SAN.",
+                  severity="Critical", cvss="9.8",
+                  finding_title="AD CS ESC6 — CA Allows Arbitrary SAN (EDITF flag)",
+                  impact="Any enrollable template becomes an ESC1 vector — a SAN with a "
+                         "privileged UPN yields a Domain Admin certificate.",
+                  recommendation="Remove EDITF_ATTRIBUTESUBJECTALTNAME2 from the CA policy "
+                         "and restart certsvc."),
+            _step(7, "ESC7 — vulnerable CA ACL (ManageCA/ManageCertificates)", "have credential",
+                  "certipy ca -add-officer / issue a pending request", ["adcs_vuln"], ["adcs_esc7"],
+                  "The account holds ManageCA or ManageCertificates on the CA — enable the SAN "
+                  "flag (ESC6), add yourself as an officer, or approve a pending request to "
+                  "obtain a privileged certificate.",
+                  severity="High", cvss="8.1",
+                  finding_title="AD CS ESC7 — Dangerous CA Permissions (ManageCA/Certificates)",
+                  impact="CA management rights allow issuing/approving arbitrary certificates "
+                         "and enabling ESC6 — a path to Domain Admin.",
+                  recommendation="Restrict ManageCA/ManageCertificates to tiered CA admins."),
+            _step(8, "ESC9 — no security extension (szOID_NTDS_CA_SECURITY_EXT)", "have credential",
+                  "certipy req + auth (weak cert mapping)", ["adcs_vuln"], ["adcs_esc9"],
+                  "A template sets CT_FLAG_NO_SECURITY_EXTENSION — combined with weak cert "
+                  "mapping (or an altered UPN) the certificate authenticates as another user.",
+                  severity="High", cvss="8.1",
+                  finding_title="AD CS ESC9 — No Security Extension on Template",
+                  impact="Missing the SID security extension enables certificate-mapping abuse "
+                         "to impersonate a privileged account.",
+                  recommendation="Apply the May 2022+ KB5014754 hardening (StrongCertificate"
+                         "BindingEnforcement) and remove the flag."),
+            _step(9, "ESC13 — issuance policy linked to a group", "have credential",
+                  "certipy req (policy → group membership)", ["adcs_vuln"], ["adcs_esc13"],
+                  "A template's issuance policy is linked (msDS-OIDToGroupLink) to a "
+                  "privileged group — enrolling grants that group's access via the cert.",
+                  severity="High", cvss="8.1",
+                  finding_title="AD CS ESC13 — Issuance Policy Linked to a Group",
+                  impact="Enrolling a cert with the linked issuance policy yields membership "
+                         "of a privileged group.",
+                  recommendation="Remove msDS-OIDToGroupLink from issuance policies or "
+                         "restrict enrollment of the linked template."),
+            _step(10, "Enroll a certificate as Domain Admin (ESC1/2/3/6/9/13)", "have credential",
                   "certipy_req", ["adcs_vuln", "credential"], ["certificate"],
-                  "certipy req: the CA + vulnerable template are auto-filled from step 1's "
-                  "output, and the UPN defaults to administrator@<domain> — enrols a cert "
-                  "impersonating a Domain Admin (ESC1) and saves the .pfx."),
-            _step(3, "Authenticate with the certificate → hash/TGT", "have credential",
-                  "certipy_auth", ["certificate"], ["credential", "hash"],
-                  "certipy auth: the .pfx is auto-filled from step 2 → recovers the target "
-                  "user's NT hash + a Kerberos TGT (Domain Admin).", "final"),
+                  "certipy req: the CA + a vulnerable template are auto-filled from step 1, and "
+                  "the UPN defaults to administrator@<domain> — enrols a certificate "
+                  "impersonating a Domain Admin and saves the .pfx."),
+            _step(11, "Authenticate with the certificate → hash/TGT", "have credential",
+                  "certipy_auth", ["certificate"], ["credential", "hash", "admin"],
+                  "certipy auth: the .pfx auto-fills from step 10 → recovers the target user's "
+                  "NT hash + a Kerberos TGT (Domain Admin).", "final"),
         ],
     },
     {

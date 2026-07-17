@@ -523,6 +523,16 @@ _STEP_SIGNALS = {
     "userlist": [r"\(SidTypeUser\)", r"VALID USERNAME:"],
     # new artifacts (ADCS / MSSQL / coercion / ACL / delegation / trust / creds-in-AD)
     "adcs_vuln": [r"ESC\d+", r"\[!\].*[Vv]ulnerable"],
+    # per-ESC signals (\bESC1\b won't match ESC13) — each fires its own finding
+    # when certipy find -vulnerable reports that class.
+    "adcs_esc1": [r"\bESC1\b"],
+    "adcs_esc2": [r"\bESC2\b"],
+    "adcs_esc3": [r"\bESC3\b"],
+    "adcs_esc4": [r"\bESC4\b"],
+    "adcs_esc6": [r"\bESC6\b"],
+    "adcs_esc7": [r"\bESC7\b"],
+    "adcs_esc9": [r"\bESC9\b"],
+    "adcs_esc13": [r"\bESC13\b"],
     "certificate": [r"Saved certificate and private key", r"Got hash for '"],
     "mssql_exec": [r"MSSQL[^\n]*\(Pwn3d!\)", r"nt service\\mssqlserver",
                    r"Executed command via", r"xp_cmdshell"],
@@ -552,7 +562,9 @@ _STEP_SIGNALS = {
     "gpp": [r"cpassword", r"Found credentials in", r"description:[^\n]*[Pp]ass",
             r"Computer:[^\n]*Password:", r"[Gg]ot LAPS[^\n]*[Pp]assword"],
 }
-_ARTIFACT_ORDER = ["admin", "flag", "certificate", "adcs_vuln", "spn_hash", "ticket",
+_ARTIFACT_ORDER = ["admin", "flag", "certificate",
+                   "adcs_esc1", "adcs_esc2", "adcs_esc3", "adcs_esc4", "adcs_esc6",
+                   "adcs_esc7", "adcs_esc9", "adcs_esc13", "adcs_vuln", "spn_hash", "ticket",
                    "asrep_hash", "mssql_exec", "coerced", "zerologon_vuln",
                    "nopac_vuln", "printnightmare_vuln", "ms17_vuln", "weak_policy",
                    "dpapi_secret", "pre2k_hit", "sccm", "delegation",
