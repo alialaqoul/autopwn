@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 17
+_BUILTIN_VERSION = 18
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -384,6 +384,55 @@ DEFAULT_PLAYBOOKS = [
             _step(4, "Pivot credentials", "have credential", "netexec_spray",
                   ["credential"], ["admin"],
                   "Any recovered credential → spray across the AD estate.", "final"),
+        ],
+    },
+    {
+        "id": "mgmt-server-audit",
+        "name": "Enterprise management-server audit (ePO / SolarWinds / Splunk / …)",
+        "summary": "Recognise the management & monitoring appliances that run an "
+                   "estate — Trellix ePO, SolarWinds NPM/Orion, Splunk, Acronis "
+                   "Cyber Protect, Tripwire, ExtremeCloud IQ Site Engine, WSUS, NPS "
+                   "— then non-destructively test each: default credentials, "
+                   "notable CVEs (nuclei), and read-only proof-of-access PoCs. These "
+                   "boxes store the credentials that unlock the rest of the network.",
+        "match": {"any_ports": [443, 8443, 8444, 8081, 8082, 8000, 8089, 9997,
+                                8080, 8530, 8531, 9877, 9876, 7780], "signals": []},
+        "run": {"tool": ""},
+        "steps": [
+            _step(1, "Fingerprint the product", "start", "product_recon", [],
+                  ["host_info"],
+                  "Match the host against the management-server catalogue, tag it, "
+                  "run each product's read-only PoC and nuclei CVE templates, and "
+                  "report every exposed console with its CVEs + credential-vault "
+                  "loot.", args={"cve_scan": "true"},
+                  severity="High", cvss="8.1",
+                  finding_title="Exposed management interface",
+                  impact="An enterprise management/monitoring console (ePO, "
+                         "SolarWinds, Splunk, Acronis, Tripwire, Extreme XIQ SE, "
+                         "WSUS, NPS) is network-reachable. These platforms store "
+                         "the credentials for — and can push code to — the hosts "
+                         "and network devices they manage.",
+                  recommendation="Restrict management consoles to a management "
+                         "network/jump host, enforce strong unique credentials + "
+                         "MFA, rotate default/service accounts, and patch to "
+                         "current. Encrypt WSUS (HTTPS + signing) and use strong "
+                         "RADIUS shared secrets."),
+            _step(2, "Test default credentials", "start", "default_creds", [],
+                  ["credential"],
+                  "Try each recognised product's vendor/default credentials against "
+                  "its login endpoint (login attempt only, no change).",
+                  severity="Critical", cvss="9.8",
+                  finding_title="Default credentials on a management server",
+                  impact="A management server accepts vendor/default credentials, "
+                         "granting an attacker its credential vault and the ability "
+                         "to push code/config to every managed asset.",
+                  recommendation="Change all default/vendor credentials, enforce a "
+                         "strong password policy + MFA on the console, and monitor "
+                         "console logins."),
+            _step(3, "Pivot recovered credentials", "have credential",
+                  "netexec_spray", ["credential"], ["admin"],
+                  "Spray any recovered console credential across the estate — these "
+                  "accounts are frequently reused.", "final"),
         ],
     },
     {

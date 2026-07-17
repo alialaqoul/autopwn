@@ -134,7 +134,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   its arguments; Autopwn parses every tool's output into shared variables that
   auto-fill the next step. The full no-creds → Domain Admin AD chain, Kerberoast,
   ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, privilege
-  escalation, and critical-CVE checks ship as 29 playbooks — each editable in the
+  escalation, and critical-CVE checks ship as 30 playbooks — each editable in the
   console and driven from real output, not an LLM. A step with a severity becomes a
   report finding when it actually fires.
 - **Lab-validated for accuracy** — a built-in verify harness (`autopwn verify`)
@@ -483,7 +483,7 @@ autopwn playbook --id delegation-abuse  --target 10.0.0.11 --domain corp.local -
 autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -u user -p pass
 ```
 
-The 27 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
+The 30 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `kerberoast-da`, `adcs-esc` (full AD CS ESC1–ESC13 audit + exploit),
 `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
 `domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
@@ -495,8 +495,18 @@ ntlm_relay`), `ipv6-relay` (mitm6 IPv6/WPAD takeover → relay, no creds),
 checks), `sccm-attack` (SCCM/MECM enum + abuse), `password-policy`, `dpapi-loot`, `unauth-ad-roast` (pre2k/timeroast, no
 creds), and — from a single unprivileged domain user — **`privesc-ad`** (enumerate
 every escalation path in one run) and **`privesc-local`** (Windows local → SYSTEM),
-plus detection playbooks (SMB signing/null-auth, RDP, WSUS, …). All are editable in
-the web console.
+and **`mgmt-server-audit`** (recognises the enterprise management/monitoring
+appliances that run an estate — Trellix ePO, SolarWinds NPM/Orion, Splunk,
+Acronis Cyber Protect, Tripwire, ExtremeCloud IQ Site Engine, WSUS, NPS — then
+**non-destructively** tests each: default credentials, notable CVEs via nuclei,
+and read-only proof-of-access PoCs; these boxes store the credentials that
+unlock the rest of the network), plus detection playbooks (SMB signing/null-auth,
+RDP, WSUS, …). All are editable in the web console.
+
+The management-server catalogue lives in [`autopwn/signatures.py`](autopwn/signatures.py)
+(data-only — adding a product is one entry) and is driven by two native tools,
+**`product_recon`** (fingerprint → tag → CVEs + credential-vault loot + safe PoC)
+and **`default_creds`** (a safe login test of each product's vendor defaults).
 
 ### Verify — prove a playbook against a lab
 

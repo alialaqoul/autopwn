@@ -74,6 +74,9 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     reg.register(WinPrivescTool())
     from .loot import WinCredsTool
     reg.register(WinCredsTool())
+    from .mgmt import ProductReconTool, DefaultCredsTool
+    reg.register(ProductReconTool())
+    reg.register(DefaultCredsTool())
 
     # Catalogued external tools.
     for spec in CATALOG:

@@ -50,6 +50,14 @@ TOOL_SERVICES: dict[str, dict] = {
     "arjun":       {"web": True, "ports": [80, 443, 8080, 8443, 8000, 8081], "services": ["http"]},
     "testssl":     {"web": True, "ports": [443, 8443, 993, 995, 465], "services": ["ssl", "https"]},
     "subzy":       {"web": True, "ports": [80, 443, 8080, 8443], "services": ["http"]},
+    # Enterprise management / monitoring servers (host-target, not URL).
+    "product_recon": {"ports": [443, 8443, 8444, 8081, 8082, 8000, 8089, 9997,
+                                8080, 8530, 8531, 9877, 9876, 7780, 17777, 17778,
+                                17790, 17791, 1812, 1813],
+                      "services": ["http", "splunk", "radius"]},
+    "default_creds": {"ports": [443, 8443, 8444, 8081, 8082, 8000, 8089, 9997,
+                                8080, 9877, 9876, 7780],
+                      "services": ["http", "splunk"]},
 }
 
 

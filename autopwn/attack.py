@@ -141,6 +141,17 @@ _FINDING_RULES: list[tuple[str, list[str]]] = [
     ("dcshadow", ["T1207"]),
     ("skeleton key", ["T1556.001"]),
     ("adminsdholder", ["T1098"]),
+    # enterprise management / monitoring servers (mgmt-server-audit)
+    ("management interface", ["T1190", "T1078"]),
+    ("solarwinds", ["T1190", "T1552.001"]),
+    ("epolicy orchestrator", ["T1190", "T1072"]),
+    ("splunk", ["T1190", "T1552.001", "T1072"]),
+    ("acronis", ["T1190", "T1078"]),
+    ("tripwire", ["T1190", "T1562.001"]),
+    ("extremecloud", ["T1190", "T1552.001"]),
+    ("netsight", ["T1190", "T1552.001"]),
+    ("radius", ["T1557", "T1110.002"]),
+    ("nps", ["T1557", "T1110.002"]),
 ]
 
 # --------------------------------------------------------------------------- #
@@ -188,6 +199,8 @@ TOOL_TECHNIQUES: dict[str, list[str]] = {
     "lsassy": ["T1003.001"],
     "win_creds": ["T1003.001", "T1003.002", "T1003.004"],
     "ticketer": ["T1558.001", "T1558.002"],
+    "product_recon": ["T1046", "T1595.002", "T1590.002", "T1190"],
+    "default_creds": ["T1078", "T1110.001"],
 }
 
 
@@ -442,6 +455,7 @@ EXPECTED_BY_SIGNAL: dict[str, list[str]] = {
     "ms-wbt-server": ["T1021.001"],
     "mssql":     ["T1190", "T1078"],
     "wsus":      ["T1072"],
+    "mgmt":      ["T1190", "T1078", "T1552.001"],   # management/monitoring consoles
 }
 
 
@@ -462,6 +476,9 @@ def _signals(services) -> set:
                 sig.add("smb")
             if p in (8530, 8531):
                 sig.add("wsus")
+            if p in (8443, 8444, 8081, 8082, 8089, 9997, 9877, 9876, 7780,
+                     17778, 17790, 17791):
+                sig.add("mgmt")   # enterprise management-server ports
     return sig
 
 
