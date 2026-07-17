@@ -115,7 +115,7 @@ class ProductReconTool(MacroTool):
         # 1) gather HTTP evidence (titles/Server headers) from candidate consoles
         open_ports = signatures._host_open_ports(entry)
         evidence = []
-        for prod in signatures.PRODUCTS:
+        for prod in signatures.by_kind("mgmt"):
             if not (open_ports & set(prod.ports)) or not prod.web_port:
                 continue
             st, hdrs, body = _http("GET", _base(prod, host, prod.url_port) + "/")
@@ -123,7 +123,7 @@ class ProductReconTool(MacroTool):
                 t = _TITLE.search(body)
                 evidence.append((t.group(1).strip() if t else "")
                                 + " " + hdrs.get("Server", ""))
-        found = signatures.identify(entry, " ".join(evidence))
+        found = signatures.identify(entry, " ".join(evidence), kind="mgmt")
         if not found:
             self.log("no management-server products recognised on this host")
             return

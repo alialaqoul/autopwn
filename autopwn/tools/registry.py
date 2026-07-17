@@ -77,6 +77,9 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     from .mgmt import ProductReconTool, DefaultCredsTool
     reg.register(ProductReconTool())
     reg.register(DefaultCredsTool())
+    from .netdev import NetDeviceReconTool, SnmpAuditTool
+    reg.register(NetDeviceReconTool())
+    reg.register(SnmpAuditTool())
 
     # Catalogued external tools.
     for spec in CATALOG:

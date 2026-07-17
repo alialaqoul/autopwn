@@ -58,6 +58,11 @@ TOOL_SERVICES: dict[str, dict] = {
     "default_creds": {"ports": [443, 8443, 8444, 8081, 8082, 8000, 8089, 9997,
                                 8080, 9877, 9876, 7780],
                       "services": ["http", "splunk"]},
+    # Network devices & firewalls (host-target).
+    "net_device_recon": {"ports": [22, 23, 80, 443, 161, 4786, 8443, 10443, 830, 541],
+                         "services": ["ssh", "telnet", "http", "snmp"]},
+    "snmp_audit":       {"ports": [161, 22, 23, 443, 4786],
+                         "services": ["snmp", "ssh", "telnet"]},
 }
 
 

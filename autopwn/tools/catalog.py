@@ -878,9 +878,12 @@ CATALOG: list[CommandSpec] = [
                     "processes, users, and sometimes credentials.",
         binary="snmpwalk", category="recon",
         parameters=_params({**_TARGET,
-            "community": {"type": "string", "description": "Community string. Default public."}},
+            "community": {"type": "string", "description": "Community string. Default public."},
+            "oid": {"type": "string", "description": "Optional base OID to target "
+                    "(e.g. 1.3.6.1.2.1.1.1 for sysDescr) instead of the whole tree."}},
             ["target"]),
-        build_args=lambda k: ["-v2c", "-c", _s(k.get("community", "public")), _s(k["target"])],
+        build_args=lambda k: ["-v2c", "-c", _s(k.get("community", "public")),
+                              _s(k["target"])] + ([_s(k["oid"])] if k.get("oid") else []),
         timeout=600, install_hint="apt install snmp.",
     ),
     CommandSpec(

@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 18
+_BUILTIN_VERSION = 19
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -399,40 +399,52 @@ DEFAULT_PLAYBOOKS = [
                                 8080, 8530, 8531, 9877, 9876, 7780], "signals": []},
         "run": {"tool": ""},
         "steps": [
+            # The findings are produced by the macros themselves (product_recon /
+            # default_creds emit precise, per-product findings), so the steps carry
+            # no step-level finding — that avoids a generic duplicate and stops the
+            # default-cred finding from false-firing on a credential recovered
+            # elsewhere in the run.
             _step(1, "Fingerprint the product", "start", "product_recon", [],
                   ["host_info"],
                   "Match the host against the management-server catalogue, tag it, "
                   "run each product's read-only PoC and nuclei CVE templates, and "
                   "report every exposed console with its CVEs + credential-vault "
-                  "loot.", args={"cve_scan": "true"},
-                  severity="High", cvss="8.1",
-                  finding_title="Exposed management interface",
-                  impact="An enterprise management/monitoring console (ePO, "
-                         "SolarWinds, Splunk, Acronis, Tripwire, Extreme XIQ SE, "
-                         "WSUS, NPS) is network-reachable. These platforms store "
-                         "the credentials for — and can push code to — the hosts "
-                         "and network devices they manage.",
-                  recommendation="Restrict management consoles to a management "
-                         "network/jump host, enforce strong unique credentials + "
-                         "MFA, rotate default/service accounts, and patch to "
-                         "current. Encrypt WSUS (HTTPS + signing) and use strong "
-                         "RADIUS shared secrets."),
+                  "loot.", args={"cve_scan": "true"}),
             _step(2, "Test default credentials", "start", "default_creds", [],
                   ["credential"],
                   "Try each recognised product's vendor/default credentials against "
-                  "its login endpoint (login attempt only, no change).",
-                  severity="Critical", cvss="9.8",
-                  finding_title="Default credentials on a management server",
-                  impact="A management server accepts vendor/default credentials, "
-                         "granting an attacker its credential vault and the ability "
-                         "to push code/config to every managed asset.",
-                  recommendation="Change all default/vendor credentials, enforce a "
-                         "strong password policy + MFA on the console, and monitor "
-                         "console logins."),
+                  "its login endpoint (login attempt only, no change)."),
             _step(3, "Pivot recovered credentials", "have credential",
                   "netexec_spray", ["credential"], ["admin"],
                   "Spray any recovered console credential across the estate — these "
                   "accounts are frequently reused.", "final"),
+        ],
+    },
+    {
+        "id": "net-device-audit",
+        "name": "Network device & firewall audit (Cisco / Extreme / FortiGate / Juniper)",
+        "summary": "Recognise the switches and firewalls that carry an estate — "
+                   "Cisco IOS & ASA/FTD, Extreme EXOS, Fortinet FortiGate, Juniper "
+                   "JunOS — from SSH/HTTP/SNMP fingerprints, then non-destructively "
+                   "test each: default + readable/writable SNMP communities, notable "
+                   "device CVEs, read-only auth-bypass PoCs (FortiOS/ASA path "
+                   "traversal), and an exposed Cisco Smart Install (4786). Their "
+                   "configs hold the credentials + topology for the whole network.",
+        "match": {"any_ports": [22, 23, 80, 443, 4786, 8443, 10443, 830, 541],
+                  "signals": []},
+        "run": {"tool": ""},
+        "steps": [
+            # Findings come from the macros (net_device_recon / snmp_audit emit
+            # precise per-device findings), so the steps carry no step-level finding.
+            _step(1, "Fingerprint the device", "start", "net_device_recon", [],
+                  ["host_info"],
+                  "Identify the device from its SSH banner, HTTP title and SNMP "
+                  "sysDescr; tag it; run each product's read-only PoC and the Cisco "
+                  "Smart Install (4786) check; report it with CVEs + config-loot."),
+            _step(2, "Audit SNMP communities", "start", "snmp_audit", [], [],
+                  "Brute common SNMP community strings (GET only) and flag readable "
+                  "communities — write-suggesting names are likely RW = config push.",
+                  "final"),
         ],
     },
     {

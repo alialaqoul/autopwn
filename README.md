@@ -134,7 +134,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   its arguments; Autopwn parses every tool's output into shared variables that
   auto-fill the next step. The full no-creds → Domain Admin AD chain, Kerberoast,
   ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, privilege
-  escalation, and critical-CVE checks ship as 30 playbooks — each editable in the
+  escalation, and critical-CVE checks ship as 31 playbooks — each editable in the
   console and driven from real output, not an LLM. A step with a severity becomes a
   report finding when it actually fires.
 - **Lab-validated for accuracy** — a built-in verify harness (`autopwn verify`)
@@ -483,7 +483,7 @@ autopwn playbook --id delegation-abuse  --target 10.0.0.11 --domain corp.local -
 autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -u user -p pass
 ```
 
-The 30 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
+The 31 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `kerberoast-da`, `adcs-esc` (full AD CS ESC1–ESC13 audit + exploit),
 `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
 `domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
@@ -503,10 +503,19 @@ and read-only proof-of-access PoCs; these boxes store the credentials that
 unlock the rest of the network), plus detection playbooks (SMB signing/null-auth,
 RDP, WSUS, …). All are editable in the web console.
 
-The management-server catalogue lives in [`autopwn/signatures.py`](autopwn/signatures.py)
-(data-only — adding a product is one entry) and is driven by two native tools,
-**`product_recon`** (fingerprint → tag → CVEs + credential-vault loot + safe PoC)
-and **`default_creds`** (a safe login test of each product's vendor defaults).
+And **`net-device-audit`** extends the same idea to the network fabric —
+recognises Cisco IOS & ASA/FTD, Extreme EXOS, Fortinet FortiGate and Juniper
+JunOS from SSH/HTTP/SNMP fingerprints, then non-destructively tests each:
+readable/writable SNMP communities, device CVEs, read-only auth-bypass PoCs
+(FortiOS CVE-2018-13379 & ASA CVE-2020-3452 path traversals), and an exposed
+Cisco Smart Install (TCP 4786). Driven by **`net_device_recon`** and
+**`snmp_audit`** (community brute, GET-only — no SNMP SET).
+
+The product catalogue for both clusters lives in [`autopwn/signatures.py`](autopwn/signatures.py)
+(data-only — adding a product is one entry). Cluster A (`kind="mgmt"`) is driven
+by **`product_recon`** (fingerprint → tag → CVEs + credential-vault loot + safe
+PoC) and **`default_creds`** (a safe login test of each product's vendor
+defaults); Cluster B (`kind="netdev"`) by `net_device_recon` + `snmp_audit`.
 
 ### Verify — prove a playbook against a lab
 

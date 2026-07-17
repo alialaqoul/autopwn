@@ -152,6 +152,19 @@ _FINDING_RULES: list[tuple[str, list[str]]] = [
     ("netsight", ["T1190", "T1552.001"]),
     ("radius", ["T1557", "T1110.002"]),
     ("nps", ["T1557", "T1110.002"]),
+    # network devices & firewalls (net-device-audit)
+    ("smart install", ["T1602.002", "T1190"]),
+    ("cisco ios", ["T1602.001", "T1552.001"]),
+    ("cisco asa", ["T1190", "T1078"]),
+    ("firepower", ["T1190"]),
+    ("fortigate", ["T1190", "T1552.001"]),
+    ("fortios", ["T1190"]),
+    ("fortinet", ["T1190"]),
+    ("juniper", ["T1190", "T1552.001"]),
+    ("junos", ["T1190"]),
+    ("extreme", ["T1078", "T1602.001"]),
+    ("snmp community", ["T1602.001"]),
+    ("network device", ["T1190", "T1602.001"]),
 ]
 
 # --------------------------------------------------------------------------- #
@@ -201,6 +214,10 @@ TOOL_TECHNIQUES: dict[str, list[str]] = {
     "ticketer": ["T1558.001", "T1558.002"],
     "product_recon": ["T1046", "T1595.002", "T1590.002", "T1190"],
     "default_creds": ["T1078", "T1110.001"],
+    "net_device_recon": ["T1046", "T1595.002", "T1190", "T1602.002"],
+    "snmp_audit": ["T1046", "T1602.001"],
+    "snmp_walk": ["T1602.001"],
+    "onesixtyone": ["T1046", "T1602.001"],
 }
 
 
@@ -456,6 +473,7 @@ EXPECTED_BY_SIGNAL: dict[str, list[str]] = {
     "mssql":     ["T1190", "T1078"],
     "wsus":      ["T1072"],
     "mgmt":      ["T1190", "T1078", "T1552.001"],   # management/monitoring consoles
+    "netdev":    ["T1190", "T1602.001", "T1602.002", "T1552.001"],  # switches/firewalls
 }
 
 
@@ -479,6 +497,8 @@ def _signals(services) -> set:
             if p in (8443, 8444, 8081, 8082, 8089, 9997, 9877, 9876, 7780,
                      17778, 17790, 17791):
                 sig.add("mgmt")   # enterprise management-server ports
+            if p in (4786, 10443, 830, 161):
+                sig.add("netdev")   # switch/firewall indicators
     return sig
 
 
