@@ -536,12 +536,12 @@ _STEP_SIGNALS = {
     # krbtgt hash recovered (DCSync/NTDS) → golden ticket / durable persistence.
     "golden": [r"krbtgt:502:[a-f0-9]{32}:[a-f0-9]{32}:::", r"[Gg]olden [Tt]icket"],
     "certificate": [r"Saved certificate and private key", r"Got hash for '"],
-    # Certighost (CVE-2026-54121) — AD CS 'chase' abuse. Gated on evidence UNIQUE
-    # to this technique (the tool/CVE name or the poisoned cdc/rmd request attrs)
-    # so it never fires on an ordinary certipy/ESC certificate.
-    "certighost": [r"(?i:certighost)", r"CVE-2026-54121",
-                   r"(?i:EDITF_ENABLECHASECLIENTDC)",
-                   r"(?i:\bcdc\b[^\n]{0,40}\brmd\b)"],
+    # Certighost (CVE-2026-54121) — AD CS 'chase' abuse. Fires on the vendored
+    # PoC's SUCCESS banner "[*] GGWP" (printed only after the poisoned DC cert +
+    # PKINIT succeed), so it never false-fires on a patched CA (attempt-only) or
+    # an ordinary certipy/ESC certificate. CVE/tool/registry names also match.
+    "certighost": [r"\bGGWP\b", r"CVE-2026-54121", r"(?i:certighost)",
+                   r"(?i:EDITF_ENABLECHASECLIENTDC)"],
     "mssql_exec": [r"MSSQL[^\n]*\(Pwn3d!\)", r"nt service\\mssqlserver",
                    r"Executed command via", r"xp_cmdshell"],
     "coerced": [r"\[\+\][^\n]*SMB\s+Auth", r"named pipe[^\n]*efsrpc[^\n]*accessible",

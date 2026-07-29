@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 20
+_BUILTIN_VERSION = 21
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -1112,19 +1112,14 @@ DEFAULT_PLAYBOOKS = [
                   "certipy find: locate the Enterprise CA and its enrollment endpoints. "
                   "Certighost abuses the CA's directory-object 'chase' fallback, so any "
                   "reachable Enterprise CA is in scope until the July 2026 CU is applied."),
-            _step(2, "Create a machine account", "have credential", "add_computer",
-                  ["credential", "domain"], ["machine_account"],
-                  "impacket-addcomputer: create a computer account to act as the "
-                  "controlled principal (needs MachineAccountQuota>0 — default 10 — or "
-                  "delegated computer-creation rights)."),
-            _step(3, "Certighost chase poisoning → DC certificate", "have credential",
-                  "certighost PoC (H0j3n) — fake LDAP/LSA listeners + cdc/rmd cert request",
-                  ["machine_account", "adcs_vuln"], ["certighost"],
-                  "Run the Certighost PoC: host attacker-controlled LDAP + LSA services, "
-                  "then submit a certificate request whose cdc (Client DC) / rmd (Remote "
-                  "Domain) attributes point the CA at those listeners. The unpatched CA "
-                  "'chases' the attacker host and issues a certificate carrying a Domain "
-                  "Controller's identity — before proving the target is a real DC. PoC: "
+            _step(2, "Certighost chase → DC certificate → DC hash", "have credential",
+                  "certighost", ["credential", "domain"], ["certighost"],
+                  "The vendored certighost tool (run as ROOT, with TCP 445+389 free) does "
+                  "the whole chain: create a machine account, stand up rogue LDAP+LSA/SMB "
+                  "listeners, and request a certificate whose poisoned cdc (Client DC) / "
+                  "rmd (Remote Domain) attributes make the unpatched CA 'chase' the "
+                  "attacker host and issue a Domain Controller certificate — then PKINIT "
+                  "as that DC and recover its NT hash. Prints '[*] GGWP' on success. PoC: "
                   "gist.github.com/H0j3n/a5ef2609b5f2944ac2390a191a534c26.",
                   severity="Critical", cvss="9.0",
                   finding_title="Certighost — AD CS Domain Controller Impersonation (CVE-2026-54121)",
@@ -1141,12 +1136,12 @@ DEFAULT_PLAYBOOKS = [
                          "attributes and 4768 for certificate TGTs from non-DC hosts; "
                          "revoke suspicious certs and reset krbtgt twice if abuse is "
                          "confirmed."),
-            _step(4, "Authenticate as the DC → DCSync krbtgt", "have credential",
-                  "certipy_auth (use the Certighost DC cert) → secretsdump -just-dc",
+            _step(3, "DCSync krbtgt with the DC identity", "have credential",
+                  "secretsdump -k (certighost .ccache) / -hashes <DC$ hash> — DCSync",
                   ["certighost"], ["hash", "admin", "golden", "flag"],
-                  "certipy auth -pfx <dc>.pfx recovers the DC's NT hash + a Kerberos TGT "
-                  "via PKINIT; then secretsdump -just-dc / DCSync dumps krbtgt and every "
-                  "domain secret — Domain Admin equivalent. The krbtgt hash enables a "
+                  "certighost saved a Kerberos ccache and printed the DC's NT hash; use "
+                  "either to DCSync the domain (secretsdump -just-dc) — dumping krbtgt and "
+                  "every domain secret, Domain Admin equivalent. The krbtgt hash enables a "
                   "Golden Ticket for domain-wide persistence (reset it twice to evict).",
                   "final"),
         ],

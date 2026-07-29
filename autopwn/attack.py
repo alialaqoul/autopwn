@@ -191,6 +191,7 @@ TOOL_TECHNIQUES: dict[str, list[str]] = {
     "certipy_auth": ["T1649"],
     "certipy_shadow": ["T1649", "T1098"],
     "add_computer": ["T1136.002"],
+    "certighost": ["T1649", "T1136.002", "T1078", "T1003.006"],
     "finddelegation": ["T1558"],
     "bloodhound_python": ["T1087.002", "T1069.002", "T1482"],
     "bloodyad": ["T1098"],
