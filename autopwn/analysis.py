@@ -536,6 +536,12 @@ _STEP_SIGNALS = {
     # krbtgt hash recovered (DCSync/NTDS) → golden ticket / durable persistence.
     "golden": [r"krbtgt:502:[a-f0-9]{32}:[a-f0-9]{32}:::", r"[Gg]olden [Tt]icket"],
     "certificate": [r"Saved certificate and private key", r"Got hash for '"],
+    # Certighost (CVE-2026-54121) — AD CS 'chase' abuse. Gated on evidence UNIQUE
+    # to this technique (the tool/CVE name or the poisoned cdc/rmd request attrs)
+    # so it never fires on an ordinary certipy/ESC certificate.
+    "certighost": [r"(?i:certighost)", r"CVE-2026-54121",
+                   r"(?i:EDITF_ENABLECHASECLIENTDC)",
+                   r"(?i:\bcdc\b[^\n]{0,40}\brmd\b)"],
     "mssql_exec": [r"MSSQL[^\n]*\(Pwn3d!\)", r"nt service\\mssqlserver",
                    r"Executed command via", r"xp_cmdshell"],
     "coerced": [r"\[\+\][^\n]*SMB\s+Auth", r"named pipe[^\n]*efsrpc[^\n]*accessible",
@@ -564,7 +570,7 @@ _STEP_SIGNALS = {
     "gpp": [r"cpassword", r"Found credentials in", r"description:[^\n]*[Pp]ass",
             r"Computer:[^\n]*Password:", r"[Gg]ot LAPS[^\n]*[Pp]assword"],
 }
-_ARTIFACT_ORDER = ["admin", "flag", "golden", "certificate",
+_ARTIFACT_ORDER = ["admin", "flag", "golden", "certighost", "certificate",
                    "adcs_esc1", "adcs_esc2", "adcs_esc3", "adcs_esc4", "adcs_esc6",
                    "adcs_esc7", "adcs_esc9", "adcs_esc13", "adcs_vuln", "spn_hash", "ticket",
                    "asrep_hash", "mssql_exec", "coerced", "zerologon_vuln",

@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 19
+_BUILTIN_VERSION = 20
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -40,7 +40,8 @@ _BUILTIN_VERSION = 19
 ARTIFACTS = [
     "domain", "host_info", "signing", "userlist", "credential", "hash", "ticket",
     "spn_hash", "asrep_hash", "shares", "relay_targets", "coerced", "machine_account",
-    "adcs_vuln", "certificate", "mssql_exec", "delegation", "trust", "acl_write",
+    "adcs_vuln", "certificate", "certighost", "mssql_exec", "delegation", "trust",
+    "acl_write",
     "gpp", "zerologon_vuln", "nopac_vuln", "printnightmare_vuln", "ms17_vuln",
     "weak_policy", "dpapi_secret", "pre2k_hit", "sccm", "admin", "flag",
 ]
@@ -1090,6 +1091,63 @@ DEFAULT_PLAYBOOKS = [
                   ["hash", "admin", "flag"],
                   "certipy auth -pfx dc.pfx → the DC's NT hash + TGT; then secretsdump -k / "
                   "DCSync for the whole domain. This is the ESC8 → Domain Admin finish.",
+                  "final"),
+        ],
+    },
+    {
+        "id": "adcs-certighost",
+        "name": "Certighost — AD CS DC impersonation → Domain Admin (CVE-2026-54121)",
+        "summary": "The 2026 AD CS 'chase' abuse: from a single low-privileged domain "
+                   "user, create a machine account, stand up attacker-controlled LDAP + "
+                   "LSA listeners, and request a certificate with poisoned cdc/rmd "
+                   "attributes so the unpatched CA issues a *Domain Controller* "
+                   "certificate. PKINIT as that DC, then DCSync the krbtgt — full domain "
+                   "takeover from one credential. Needs an Enterprise CA and "
+                   "MachineAccountQuota>0 (default 10). Patched in the July 2026 CU.",
+        "match": {"any_ports": [88, 389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Find the Enterprise CA + enrollment", "have credential",
+                  "certipy_find", ["credential", "domain"], ["adcs_vuln"],
+                  "certipy find: locate the Enterprise CA and its enrollment endpoints. "
+                  "Certighost abuses the CA's directory-object 'chase' fallback, so any "
+                  "reachable Enterprise CA is in scope until the July 2026 CU is applied."),
+            _step(2, "Create a machine account", "have credential", "add_computer",
+                  ["credential", "domain"], ["machine_account"],
+                  "impacket-addcomputer: create a computer account to act as the "
+                  "controlled principal (needs MachineAccountQuota>0 — default 10 — or "
+                  "delegated computer-creation rights)."),
+            _step(3, "Certighost chase poisoning → DC certificate", "have credential",
+                  "certighost PoC (H0j3n) — fake LDAP/LSA listeners + cdc/rmd cert request",
+                  ["machine_account", "adcs_vuln"], ["certighost"],
+                  "Run the Certighost PoC: host attacker-controlled LDAP + LSA services, "
+                  "then submit a certificate request whose cdc (Client DC) / rmd (Remote "
+                  "Domain) attributes point the CA at those listeners. The unpatched CA "
+                  "'chases' the attacker host and issues a certificate carrying a Domain "
+                  "Controller's identity — before proving the target is a real DC. PoC: "
+                  "gist.github.com/H0j3n/a5ef2609b5f2944ac2390a191a534c26.",
+                  severity="Critical", cvss="9.0",
+                  finding_title="Certighost — AD CS Domain Controller Impersonation (CVE-2026-54121)",
+                  impact="Any authenticated domain user can coerce the AD CS CA into "
+                         "issuing a certificate for a Domain Controller via the enrollment "
+                         "'chase' fallback, then authenticate as that DC (PKINIT) and "
+                         "DCSync the domain — recovering krbtgt and every secret. A single "
+                         "low-privileged credential yields full domain compromise.",
+                  recommendation="Apply the July 14 2026 cumulative update (e.g. KB5099540 "
+                         "/ build >= 10.0.20348.5386 on Server 2022). If patching is "
+                         "delayed, disable the chase fallback (clear "
+                         "EDITF_ENABLECHASECLIENTDC) and restrict the CA's outbound access "
+                         "to approved DCs. Monitor CA events 4886/4887 for cdc/rmd request "
+                         "attributes and 4768 for certificate TGTs from non-DC hosts; "
+                         "revoke suspicious certs and reset krbtgt twice if abuse is "
+                         "confirmed."),
+            _step(4, "Authenticate as the DC → DCSync krbtgt", "have credential",
+                  "certipy_auth (use the Certighost DC cert) → secretsdump -just-dc",
+                  ["certighost"], ["hash", "admin", "golden", "flag"],
+                  "certipy auth -pfx <dc>.pfx recovers the DC's NT hash + a Kerberos TGT "
+                  "via PKINIT; then secretsdump -just-dc / DCSync dumps krbtgt and every "
+                  "domain secret — Domain Admin equivalent. The krbtgt hash enables a "
+                  "Golden Ticket for domain-wide persistence (reset it twice to evict).",
                   "final"),
         ],
     },

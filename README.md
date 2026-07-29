@@ -151,7 +151,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   its arguments; Autopwn parses every tool's output into shared variables that
   auto-fill the next step. The full no-creds → Domain Admin AD chain, Kerberoast,
   ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, privilege
-  escalation, and critical-CVE checks ship as 31 playbooks — each editable in the
+  escalation, and critical-CVE checks ship as 32 playbooks — each editable in the
   console and driven from real output, not an LLM. A step with a severity becomes a
   report finding when it actually fires.
 - **Lab-validated for accuracy** — a built-in verify harness (`autopwn verify`)
@@ -500,11 +500,11 @@ autopwn playbook --id delegation-abuse  --target 10.0.0.11 --domain corp.local -
 autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -u user -p pass
 ```
 
-The 31 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
+The 32 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `kerberoast-da`, `adcs-esc` (full AD CS ESC1–ESC13 audit + exploit),
 `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
 `domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
-`trust-abuse`, `creds-in-ad`, `relay-adcs-esc8` (coerce→relay→ESC8→DA — the
+`trust-abuse`, `creds-in-ad`, `adcs-certighost` (Certighost / CVE-2026-54121 — AD CS 'chase' DC-impersonation → DCSync, the 2026 single-credential domain takeover), `relay-adcs-esc8` (coerce→relay→ESC8→DA — the
 built-in **`ntlm_relay`** tool orchestrates the whole listener+coercion end to
 end against the in-scope target; run as root via `sudo autopwn run --tool
 ntlm_relay`), `ipv6-relay` (mitm6 IPv6/WPAD takeover → relay, no creds),
