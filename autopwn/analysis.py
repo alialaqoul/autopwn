@@ -535,6 +535,8 @@ _STEP_SIGNALS = {
     "adcs_esc13": [r"\bESC13\b"],
     # krbtgt hash recovered (DCSync/NTDS) → golden ticket / durable persistence.
     "golden": [r"krbtgt:502:[a-f0-9]{32}:[a-f0-9]{32}:::", r"[Gg]olden [Tt]icket"],
+    # hydra SSH success: "[22][ssh] host: X login: Y password: Z"
+    "ssh_cred": [r"\[\d+\]\[ssh\][^\n]*login:", r"\[ssh\][^\n]*password:"],
     "certificate": [r"Saved certificate and private key", r"Got hash for '"],
     # Certighost (CVE-2026-54121) — AD CS 'chase' abuse. Fires on the vendored
     # PoC's SUCCESS banner "[*] GGWP" (printed only after the poisoned DC cert +
@@ -570,7 +572,7 @@ _STEP_SIGNALS = {
     "gpp": [r"cpassword", r"Found credentials in", r"description:[^\n]*[Pp]ass",
             r"Computer:[^\n]*Password:", r"[Gg]ot LAPS[^\n]*[Pp]assword"],
 }
-_ARTIFACT_ORDER = ["admin", "flag", "golden", "certighost", "certificate",
+_ARTIFACT_ORDER = ["admin", "flag", "golden", "certighost", "certificate", "ssh_cred",
                    "adcs_esc1", "adcs_esc2", "adcs_esc3", "adcs_esc4", "adcs_esc6",
                    "adcs_esc7", "adcs_esc9", "adcs_esc13", "adcs_vuln", "spn_hash", "ticket",
                    "asrep_hash", "mssql_exec", "coerced", "zerologon_vuln",

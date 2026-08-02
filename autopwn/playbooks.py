@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 21
+_BUILTIN_VERSION = 22
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -43,7 +43,7 @@ ARTIFACTS = [
     "adcs_vuln", "certificate", "certighost", "mssql_exec", "delegation", "trust",
     "acl_write",
     "gpp", "zerologon_vuln", "nopac_vuln", "printnightmare_vuln", "ms17_vuln",
-    "weak_policy", "dpapi_secret", "pre2k_hit", "sccm", "admin", "flag",
+    "weak_policy", "dpapi_secret", "pre2k_hit", "sccm", "ssh_cred", "admin", "flag",
 ]
 # Execution triggers the sequence runner understands (see sequence._trigger_ok).
 # A step fires when its trigger is true against the current variables.
@@ -934,7 +934,70 @@ DEFAULT_PLAYBOOKS = [
                   "%PATH% dirs → run a payload as the service (often SYSTEM).", "final"),
         ],
     },
-
+    {
+        "id": "ssh-access",
+        "name": "SSH foothold → Linux local privilege escalation → root",
+        "summary": "The Linux kill chain: get onto a host over SSH (spray recovered / "
+                   "guessable credentials), then enumerate the local privilege-"
+                   "escalation vectors and walk one to root. Read-only enumeration; "
+                   "the escalation itself is documented per vector.",
+        "match": {"any_ports": [22], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "SSH credential spray", "start", "hydra",
+                  [], ["ssh_cred"],
+                  "hydra ssh: spray a small set of usernames × common passwords (or "
+                  "reuse recovered creds) to land a foothold. Intrusive — keep the "
+                  "list small and mind lockout.",
+                  args={"service": "ssh",
+                        "userlist": "/usr/share/seclists/Usernames/top-usernames-shortlist.txt",
+                        "passlist": "/usr/share/seclists/Passwords/Common-Credentials/10-million-password-list-top-100.txt"},
+                  severity="High", cvss="8.1",
+                  finding_title="SSH Weak / Guessable Credentials",
+                  impact="An SSH account uses a weak or reused password, giving an "
+                         "interactive foothold on the host.",
+                  recommendation="Enforce key-based auth (PasswordAuthentication no), "
+                         "strong passwords, fail2ban, and MFA."),
+            _step(2, "Local privilege-escalation triage", "have credential",
+                  "linux_privesc", ["credential"], [],
+                  "Automated read-only linPEAS-style enumeration over SSH: abusable "
+                  "sudo, GTFOBins SUID/SGID, dangerous capabilities, docker/lxd/disk "
+                  "group, kernel/pkexec/sudo CVEs (PwnKit/Baron Samedit/DirtyPipe), "
+                  "writable /etc/passwd, readable keys — each reported as a finding."),
+            _step(3, "Reuse credentials & keys for lateral movement", "have credential",
+                  "recovered password / private key → SSH to peers", ["credential"],
+                  ["admin"],
+                  "Reuse the recovered password and any readable private keys "
+                  "(~/.ssh/id_*) to SSH into peer hosts — Linux credential reuse is "
+                  "rampant.", "final"),
+        ],
+    },
+    {
+        "id": "privesc-linux",
+        "name": "Linux local privilege escalation → root",
+        "summary": "From an SSH credential on a Linux host, enumerate the local "
+                   "privilege-escalation vectors and escalate to root — the Linux "
+                   "counterpart of privesc-local. Read-only enumeration; each abusable "
+                   "vector becomes a finding with its root path.",
+        "match": {"any_ports": [22], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Host privilege & config triage", "have credential",
+                  "linux_privesc", ["credential"], [],
+                  "linux_privesc over SSH: sudo -l, SUID/SGID (GTFOBins), file "
+                  "capabilities, docker/lxd/disk group, kernel/pkexec/sudo versions vs "
+                  "local-root CVEs, writable /etc/passwd|shadow, world-writable cron, "
+                  "readable private keys, writable $PATH — all read-only, each an "
+                  "ATT&CK-tagged finding."),
+            _step(2, "Escalate via the identified vector → root", "have credential",
+                  "GTFOBins (sudo/SUID) / PwnKit / DirtyPipe / docker-mount (on the host)",
+                  ["credential"], ["admin", "flag"],
+                  "Walk the strongest finding to root: a GTFOBins sudo/SUID shell, the "
+                  "PwnKit/Baron-Samedit/DirtyPipe exploit, a docker/lxd host mount, or "
+                  "writing /etc/passwd. (Documented: run the exploit on the host.)",
+                  "final"),
+        ],
+    },
     {
         "id": "sccm-attack",
         "name": "SCCM / MECM enumeration and abuse",

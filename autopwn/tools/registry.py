@@ -80,6 +80,8 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     from .netdev import NetDeviceReconTool, SnmpAuditTool
     reg.register(NetDeviceReconTool())
     reg.register(SnmpAuditTool())
+    from .linux import LinuxPrivescTool
+    reg.register(LinuxPrivescTool())
 
     # Catalogued external tools.
     for spec in CATALOG:

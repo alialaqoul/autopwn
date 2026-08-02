@@ -63,6 +63,8 @@ TOOL_SERVICES: dict[str, dict] = {
                          "services": ["ssh", "telnet", "http", "snmp"]},
     "snmp_audit":       {"ports": [161, 22, 23, 443, 4786],
                          "services": ["snmp", "ssh", "telnet"]},
+    # Linux post-foothold (SSH).
+    "linux_privesc":    {"ports": [22], "services": ["ssh"]},
 }
 
 

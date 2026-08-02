@@ -166,6 +166,21 @@ _FINDING_RULES: list[tuple[str, list[str]]] = [
     ("extreme", ["T1078", "T1602.001"]),
     ("snmp community", ["T1602.001"]),
     ("network device", ["T1190", "T1602.001"]),
+    # Linux local privilege escalation (linux_privesc / privesc-linux)
+    ("sudo grants full root", ["T1548.003"]),
+    ("sudo gtfobins", ["T1548.003"]),
+    ("gtfobins suid", ["T1548.001"]),
+    ("file capabilities", ["T1548.001"]),
+    ("root-equivalent group", ["T1611"]),
+    ("pwnkit", ["T1068"]),
+    ("baron samedit", ["T1068"]),
+    ("dirtypipe", ["T1068"]),
+    ("dirtycow", ["T1068"]),
+    ("writable /etc/passwd", ["T1222.002", "T1548"]),
+    ("writable /etc/shadow", ["T1222.002", "T1003.008"]),
+    ("writable $path", ["T1574.007"]),
+    ("ssh weak", ["T1110.001", "T1078"]),
+    ("guessable credentials", ["T1110.001"]),
 ]
 
 # --------------------------------------------------------------------------- #
@@ -219,6 +234,8 @@ TOOL_TECHNIQUES: dict[str, list[str]] = {
     "default_creds": ["T1078", "T1110.001"],
     "net_device_recon": ["T1046", "T1595.002", "T1190", "T1602.002"],
     "snmp_audit": ["T1046", "T1602.001"],
+    "linux_privesc": ["T1082", "T1033", "T1518", "T1548.001", "T1548.003"],
+    "hydra": ["T1110.001"],
     "snmp_walk": ["T1602.001"],
     "onesixtyone": ["T1046", "T1602.001"],
 }

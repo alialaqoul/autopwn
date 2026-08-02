@@ -151,7 +151,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
   its arguments; Autopwn parses every tool's output into shared variables that
   auto-fill the next step. The full no-creds → Domain Admin AD chain, Kerberoast,
   ADCS/ESC, MSSQL, coercion+relay, delegation, ACL abuse, trusts, privilege
-  escalation, and critical-CVE checks ship as 32 playbooks — each editable in the
+  escalation, and critical-CVE checks ship as 34 playbooks — each editable in the
   console and driven from real output, not an LLM. A step with a severity becomes a
   report finding when it actually fires.
 - **Lab-validated for accuracy** — a built-in verify harness (`autopwn verify`)
@@ -500,7 +500,7 @@ autopwn playbook --id delegation-abuse  --target 10.0.0.11 --domain corp.local -
 autopwn playbook --id trust-abuse       --target 10.0.0.11 --domain corp.local -u user -p pass
 ```
 
-The 32 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
+The 34 built-in playbooks cover the full GOAD/AD technique set: `ad-kill-chain`,
 `kerberoast-da`, `adcs-esc` (full AD CS ESC1–ESC13 audit + exploit),
 `mssql-foothold`, `smb-relay` (coercion), `rbcd`,
 `domain-dominance`, `acl-abuse`, `shadow-credentials`, `delegation-abuse`,
@@ -511,7 +511,7 @@ ntlm_relay`), `ipv6-relay` (mitm6 IPv6/WPAD takeover → relay, no creds),
 `domain-persistence` (golden/silver tickets, DCSync-rights + AdminSDHolder backdoors, golden certificate, DCShadow), `ad-cve-check` (ZeroLogon/noPac/PrintNightmare/MS17-010/coercion — non-destructive
 checks), `sccm-attack` (SCCM/MECM enum + abuse), `password-policy`, `dpapi-loot`, `unauth-ad-roast` (pre2k/timeroast, no
 creds), and — from a single unprivileged domain user — **`privesc-ad`** (enumerate
-every escalation path in one run) and **`privesc-local`** (Windows local → SYSTEM),
+every escalation path in one run) and **`privesc-local`** (Windows local → SYSTEM), plus the Linux kill chain **`ssh-access`** & **`privesc-linux`** (SSH foothold → `linux_privesc` reads sudo/SUID/capabilities/docker-lxd/kernel-CVE vectors → root),
 and **`mgmt-server-audit`** (recognises the enterprise management/monitoring
 appliances that run an estate — Trellix ePO, SolarWinds NPM/Orion, Splunk,
 Acronis Cyber Protect, Tripwire, ExtremeCloud IQ Site Engine, WSUS, NPS — then
