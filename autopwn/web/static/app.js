@@ -604,13 +604,24 @@ function openSessionForFinding(s) {   // called from a finding's "Open session"
 // console, then open an interactive session with the freshest recovered creds.
 async function exploitAndSession(s) {
   if (!s) return;
-  if (!s.playbook) return openSessionForFinding(s);   // no source exploit — prefill only
-  if (!confirm(`Run the "${s.playbook}" exploit against ${s.host} (intrusive), then open a `
-      + `${(s.protocol || "").toUpperCase()} session?\n\nThis actively exploits the target.`)) return;
+  if (!s.playbook) return openSessionForFinding(s);   // detection-only — prefill only
+  // Constrain the target to hosts this playbook actually applies to (e.g. a
+  // DCSync playbook -> Domain Controllers) and let the operator choose.
+  const targets = (s.targets && s.targets.length) ? s.targets : [s.host];
+  let host = targets.includes(s.host) ? s.host : targets[0];
+  if (targets.length > 1) {
+    const pick = prompt(`"${s.playbook}" applies to these hosts — choose the target:\n\n` +
+                        targets.join("\n"), host);
+    if (pick === null) return;                          // cancelled
+    host = pick.trim();
+    if (!targets.includes(host)) { alert(`"${host}" is not one of the applicable hosts.`); return; }
+  }
+  if (!confirm(`Run the "${s.playbook}" exploit against ${host} (intrusive), then open a `
+      + `session?\n\nThis actively exploits the target.`)) return;
   show("console");
   if (_execConnected) execDisconnect();
-  openSessionForFinding(s);                             // prefill host/proto/cred (no connect yet)
-  _exTerm.writeln(`\r\n\x1b[33m[*] Exploiting ${s.host} via playbook "${s.playbook}" (intrusive)…\x1b[0m`);
+  openSessionForFinding({ ...s, host });                // prefill (no connect yet)
+  _exTerm.writeln(`\r\n\x1b[33m[*] Exploiting ${host} via playbook "${s.playbook}" (intrusive)…\x1b[0m`);
   let job;
   try {
     const creds = s.auth === "hash"
@@ -618,7 +629,7 @@ async function exploitAndSession(s) {
       : { username: s.username, password: s.secret, domain: s.domain };
     job = await api(`/api/playbooks/${encodeURIComponent(s.playbook)}/run`,
       { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: s.host, intrusive: true, ...creds }) });
+        body: JSON.stringify({ target: host, intrusive: true, ...creds }) });
   } catch (e) {
     _exTerm.writeln(`\x1b[31m[!] could not launch the exploit: ${e && e.message || e}\x1b[0m`);
     return;
@@ -627,12 +638,12 @@ async function exploitAndSession(s) {
   es.onmessage = (ev) => { if (ev.data) _exTerm.writeln("\x1b[38;5;245m" + ev.data.replace(/\s+$/, "") + "\x1b[0m"); };
   es.addEventListener("end", async () => {
     es.close();
-    _exTerm.writeln(`\x1b[32m[+] exploit complete — opening ${(s.protocol || "").toUpperCase()} session…\x1b[0m`);
-    try {   // pick up any freshly recovered credential for this host
+    _exTerm.writeln(`\x1b[32m[+] exploit complete — opening session…\x1b[0m`);
+    try {   // pick up any freshly recovered credential for the chosen host
       const d = await api("/api/findings");
-      const hint = (d.findings || []).map(f => f.session).find(x => x && x.host === s.host);
-      if (hint) openSessionForFinding(hint);
-    } catch { }
+      const hint = (d.findings || []).map(f => f.session).find(x => x && x.host === host);
+      openSessionForFinding(hint || { ...s, host });
+    } catch { openSessionForFinding({ ...s, host }); }
     execConnect();
   });
   es.onerror = () => es.close();

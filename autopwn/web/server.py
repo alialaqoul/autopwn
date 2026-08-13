@@ -78,6 +78,24 @@ def _shell_proto(entry: dict) -> Optional[str]:
     return None
 
 
+def _host_has_port(entry: dict, port: int) -> bool:
+    return any(int(p.get("port", 0)) == port and p.get("state") in (None, "open")
+               for p in (entry.get("ports") or {}).values())
+
+
+def _playbook_targets(pb: dict, hosts: dict, pbmod) -> list:
+    """Hosts a playbook should be launched against. Starts from the playbook's
+    own applicability (matching_hosts), then — for AD/DC-oriented playbooks
+    (match on Kerberos/LDAP) — narrows to actual Domain Controllers (a host
+    running the KDC on 88), so e.g. a DCSync/dominance playbook only offers DCs."""
+    matched = pbmod.matching_hosts(pb, hosts)
+    ap = set(pb.get("match", {}).get("any_ports") or [])
+    if ap & {88, 389}:
+        dcs = [h for h in matched if _host_has_port(hosts.get(h, {}), 88)]
+        return dcs or matched
+    return matched
+
+
 def _best_cred(creds: list, hashes: list) -> Optional[dict]:
     """Best credential to seed a session: a plaintext password first, else an
     NT hash (pass-the-hash) for a named account."""
@@ -92,23 +110,36 @@ def _best_cred(creds: list, hashes: list) -> Optional[dict]:
     return None
 
 
-def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list) -> None:
-    """Add finding['session'] = {host, protocol, username, secret, auth, domain}
-    to confirmed High/Critical/Medium findings whose host exposes a shell service
-    and for which we hold a usable credential. The operator reviews it before
-    connecting — it's a launcher, not an auto-exploit."""
+def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list,
+                          books: list = None) -> None:
+    """Add finding['session'] = {host, protocol, playbook, targets, username,
+    secret, auth, domain} to confirmed High/Critical/Medium findings whose host
+    exposes a shell service and for which we hold a usable credential.
+
+    `playbook` is set ONLY when the source playbook has runnable exploit steps
+    (so detection-only findings get a plain 'Open session', not an 'Exploit'
+    button that would fail). `targets` lists the hosts that playbook actually
+    applies to, so the operator can pick the right machine (e.g. a DCSync
+    playbook -> only Domain Controllers)."""
     cred = _best_cred(creds, hashes)
     if not cred:
         return
+    from .. import playbooks as pbmod
+    by_id = {p.get("id"): p for p in (books or [])}
     for f in findings or []:
         if (f.get("severity") or "") in ("Low", "Info"):
             continue
         for host in (f.get("hosts") or []):
             proto = _shell_proto(hosts.get(host, {}))
-            if proto:
-                f["session"] = {"host": host, "protocol": proto,
-                                "playbook": f.get("playbook", ""), **cred}
-                break
+            if not proto:
+                continue
+            pb = by_id.get(f.get("playbook", ""))
+            runnable = bool(pb and pbmod.runnable_sequence(pb))
+            targets = _playbook_targets(pb, hosts, pbmod) if runnable else []
+            f["session"] = {"host": host, "protocol": proto,
+                            "playbook": f.get("playbook", "") if runnable else "",
+                            "targets": targets, **cred}
+            break
 
 
 # --------------------------------------------------------------------------- #
@@ -650,9 +681,11 @@ def create_app(config_path: str = "config.yaml"):
         _res = extract_results(transcript)
         _hashes = extract_hashes(transcript)
         # Attach an "Open session" hint to confirmed findings on a host that
-        # exposes an interactive service (WinRM/SMB/SSH), so the operator can
-        # drop into a shell straight from the finding.
-        _attach_session_hints(findings, hosts, _res["credentials"], _hashes)
+        # exposes an interactive service (WinRM/SMB/SSH). The source playbook +
+        # its applicable target hosts drive the "Exploit & session" action.
+        from .. import playbooks as _pb
+        _attach_session_hints(findings, hosts, _res["credentials"], _hashes,
+                              _pb.load(str(ld)))
         return {"findings": findings, "credentials": _res["credentials"],
                 "users": _res["users"], "hashes": _hashes,
                 "transcript": sess[-1].name if sess else None}
