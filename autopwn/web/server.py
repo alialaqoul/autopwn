@@ -465,6 +465,12 @@ def create_app(config_path: str = "config.yaml"):
             # intrusive steps that a default assessment would skip.
             if (body or {}).get("intrusive"):
                 argv.append("--intrusive")
+            # Seed the finding's recovered credential so the exploit re-runs with it.
+            for flag, key in (("--username", "username"), ("--password", "password"),
+                              ("--domain", "domain"), ("--hash", "hash")):
+                v = (body or {}).get(key)
+                if v:
+                    argv += [flag, str(v)]
             kind = "sequence"
         else:
             argv = _session_args() + ["run", "--tool", tool, "--set", f"target={target}"]

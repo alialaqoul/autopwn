@@ -613,10 +613,14 @@ async function exploitAndSession(s) {
   _exTerm.writeln(`\r\n\x1b[33m[*] Exploiting ${s.host} via playbook "${s.playbook}" (intrusive)…\x1b[0m`);
   let job;
   try {
+    const creds = s.auth === "hash"
+      ? { username: s.username, hash: s.secret, domain: s.domain }
+      : { username: s.username, password: s.secret, domain: s.domain };
     job = await api(`/api/playbooks/${encodeURIComponent(s.playbook)}/run`,
-      { method: "POST", body: JSON.stringify({ target: s.host, intrusive: true }) });
+      { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: s.host, intrusive: true, ...creds }) });
   } catch (e) {
-    _exTerm.writeln(`\x1b[31m[!] could not launch the exploit: ${e.message}\x1b[0m`);
+    _exTerm.writeln(`\x1b[31m[!] could not launch the exploit: ${e && e.message || e}\x1b[0m`);
     return;
   }
   const es = new EventSource(`/api/jobs/${job.id}/stream`);
