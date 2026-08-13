@@ -600,6 +600,40 @@ function openSessionForFinding(s) {   // called from a finding's "Open session"
   setTimeout(() => $("#ex_connect").focus(), 120);   // review creds, then Connect
 }
 
+// Re-run the playbook that compromised the host (intrusive), stream it into the
+// console, then open an interactive session with the freshest recovered creds.
+async function exploitAndSession(s) {
+  if (!s) return;
+  if (!s.playbook) return openSessionForFinding(s);   // no source exploit — prefill only
+  if (!confirm(`Run the "${s.playbook}" exploit against ${s.host} (intrusive), then open a `
+      + `${(s.protocol || "").toUpperCase()} session?\n\nThis actively exploits the target.`)) return;
+  show("console");
+  if (_execConnected) execDisconnect();
+  openSessionForFinding(s);                             // prefill host/proto/cred (no connect yet)
+  _exTerm.writeln(`\r\n\x1b[33m[*] Exploiting ${s.host} via playbook "${s.playbook}" (intrusive)…\x1b[0m`);
+  let job;
+  try {
+    job = await api(`/api/playbooks/${encodeURIComponent(s.playbook)}/run`,
+      { method: "POST", body: JSON.stringify({ target: s.host, intrusive: true }) });
+  } catch (e) {
+    _exTerm.writeln(`\x1b[31m[!] could not launch the exploit: ${e.message}\x1b[0m`);
+    return;
+  }
+  const es = new EventSource(`/api/jobs/${job.id}/stream`);
+  es.onmessage = (ev) => { if (ev.data) _exTerm.writeln("\x1b[38;5;245m" + ev.data.replace(/\s+$/, "") + "\x1b[0m"); };
+  es.addEventListener("end", async () => {
+    es.close();
+    _exTerm.writeln(`\x1b[32m[+] exploit complete — opening ${(s.protocol || "").toUpperCase()} session…\x1b[0m`);
+    try {   // pick up any freshly recovered credential for this host
+      const d = await api("/api/findings");
+      const hint = (d.findings || []).map(f => f.session).find(x => x && x.host === s.host);
+      if (hint) openSessionForFinding(hint);
+    } catch { }
+    execConnect();
+  });
+  es.onerror = () => es.close();
+}
+
 function updateSecretLabel() {
   const hash = $("#ex_auth").value === "hash";
   $("#ex_secret_lbl").textContent = hash ? "NT hash" : "Password";
@@ -754,7 +788,7 @@ async function loadFindings() {
   $("#findingCount").textContent = fs.length;
   $("#findingsList").innerHTML = fs.length ? fs.map((f, i) => {
     const sev = `<span class="badge ${SEV_CLASS[f.severity] || "text-bg-secondary"}">${esc(f.severity)}</span>`;
-    const sess = f.session ? `<button class="btn btn-sm btn-outline-danger py-0 ms-2 text-nowrap" data-open-session-finding="${i}" title="Open an interactive ${esc((f.session.protocol||'').toUpperCase())} session on ${esc(f.session.host)}">▸ Open session</button>` : "";
+    const sess = f.session ? `<button class="btn btn-sm btn-outline-danger py-0 ms-2 text-nowrap" data-open-session-finding="${i}" title="${f.session.playbook ? "Re-run the " + esc(f.session.playbook) + " exploit (intrusive), then open a session" : "Open a session"} on ${esc(f.session.host)}">${f.session.playbook ? "▸ Exploit &amp; session" : "▸ Open session"}</button>` : "";
     const hosts = (f.hosts || []).map(h => `<span class="badge text-bg-light text-secondary border font-monospace">${esc(h)}</span>`).join(" ");
     const att = (f.attack || []).map(t => `<span class="badge text-bg-light text-secondary border" title="MITRE ATT&CK technique">${esc(t)}</span>`).join(" ");
     const ev = f.evidence_out ? `<div class="pb-section-label mt-2">Evidence${f.evidence_cmd ? " — <code>" + esc(f.evidence_cmd) + "</code>" : ""}</div>
@@ -773,7 +807,7 @@ async function loadFindings() {
     </div>`;
   }).join("") : `<div class="text-secondary py-3 text-center">No findings yet — run an assessment.</div>`;
   $$("#findingsList [data-open-session-finding]").forEach(b =>
-    b.onclick = () => openSessionForFinding(window._findings[+b.dataset.openSessionFinding].session));
+    b.onclick = () => exploitAndSession(window._findings[+b.dataset.openSessionFinding].session));
 
   $("#findingsSource").textContent = d.transcript
     ? `Derived from the latest run (${d.transcript}) and the results store.`

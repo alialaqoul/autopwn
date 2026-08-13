@@ -106,7 +106,8 @@ def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list
         for host in (f.get("hosts") or []):
             proto = _shell_proto(hosts.get(host, {}))
             if proto:
-                f["session"] = {"host": host, "protocol": proto, **cred}
+                f["session"] = {"host": host, "protocol": proto,
+                                "playbook": f.get("playbook", ""), **cred}
                 break
 
 
@@ -460,6 +461,10 @@ def create_app(config_path: str = "config.yaml"):
         # step + parses variables between them); a legacy macro via `run`.
         if sequence:
             argv = _session_args() + ["playbook", "--id", pb_id, "--target", target]
+            # Explicit operator action (e.g. Exploit & open session) may permit
+            # intrusive steps that a default assessment would skip.
+            if (body or {}).get("intrusive"):
+                argv.append("--intrusive")
             kind = "sequence"
         else:
             argv = _session_args() + ["run", "--tool", tool, "--set", f"target={target}"]

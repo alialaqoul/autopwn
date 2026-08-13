@@ -403,6 +403,7 @@ def build_findings(hosts: dict, facts: dict, transcript=None,
             "impact": pb.get("impact", ""),
             "recommendation": pb.get("recommendation", ""),
             "evidence_cmd": cmd, "evidence_out": out,
+            "playbook": pb.get("id", ""),   # source playbook (re-run to exploit)
         })
         fid += 1
 
@@ -446,6 +447,7 @@ def build_findings(hosts: dict, facts: dict, transcript=None,
                 "impact": st.get("impact", ""),
                 "recommendation": st.get("recommendation", ""),
                 "evidence_cmd": ev[0], "evidence_out": ev[1],
+                "playbook": pb.get("id", ""),   # source playbook (re-run to exploit)
             })
             fid += 1
 
