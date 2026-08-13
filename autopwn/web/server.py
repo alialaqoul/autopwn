@@ -17,9 +17,12 @@ resolve and be mistaken for query params.
 """
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 from typing import Optional
+
+_NTHASH_RE = re.compile(r"^[a-fA-F0-9]{32}$")   # a bare NT hash (pass-the-hash)
 
 from pydantic import BaseModel
 
@@ -97,13 +100,21 @@ def _playbook_targets(pb: dict, hosts: dict, pbmod) -> list:
 
 
 def _best_cred(creds: list, hashes: list) -> Optional[dict]:
-    """Best credential to seed a session: a plaintext password first, else an
-    NT hash (pass-the-hash) for a named account."""
-    for c in creds or []:
-        if c.get("password"):
-            return {"username": c.get("username", ""), "secret": c["password"],
+    """Best credential to seed a session. Order: a real plaintext password, then a
+    'password' that is actually an NT hash (pass-the-hash — e.g. an Administrator
+    hash from DCSync), then the captured-hashes list. Getting the auth type right
+    is critical: an NT hash used as a password fails with WinRMAuthorizationError."""
+    for c in creds or []:                        # 1) a genuine plaintext password
+        pw = (c.get("password") or "").strip()
+        if pw and not _NTHASH_RE.match(pw):
+            return {"username": c.get("username", ""), "secret": pw,
                     "auth": "password", "domain": c.get("domain", "")}
-    for h in hashes or []:
+    for c in creds or []:                        # 2) an NT-hash-shaped 'password'
+        pw = (c.get("password") or "").strip()
+        if _NTHASH_RE.match(pw):
+            return {"username": c.get("username", ""), "secret": pw,
+                    "auth": "hash", "domain": c.get("domain", "")}
+    for h in hashes or []:                        # 3) the captured-hashes table
         if h.get("hash") and h.get("account") and "$" not in h.get("account", ""):
             return {"username": h["account"], "secret": h["hash"],
                     "auth": "hash", "domain": ""}
