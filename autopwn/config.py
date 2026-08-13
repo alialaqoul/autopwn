@@ -48,6 +48,10 @@ class AgentConfig(BaseModel):
 class ToolsConfig(BaseModel):
     nmap_path: str = "nmap"
     nuclei_path: str = "nuclei"
+    # Scan gentleness so discovery never freezes a fragile target: one of
+    # sneaky | polite | normal | aggressive. Default polite (rate-limited, few
+    # retransmits, bounded per-host time). See tools/throttle.py.
+    scan_intensity: str = "polite"
 
 
 class Config(BaseModel):
@@ -59,6 +63,10 @@ class Config(BaseModel):
     # Master switch: when False, the LLM agent (autopilot) is disabled and only
     # deterministic playbooks/tools run.
     ai_enabled: bool = True
+    # Safe-by-default: when False (the default), tools flagged `intrusive`
+    # (exploits, brute-force, relay/coercion, writes to the target) are BLOCKED —
+    # only recon + safe read-only checks run. Set True to permit exploitation.
+    allow_intrusive: bool = False
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "Config":

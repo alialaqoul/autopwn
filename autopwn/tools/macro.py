@@ -54,6 +54,8 @@ class MacroTool(Tool):
 
     # ---- runtime ---------------------------------------------------------
     def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        if (blocked := self._intrusive_block(ctx)) is not None:
+            return blocked
         from .registry import default_registry
         self._ctx = ctx
         self._reg = default_registry()

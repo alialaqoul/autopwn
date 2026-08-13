@@ -56,6 +56,9 @@ class CommandSpec:
     #: from subcommand + positional + flags + fixed (the easy way to add tools).
     build_args: Optional[ArgBuilder] = None
     active: bool = True
+    #: True for exploit/brute-force/relay/coercion/target-write tools — blocked
+    #: by the safe-by-default gate. Recon/enum tools leave this False.
+    intrusive: bool = False
     #: grouping category: recon | web | ad-smb | credentials | exploit
     category: str = "misc"
     host_resolver: HostResolver = host_from_target
@@ -105,6 +108,7 @@ class GenericCommandTool(Tool):
         self.name = spec.name
         self.description = spec.description
         self.active = spec.active
+        self.intrusive = spec.intrusive
         self.category = spec.category
         self.parameters = spec.parameters
 
@@ -117,6 +121,8 @@ class GenericCommandTool(Tool):
 
     def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         spec = self._spec
+        if (blocked := self._intrusive_block(ctx)) is not None:
+            return blocked
 
         host = spec.host_resolver(kwargs)
         if spec.requires_host:

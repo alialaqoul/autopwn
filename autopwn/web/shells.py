@@ -92,10 +92,16 @@ def start(host, protocol, username, secret, auth="password", domain="",
     logf, cmdf = log_path(sid), _cmd_path(sid)
     logf.write_text("", encoding="utf-8")
     cmdf.write_text("", encoding="utf-8")
-    client = _client_argv(host, protocol, username, secret, auth, domain)
-    wrapper = Path(__file__).parent / "_shell_proc.py"
-    argv = [sys.executable, str(wrapper), json.dumps(client), str(logf), str(cmdf),
-            str(int(cols) or 120), str(int(rows) or 34)]
+    if protocol == "ssh":
+        # SSH runs a paramiko-based interactive client (no PTY / sshpass needed).
+        wrapper = Path(__file__).parent / "_ssh_shell.py"
+        argv = [sys.executable, str(wrapper), host, "22", username, secret,
+                auth, str(logf), str(cmdf), str(int(cols) or 120), str(int(rows) or 34)]
+    else:
+        client = _client_argv(host, protocol, username, secret, auth, domain)
+        wrapper = Path(__file__).parent / "_shell_proc.py"
+        argv = [sys.executable, str(wrapper), json.dumps(client), str(logf), str(cmdf),
+                str(int(cols) or 120), str(int(rows) or 34)]
     kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
                     "stdin": subprocess.DEVNULL}
     if os.name == "nt":

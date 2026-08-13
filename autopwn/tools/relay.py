@@ -44,6 +44,7 @@ from .runner import which
 
 class NtlmRelayTool(MacroTool):
     name = "ntlm_relay"
+    intrusive = True   # coerces a DC + relays NTLM — blocked in non-intrusive mode
     category = "ad-smb"
     active = True
     #: authorize the *coerced* host (the launch/assessment target) via the base class

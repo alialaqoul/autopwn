@@ -65,7 +65,8 @@ def run_one(entry: dict, cfg, scope, report=lambda *a: None) -> dict:
             "password": entry.get("password"), "nthash": entry.get("hash")})
 
     reg = default_registry(cfg.tools)
-    ctx = ToolContext(scope=scope, confirm_active_actions=False)
+    # Verify exists to prove exploit playbooks fire against a lab — allow intrusive.
+    ctx = ToolContext(scope=scope, confirm_active_actions=False, allow_intrusive=True)
     transcript: list = []
 
     def _record(name, r):

@@ -50,6 +50,7 @@ class AgentLaunch(BaseModel):
     assessor: str = ""
     authorized_by: str = ""
     report_format: str = "html,docx,md"
+    intrusive: bool = False   # opt in to exploits/brute-force/relay (default off)
 
 
 class ScopeEntry(BaseModel):
@@ -59,6 +60,54 @@ class ScopeEntry(BaseModel):
 class Fact(BaseModel):
     key: str
     value: str = ""
+
+
+# --------------------------------------------------------------------------- #
+# Findings -> "Open session" hints
+# --------------------------------------------------------------------------- #
+def _shell_proto(entry: dict) -> Optional[str]:
+    """Interactive protocol a host exposes: winrm (5985/6) > smb (445) > ssh (22)."""
+    ports = {int(p["port"]) for p in (entry.get("ports") or {}).values()
+             if p.get("port") and p.get("state") in (None, "open")}
+    if ports & {5985, 5986}:
+        return "winrm"
+    if 445 in ports:
+        return "smb"
+    if 22 in ports:
+        return "ssh"
+    return None
+
+
+def _best_cred(creds: list, hashes: list) -> Optional[dict]:
+    """Best credential to seed a session: a plaintext password first, else an
+    NT hash (pass-the-hash) for a named account."""
+    for c in creds or []:
+        if c.get("password"):
+            return {"username": c.get("username", ""), "secret": c["password"],
+                    "auth": "password", "domain": c.get("domain", "")}
+    for h in hashes or []:
+        if h.get("hash") and h.get("account") and "$" not in h.get("account", ""):
+            return {"username": h["account"], "secret": h["hash"],
+                    "auth": "hash", "domain": ""}
+    return None
+
+
+def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list) -> None:
+    """Add finding['session'] = {host, protocol, username, secret, auth, domain}
+    to confirmed High/Critical/Medium findings whose host exposes a shell service
+    and for which we hold a usable credential. The operator reviews it before
+    connecting — it's a launcher, not an auto-exploit."""
+    cred = _best_cred(creds, hashes)
+    if not cred:
+        return
+    for f in findings or []:
+        if (f.get("severity") or "") in ("Low", "Info"):
+            continue
+        for host in (f.get("hosts") or []):
+            proto = _shell_proto(hosts.get(host, {}))
+            if proto:
+                f["session"] = {"host": host, "protocol": proto, **cred}
+                break
 
 
 # --------------------------------------------------------------------------- #
@@ -502,6 +551,8 @@ def create_app(config_path: str = "config.yaml"):
         for flag, val in pairs:
             if val:
                 argv += [flag, val]
+        if body.intrusive:      # opt in to exploits/brute-force/relay
+            argv.append("--intrusive")
 
         label = f"{'playbook' if mode == 'playbook' else 'agent'} {target or objective[:24]}"
         job_id = jobs.start(argv, label=label, log_dir=_ld())
@@ -586,8 +637,13 @@ def create_app(config_path: str = "config.yaml"):
         # not from the transient username/password facts, which mutate during a
         # run and can pair values that were never a real login.
         _res = extract_results(transcript)
+        _hashes = extract_hashes(transcript)
+        # Attach an "Open session" hint to confirmed findings on a host that
+        # exposes an interactive service (WinRM/SMB/SSH), so the operator can
+        # drop into a shell straight from the finding.
+        _attach_session_hints(findings, hosts, _res["credentials"], _hashes)
         return {"findings": findings, "credentials": _res["credentials"],
-                "users": _res["users"], "hashes": extract_hashes(transcript),
+                "users": _res["users"], "hashes": _hashes,
                 "transcript": sess[-1].name if sess else None}
 
     # ---- MITRE ATT&CK coverage / Navigator layer ------------------------- #
@@ -815,7 +871,8 @@ def create_app(config_path: str = "config.yaml"):
             kw["hash"] = (body.get("secret") or "").strip()
         else:
             kw["password"] = body.get("secret") or ""
-        ctx = ToolContext(scope=sc, confirm_active_actions=False)
+        # Manual operator-issued command in the console — an explicit action.
+        ctx = ToolContext(scope=sc, confirm_active_actions=False, allow_intrusive=True)
         r = tool.run(ctx, **kw)
         out = r.raw_output or r.summary or ""
         return {"ok": r.ok, "pwned": "Pwn3d!" in out, "protocol": proto, "output": out}

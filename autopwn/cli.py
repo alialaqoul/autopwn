@@ -355,8 +355,9 @@ def cmd_sweep(args) -> int:
     exclude_args = ["--exclude", ",".join(excludes)] if excludes else []
     if excludes:
         console.print(f"[dim]Excluding denied hosts: {', '.join(excludes)}[/]")
-    argv = [cfg.tools.nmap_path, "-T4", "--open", "-sV", *ports, *exclude_args,
-            "-oG", "-", args.target]
+    from .tools import throttle
+    argv = [cfg.tools.nmap_path, *throttle.nmap_timing(getattr(cfg.tools, "scan_intensity", "polite")),
+            "--open", "-sV", *ports, *exclude_args, "-oG", "-", args.target]
     console.print(f"[cyan]Sweeping {args.target}...[/] (this can take a while)")
     res = run_command(argv, timeout=3600)
     n = record_to_store(parse_grepable(res.stdout))
@@ -990,7 +991,13 @@ def cmd_autorun(args) -> int:
             return 2
 
     registry = default_registry(cfg.tools)
-    ctx = ToolContext(scope=scope, confirm_active_actions=False)
+    # Safe by default: an assessment runs recon + safe checks only; intrusive
+    # tools (exploits/brute/relay) are blocked unless enabled in config or --intrusive.
+    ctx = ToolContext(scope=scope, confirm_active_actions=False,
+                      allow_intrusive=cfg.allow_intrusive or getattr(args, "intrusive", False))
+    if not ctx.allow_intrusive:
+        console.print("[dim]non-intrusive mode: exploit/brute-force/relay tools are "
+                      "skipped (enable with --intrusive or Settings).[/]")
     transcript: list = []
     ts = time.strftime("%Y%m%d-%H%M%S")
     tpath = Path(cfg.log_dir) / f"session-{ts}.json"
@@ -1142,7 +1149,8 @@ def cmd_playbook(args) -> int:
             _store.set_fact(k, v)
 
     registry = default_registry(cfg.tools)
-    ctx = ToolContext(scope=scope, confirm_active_actions=False)
+    ctx = ToolContext(scope=scope, confirm_active_actions=False,
+                      allow_intrusive=cfg.allow_intrusive or getattr(args, "intrusive", False))
     transcript: list = []
     ts = time.strftime("%Y%m%d-%H%M%S")
     tpath = Path(cfg.log_dir) / f"session-{ts}.json"
@@ -1249,6 +1257,8 @@ def cmd_verify(args) -> int:
 
 def cmd_agent(args) -> int:
     cfg, scope = _load(args)
+    if getattr(args, "intrusive", False):
+        cfg.allow_intrusive = True   # --intrusive overrides the safe default
     if not cfg.ai_enabled:
         console.print("[yellow]AI is disabled (ai_enabled: false). Enable it in "
                       "config.yaml or the web Settings, or run a playbook/tool.[/]")
@@ -1464,6 +1474,9 @@ def build_parser() -> argparse.ArgumentParser:
     ar.add_argument("--assessor", help="Who is running the assessment.")
     ar.add_argument("--authorized-by", dest="authorized_by", help="Who authorized it.")
     ar.add_argument("--report-format", default="html,docx,md", help="html,docx,md")
+    ar.add_argument("--intrusive", action="store_true",
+                    help="Permit intrusive tools (exploits/brute-force/relay). "
+                         "Default: non-intrusive (recon + safe checks only).")
     ar.set_defaults(func=cmd_autorun)
 
     pbc = sub.add_parser("playbook", help="Run one playbook's built-in tool sequence.")
@@ -1475,6 +1488,8 @@ def build_parser() -> argparse.ArgumentParser:
     pbc.add_argument("--password", help="Starting password.")
     pbc.add_argument("--domain", help="AD domain.")
     pbc.add_argument("--hash", dest="nt_hash", help="Starting NTLM hash.")
+    pbc.add_argument("--intrusive", action="store_true",
+                     help="Permit intrusive tools (exploits/brute-force/relay).")
     pbc.set_defaults(func=cmd_playbook)
 
     vf = sub.add_parser("verify", help="Prove playbooks against a lab (assert findings fire).")
@@ -1508,6 +1523,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Who authorized the test.")
     a.add_argument("--report-format", default="html,docx,md",
                    help="Auto-export formats on completion (html,docx,md).")
+    a.add_argument("--intrusive", action="store_true",
+                   help="Permit intrusive tools (exploits/brute-force/relay). "
+                        "Default: non-intrusive (recon + safe checks only).")
     a.set_defaults(func=cmd_agent)
 
     rp = sub.add_parser("report", help="Export a saved session transcript as a report.")

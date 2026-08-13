@@ -29,13 +29,16 @@ _DEFAULT_PORTS = (
     "17777,"
     "17778,17790,17791,27017,47001,49152,49664")
 
+# Scan SCOPE only (which ports / probes). The TIMING (-T level, rate limits,
+# retries, host-timeout) is prepended per the configured scan_intensity so the
+# scan stays gentle enough not to freeze a fragile target — see tools/throttle.py.
 PROFILES: dict[str, list[str]] = {
-    "quick":       ["-T4", "-F"],                      # fast, top 100 ports
-    "default":     ["-T4", "-sV", "-p", _DEFAULT_PORTS],
-    "full_tcp":    ["-T4", "-p-", "-sV"],              # all 65535 TCP ports
-    "service_os":  ["-T4", "-sV", "-O", "-p", _DEFAULT_PORTS],
-    "vuln":        ["-T4", "-sV", "--script", "vuln"], # NSE vuln scripts
-    "udp_top":     ["-T4", "-sU", "--top-ports", "50"],
+    "quick":       ["-F"],                             # top 100 ports
+    "default":     ["-sV", "-p", _DEFAULT_PORTS],
+    "full_tcp":    ["-p-", "-sV"],                     # all 65535 TCP ports
+    "service_os":  ["-sV", "-O", "-p", _DEFAULT_PORTS],
+    "vuln":        ["-sV", "--script", "vuln"],        # NSE vuln scripts
+    "udp_top":     ["-sU", "--top-ports", "50"],
 }
 
 
@@ -66,8 +69,9 @@ class NmapTool(Tool):
         "required": ["target"],
     }
 
-    def __init__(self, nmap_path: str = "nmap"):
+    def __init__(self, nmap_path: str = "nmap", intensity: str = "polite"):
         self.nmap_path = nmap_path
+        self.intensity = intensity
 
     def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         target = kwargs["target"]
@@ -80,8 +84,10 @@ class NmapTool(Tool):
                         "or install nmap (https://nmap.org/download).",
             )
 
+        from . import throttle
         profile = kwargs.get("profile", "default")
-        args = PROFILES.get(profile, PROFILES["default"]).copy()
+        # timing (gentleness) from config intensity + the profile's scan scope
+        args = throttle.nmap_timing(self.intensity) + PROFILES.get(profile, PROFILES["default"]).copy()
         if ports := kwargs.get("ports"):
             # sanitize: digits, commas, dashes only
             if all(c.isdigit() or c in ",-" for c in ports):

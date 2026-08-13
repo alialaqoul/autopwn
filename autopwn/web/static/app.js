@@ -582,6 +582,24 @@ function openSessionFrom(cred) {   // called from Findings "Open session"
   setTimeout(() => $("#ex_host").focus(), 100);   // pick the target host next
 }
 
+function openSessionForFinding(s) {   // called from a finding's "Open session"
+  show("console");
+  if (_execConnected) execDisconnect();
+  // ensure the finding's host is selectable, then select it
+  const hostSel = $("#ex_host");
+  if (s.host && ![...hostSel.options].some(o => o.value === s.host)) {
+    hostSel.appendChild(new Option(s.host, s.host));
+  }
+  hostSel.value = s.host || "";
+  $("#ex_proto").value = s.protocol || "smb";
+  $("#ex_auth").value = s.auth || "password";
+  $("#ex_user").value = s.username || "";
+  $("#ex_secret").value = s.secret || "";
+  $("#ex_domain").value = s.domain || "";
+  updateSecretLabel();
+  setTimeout(() => $("#ex_connect").focus(), 120);   // review creds, then Connect
+}
+
 function updateSecretLabel() {
   const hash = $("#ex_auth").value === "hash";
   $("#ex_secret_lbl").textContent = hash ? "NT hash" : "Password";
@@ -732,9 +750,11 @@ async function loadFindings() {
 
   // findings
   const fs = [...d.findings].sort((a, b) => (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9));
+  window._findings = fs;
   $("#findingCount").textContent = fs.length;
-  $("#findingsList").innerHTML = fs.length ? fs.map(f => {
+  $("#findingsList").innerHTML = fs.length ? fs.map((f, i) => {
     const sev = `<span class="badge ${SEV_CLASS[f.severity] || "text-bg-secondary"}">${esc(f.severity)}</span>`;
+    const sess = f.session ? `<button class="btn btn-sm btn-outline-danger py-0 ms-2 text-nowrap" data-open-session-finding="${i}" title="Open an interactive ${esc((f.session.protocol||'').toUpperCase())} session on ${esc(f.session.host)}">▸ Open session</button>` : "";
     const hosts = (f.hosts || []).map(h => `<span class="badge text-bg-light text-secondary border font-monospace">${esc(h)}</span>`).join(" ");
     const att = (f.attack || []).map(t => `<span class="badge text-bg-light text-secondary border" title="MITRE ATT&CK technique">${esc(t)}</span>`).join(" ");
     const ev = f.evidence_out ? `<div class="pb-section-label mt-2">Evidence${f.evidence_cmd ? " — <code>" + esc(f.evidence_cmd) + "</code>" : ""}</div>
@@ -742,7 +762,7 @@ async function loadFindings() {
     return `<div class="finding-item">
       <div class="d-flex justify-content-between align-items-start gap-2">
         <div class="fw-semibold">${esc(f.title)}</div>
-        <div class="text-nowrap">${sev}${f.cvss ? ` <span class="badge text-bg-light text-secondary border">CVSS ${esc(f.cvss)}</span>` : ""}</div>
+        <div class="text-nowrap">${sev}${f.cvss ? ` <span class="badge text-bg-light text-secondary border">CVSS ${esc(f.cvss)}</span>` : ""}${sess}</div>
       </div>
       ${hosts ? `<div class="mt-1">${hosts}</div>` : ""}
       ${att ? `<div class="mt-1">${att}</div>` : ""}
@@ -752,6 +772,8 @@ async function loadFindings() {
       ${ev}
     </div>`;
   }).join("") : `<div class="text-secondary py-3 text-center">No findings yet — run an assessment.</div>`;
+  $$("#findingsList [data-open-session-finding]").forEach(b =>
+    b.onclick = () => openSessionForFinding(window._findings[+b.dataset.openSessionFinding].session));
 
   $("#findingsSource").textContent = d.transcript
     ? `Derived from the latest run (${d.transcript}) and the results store.`

@@ -34,9 +34,11 @@ class ToolResult:
 class ToolContext:
     scope: "Scope"
     confirm_active_actions: bool = True
-    # Set False by the agent when the model is not permitted to run intrusive
-    # tools (e.g. exploit modules) without explicit human sign-off.
-    allow_active: bool = True
+    # Safe-by-default gate: when False, tools flagged `intrusive` (exploits,
+    # brute-force, relay/coercion, target writes) are BLOCKED before they run —
+    # only recon + safe read-only checks proceed. Real entry points set this from
+    # Config.allow_intrusive (default False); direct callers default True.
+    allow_intrusive: bool = True
 
 
 class Tool:
@@ -44,8 +46,12 @@ class Tool:
     name: str = "tool"
     #: one-line description shown to the model
     description: str = ""
-    #: True if the tool sends traffic that alters remote state / is intrusive
+    #: True if the tool sends traffic to the target (recon scans included).
     active: bool = False
+    #: True if the tool exploits / brute-forces / relays / coerces / writes to
+    #: the target — a stricter subset of `active`. The safe-by-default gate
+    #: (ToolContext.allow_intrusive=False) blocks these; recon/enum stays allowed.
+    intrusive: bool = False
     #: category for grouping: recon | web | ad-smb | credentials | exploit
     category: str = "misc"
     #: JSON schema for parameters (OpenAI function-calling format)
@@ -68,3 +74,13 @@ class Tool:
     @staticmethod
     def _authorize(ctx: ToolContext, target: str) -> None:
         ctx.scope.authorize(target)
+
+    def _intrusive_block(self, ctx: ToolContext):
+        """Safe-by-default gate. Returns a BLOCKED ToolResult if this tool is
+        intrusive and the context forbids intrusive actions, else None."""
+        if getattr(self, "intrusive", False) and not getattr(ctx, "allow_intrusive", True):
+            return ToolResult(ok=False, summary=(
+                f"[BLOCKED] '{self.name}' is intrusive and Autopwn is in "
+                "non-intrusive mode. Enable intrusive mode (Settings → allow "
+                "intrusive, or --intrusive) to run exploits/brute-force/relay."))
+        return None

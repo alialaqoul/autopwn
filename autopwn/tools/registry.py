@@ -54,9 +54,15 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     cfg = tools_cfg or ToolsConfig()
     reg = ToolRegistry()
 
+    # Scan gentleness (so discovery never freezes a fragile target) flows from
+    # config.tools.scan_intensity into the scanners + masscan's default rate.
+    intensity = getattr(cfg, "scan_intensity", "polite")
+    from . import throttle, catalog as _catalog
+    _catalog._MASSCAN_RATE = str(throttle.masscan_rate(intensity))
+
     # Always-available native tools.
-    reg.register(PortScanTool())
-    reg.register(NmapTool(nmap_path=cfg.nmap_path))
+    reg.register(PortScanTool(intensity=intensity))
+    reg.register(NmapTool(nmap_path=cfg.nmap_path, intensity=intensity))
     reg.register(HttpProbeTool())
     # Built-in tools (Python, parse output into variables at the Autopwn level).
     # The AD kill chain is no longer one monolithic macro — it runs as a flat,

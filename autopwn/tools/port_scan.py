@@ -82,6 +82,10 @@ class PortScanTool(Tool):
         "quick liveness/port check."
     )
     active = True  # sends connection attempts to the target
+
+    def __init__(self, intensity: str = "polite"):
+        self.intensity = intensity
+
     parameters = {
         "type": "object",
         "properties": {
@@ -99,13 +103,18 @@ class PortScanTool(Tool):
     }
 
     def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        from . import throttle
         target = kwargs["target"]
         self._authorize(ctx, target)
         ports = _coerce_ports(kwargs.get("ports")) or COMMON_PORTS
-        timeout = _coerce_timeout(kwargs.get("timeout"))
+        # Gentleness from the configured intensity: fewer concurrent sockets +
+        # a longer per-port timeout avoid flooding a fragile stack.
+        timeout = _coerce_timeout(kwargs.get("timeout"),
+                                  default=throttle.native_timeout(self.intensity))
+        workers = min(throttle.native_workers(self.intensity), max(1, len(ports)))
 
         open_ports: list[int] = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=100) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_probe, target, p, timeout): p
                        for p in ports}
             for fut in concurrent.futures.as_completed(futures):

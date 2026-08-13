@@ -29,6 +29,11 @@ _SUBDOMAIN_RE = r"^([a-z0-9][a-z0-9._\-]*\.[a-z]{2,})$"
 _CERTIGHOST_POC = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
                                 "ext", "certighost.py")
 
+# Default masscan packets/sec — set from the configured scan_intensity by
+# registry.default_registry() so masscan stays gentle by default. Gentle default
+# here in case the registry hasn't run yet.
+_MASSCAN_RATE = "200"
+
 
 def _s(v: Any) -> str:
     return str(v)
@@ -118,7 +123,7 @@ CATALOG: list[CommandSpec] = [
             "rate": {"type": "string", "description": "Packets/sec. Default 1000."}},
             ["target"]),
         build_args=lambda k: [_s(k["target"]), "-p", _s(k.get("ports", "1-1000")),
-                              "--rate", _s(k.get("rate", "1000")), "-oL", "-"],
+                              "--rate", _s(k.get("rate") or _MASSCAN_RATE), "-oL", "-"],
         install_hint="apt install masscan (needs root/CAP_NET_RAW).",
     ),
     CommandSpec(
@@ -1100,10 +1105,27 @@ _CATEGORIES = {
     "exploit": ["searchsploit"],
 }
 _NAME_TO_CATEGORY = {n: c for c, names in _CATEGORIES.items() for n in names}
+
+# Intrusive = exploits / brute-force / relay / coercion / target writes. These
+# are BLOCKED under the safe-by-default gate (Config.allow_intrusive=False);
+# recon, enumeration, auth checks, offline cracking and read-only PoCs stay on.
+_INTRUSIVE_TOOLS = {
+    # exploitation / RCE / injection
+    "certighost", "sqlmap", "commix", "dalfox",
+    # brute-force / password spray (lockout / DoS risk)
+    "hydra", "netexec_spray", "pre2k",
+    # relay / coercion / MITM
+    "mitm6", "coercer", "netexec_module",
+    # AD writes / ticket forgery / cert enrolment
+    "add_computer", "rbcd", "dacledit", "bloodyad", "pygpoabuse", "raisechild",
+    "certipy_req", "certipy_shadow", "targeted_kerberoast", "ticketer", "get_st",
+}
 for _spec in CATALOG:
     # Respect a category set explicitly on the spec; otherwise use the map.
     if _spec.category == "misc":
         _spec.category = _NAME_TO_CATEGORY.get(_spec.name, "misc")
+    if _spec.name in _INTRUSIVE_TOOLS:
+        _spec.intrusive = True
 
 # Display order for grouped output.
 CATEGORY_ORDER = ["recon", "web", "ad-smb", "credentials", "exploit", "misc"]

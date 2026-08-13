@@ -114,11 +114,24 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
 - **Offline BloodHound path analysis** — parse a `bloodhound-python` collection
   into an AD graph and compute the foothold's abusable objects and the shortest
   path to Domain Admin, entirely offline (no Neo4j / Docker / CE server).
-- **Local privilege escalation triage** — `win_privesc` runs an automated
-  post-foothold host audit (SeImpersonate → potato, SeBackup/SeRestore,
-  AlwaysInstallElevated, unquoted service paths, autologon credentials, UAC) and
-  parses each abusable vector into an ATT&CK-tagged finding — the WinPEAS pass,
-  structured.
+- **Safe by default** — assessments run **non-intrusive**: recon + safe read-only
+  checks only. Tools that exploit, brute-force, relay/coerce, or write to a target
+  are flagged `intrusive` and **blocked** unless you opt in (`--intrusive`, or
+  Settings → allow intrusive). Discovery is also **rate-limited** so it never
+  freezes a fragile target — a configurable `scan_intensity` (sneaky/polite/
+  normal/aggressive, default **polite**) caps nmap timing (`-T2` + `--max-rate`),
+  the native scanner's concurrency, and masscan's packet rate.
+- **Local privilege escalation triage** — `win_privesc` (Windows: SeImpersonate →
+  potato, SeBackup/SeRestore, AlwaysInstallElevated, unquoted service paths,
+  autologon creds, UAC) and **`linux_privesc`** (Linux, over SSH: sudo/GTFOBins
+  SUID/capabilities/docker-lxd group/kernel CVEs — PwnKit, Baron Samedit,
+  DirtyPipe, DirtyCow/writable passwd/readable keys) each parse every abusable
+  vector into an ATT&CK-tagged finding — the linPEAS/WinPEAS pass, structured.
+- **Confirmed finding → interactive session** — a confirmed finding on a host with
+  a shell service shows an **Open session** button that drops you straight into an
+  interactive **command-prompt** on that target — WinRM (evil-winrm), SMB
+  (impacket-psexec), or **SSH** (Linux) — pre-filled with the host, protocol, and a
+  recovered credential.
 - **IPv6 DNS takeover (`mitm6`)** — with **no credentials**, poison IPv6 DNS/WPAD
   to coerce NTLM off the wire and feed it to the relay (LDAP RBCD / AD CS ESC8) —
   the classic on-the-wire internal foothold, alongside Responder-style poisoning.

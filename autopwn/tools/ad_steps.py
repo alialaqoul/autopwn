@@ -101,6 +101,7 @@ class CrackHashesTool(MacroTool):
 
 class SprayCredTool(MacroTool):
     name = "spray_cracked"
+    intrusive = True   # password spray — account-lockout risk
     category = "credentials"
     description = ("Spray the current password across the enumerated user list to "
                    "find reuse. Uses the password + userlist variables (auto-filled "

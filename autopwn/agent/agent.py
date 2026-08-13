@@ -65,6 +65,8 @@ class Agent:
         ctx = ToolContext(
             scope=self.scope,
             confirm_active_actions=self.config.agent.confirm_active_actions,
+            # Safe by default: intrusive tools are blocked unless enabled in config.
+            allow_intrusive=getattr(self.config, "allow_intrusive", False),
         )
         # Credential-guessing guardrail state (per run). Small local models tend
         # to burn steps trying default passwords one-by-one; we cap that.
