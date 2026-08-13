@@ -127,9 +127,9 @@ def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list
     secret, auth, domain} to confirmed High/Critical/Medium findings whose host
     exposes a shell service and for which we hold a usable credential.
 
-    `playbook` is set ONLY when the source playbook has runnable exploit steps
-    (so detection-only findings get a plain 'Open session', not an 'Exploit'
-    button that would fail). `targets` lists the hosts that playbook actually
+    A hint is attached ONLY when the source playbook has runnable exploit steps,
+    so detection-only findings (SMB signing, WSUS-over-HTTP, null auth, …) get NO
+    session button at all. `targets` lists the hosts that playbook actually
     applies to, so the operator can pick the right machine (e.g. a DCSync
     playbook -> only Domain Controllers)."""
     cred = _best_cred(creds, hashes)
@@ -140,16 +140,16 @@ def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list
     for f in findings or []:
         if (f.get("severity") or "") in ("Low", "Info"):
             continue
+        pb = by_id.get(f.get("playbook", ""))
+        if not (pb and pbmod.runnable_sequence(pb)):
+            continue   # detection-only finding (no runnable exploit) -> no button
         for host in (f.get("hosts") or []):
             proto = _shell_proto(hosts.get(host, {}))
             if not proto:
                 continue
-            pb = by_id.get(f.get("playbook", ""))
-            runnable = bool(pb and pbmod.runnable_sequence(pb))
-            targets = _playbook_targets(pb, hosts, pbmod) if runnable else []
             f["session"] = {"host": host, "protocol": proto,
-                            "playbook": f.get("playbook", "") if runnable else "",
-                            "targets": targets, **cred}
+                            "playbook": f.get("playbook", ""),
+                            "targets": _playbook_targets(pb, hosts, pbmod), **cred}
             break
 
 
