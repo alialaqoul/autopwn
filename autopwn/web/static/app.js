@@ -604,45 +604,51 @@ function openSessionForFinding(s) {   // called from a finding's "Open session"
 // console, then open an interactive session with the freshest recovered creds.
 let _pendingExploit = null;   // { playbook, host } stashed from a finding
 
-// Clicking a finding's "Exploit & session": choose the target (constrained to the
-// hosts the playbook applies to), prefill the console, and arm the Exploit button.
+// "192.168.130.11 (L3SDC)" for a host IP, from the Target-host dropdown.
+function exHostLabel(ip) {
+  const o = [...$("#ex_host").options].find(x => x.value === ip);
+  return o ? o.textContent.trim() : ip;
+}
+
+// Clicking a finding's "Exploit & session": prefill the console, arm the Exploit
+// button, and let the operator pick the target in the Target-host dropdown (shows
+// hostnames) — important for AD CS, where the target must be the CA host.
 function exploitAndSession(s) {
   if (!s || !s.playbook) return;
   const targets = (s.targets && s.targets.length) ? s.targets : [s.host];
-  let host = targets.includes(s.host) ? s.host : targets[0];
-  if (targets.length > 1) {
-    const pick = prompt(`"${s.playbook}" applies to these hosts — choose the target:\n\n` +
-                        targets.join("\n"), host);
-    if (pick === null) return;
-    host = pick.trim();
-    if (!targets.includes(host)) { alert(`"${host}" is not one of the applicable hosts.`); return; }
-  }
+  const host = targets.includes(s.host) ? s.host : targets[0];
   show("console");
   if (_execConnected) execDisconnect();
-  openSessionForFinding({ ...s, host });                 // prefill host/proto + any known cred
-  _pendingExploit = { playbook: s.playbook, host };
+  openSessionForFinding({ ...s, host });                 // prefill Target host + protocol + any known cred
+  _pendingExploit = { playbook: s.playbook, targets };
   $("#ex_exploit").classList.remove("d-none");           // arm the Exploit button
-  const haveCred = ($("#ex_user").value || "").trim() && ($("#ex_secret").value || "").trim();
-  if (haveCred) {
-    runPendingExploit();                                 // creds already known -> go (with disclaimer)
-  } else {
-    _exTerm.writeln(`\r\n\x1b[33m[*] "${s.playbook}" is exploitable on ${host}. Enter a starting `
-      + `domain credential above, then click \x1b[1m▸ Exploit\x1b[22m.\x1b[0m`);
+  const adcs = /adcs|certighost|esc/i.test(s.playbook);
+  _exTerm.writeln(`\r\n\x1b[33m[*] "${s.playbook}" is exploitable. Applicable target(s): `
+    + `${targets.map(exHostLabel).join(", ")}.\x1b[0m`);
+  _exTerm.writeln(`\x1b[38;5;245m    Choose the target in "Target host" above`
+    + (adcs ? ` — for an AD CS attack pick the CA host (the host named in the CA, e.g. `
+            + `cyberlab-L3SDC-CA-1 → L3SDC), not another DC` : ``)
+    + `, enter a credential, then click \x1b[1m▸ Exploit\x1b[22m.\x1b[0m`);
+  if (!(($("#ex_user").value || "").trim() && ($("#ex_secret").value || "").trim()))
     setTimeout(() => $("#ex_user").focus(), 150);
-  }
 }
 
 // Run the stashed exploit playbook INTRUSIVELY (overriding non-intrusive mode)
 // using whatever credential is in the console form, then open the session.
 async function runPendingExploit() {
   if (!_pendingExploit) { alert("Click “Exploit & session” on a finding first."); return; }
-  const host = ($("#ex_host").value || "").trim() || _pendingExploit.host;
+  const host = ($("#ex_host").value || "").trim();
+  if (!host) { alert("Select a target host above."); return; }
   const user = ($("#ex_user").value || "").trim();
   const secret = $("#ex_secret").value || "";
   const auth = $("#ex_auth").value;
   const domain = ($("#ex_domain").value || "").trim();
   const pb = _pendingExploit.playbook;
   if (!user || !secret) { alert("Enter a username and password / NT hash for the exploit."); $("#ex_user").focus(); return; }
+  const tgts = _pendingExploit.targets || [];
+  if (tgts.length && !tgts.includes(host) &&
+      !confirm(`${exHostLabel(host)} is not in ${pb}'s applicable hosts `
+        + `(${tgts.map(exHostLabel).join(", ")}). Run against it anyway?`)) return;
   if (!confirm(`⚠ Run the "${pb}" exploit against ${host}?\n\n`
       + `This is an ACTIVE, INTRUSIVE attack — it will run exploit/relay/credential steps `
       + `against the target (overriding non-intrusive mode), then open a session. Only proceed `
