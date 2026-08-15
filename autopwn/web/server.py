@@ -143,6 +143,25 @@ def _best_cred(creds: list, hashes: list) -> Optional[dict]:
     return {"username": u, "secret": s, "auth": a, "domain": d}
 
 
+def _engagement_transcript(ld) -> list:
+    """The WHOLE engagement's transcript — every session-*.json concatenated, not
+    just the latest run. Recovered credentials, hashes and step-level findings from
+    earlier exploits must persist after a later run writes its own transcript;
+    otherwise a post-escalation playbook (DCSync/golden ticket) loses the Domain
+    Admin credential a prior run recovered and can no longer be launched or open a
+    session. extract_results/extract_hashes/build_findings all dedupe, so simple
+    concatenation is safe (later entries win for evidence, creds union)."""
+    out: list = []
+    for sp in sorted(Path(ld).glob("session-*.json")):
+        try:
+            t = json.loads(sp.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(t, list):
+            out.extend(t)
+    return out
+
+
 def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list,
                           books: list = None) -> None:
     """Add finding['session'] = {host, protocol, playbook, targets, username,
@@ -715,12 +734,7 @@ def create_app(config_path: str = "config.yaml"):
         hosts = store.all_hosts()
         facts = store.facts()
         sess = sorted(ld.glob("session-*.json"))
-        transcript = []
-        if sess:
-            try:
-                transcript = json.loads(sess[-1].read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                transcript = []
+        transcript = _engagement_transcript(ld)   # whole engagement, not last run
         from ..analysis import extract_results, extract_hashes
         findings = build_findings(hosts, facts, transcript, str(ld))
         # Credentials/users come ONLY from actual tool output (the transcript) —
@@ -744,13 +758,7 @@ def create_app(config_path: str = "config.yaml"):
         ATT&CK endpoints (mirrors how get_findings loads the latest run)."""
         from ..analysis import build_findings
         ld = Path(_ld())
-        sess = sorted(ld.glob("session-*.json"))
-        transcript = []
-        if sess:
-            try:
-                transcript = json.loads(sess[-1].read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                transcript = []
+        transcript = _engagement_transcript(ld)   # whole engagement, not last run
         findings = build_findings(store.all_hosts(), store.facts(), transcript, str(ld))
         return findings, transcript
 

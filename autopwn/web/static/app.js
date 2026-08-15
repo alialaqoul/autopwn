@@ -668,8 +668,9 @@ async function runPendingExploit() {
     _exTerm.writeln(`\x1b[31m[!] could not launch the exploit: ${e && e.message || e}\x1b[0m`);
     return;
   }
+  let runOut = "";
   const es = new EventSource(`/api/jobs/${job.id}/stream`);
-  es.onmessage = (ev) => { if (ev.data) _exTerm.writeln("\x1b[38;5;245m" + ev.data.replace(/\s+$/, "") + "\x1b[0m"); };
+  es.onmessage = (ev) => { if (ev.data) { runOut += ev.data + "\n"; _exTerm.writeln("\x1b[38;5;245m" + ev.data.replace(/\s+$/, "") + "\x1b[0m"); } };
   es.addEventListener("end", async () => {
     es.close();
     let hint = null;
@@ -677,23 +678,48 @@ async function runPendingExploit() {
       const d = await api("/api/findings");
       hint = (d.findings || []).map(f => f.session).find(x => x && x.host === host && x.username);
     } catch { }
-    // Only open a session if the exploit ESCALATED — i.e. recovered a credential
-    // different from the low-privileged account we launched with. Otherwise the
-    // exploit failed and connecting with the launch account just errors + closes.
-    const escalated = hint && (String(hint.username).toLowerCase() !== user.toLowerCase()
-                               || (hint.secret || "") !== secret);
-    if (escalated) {
-      _exTerm.writeln(`\x1b[32m[+] exploit recovered ${hint.username} — opening session…\x1b[0m`);
+    const failed = _exploitFailed(runOut);
+    // Open a session when the run yielded a usable privileged credential for the
+    // host AND did not fail outright. That covers BOTH escalation playbooks (a NEW
+    // cred was recovered) and post-escalation ones launched with an already-
+    // privileged credential (e.g. DCSync as an existing DA — same cred in and out,
+    // so the old "must differ from the launch account" gate wrongly suppressed it).
+    if (hint && hint.secret && !failed) {
+      const escalated = String(hint.username).toLowerCase() !== user.toLowerCase()
+                        || (hint.secret || "") !== secret;
+      _exTerm.writeln(escalated
+        ? `\x1b[32m[+] exploit recovered ${hint.username} — opening session…\x1b[0m`
+        : `\x1b[32m[+] ${hint.username} confirmed on ${host} — opening session…\x1b[0m`);
       openSessionForFinding(hint);
       execConnect();
     } else {
-      _exTerm.writeln(`\r\n\x1b[31m[!] the exploit finished but did not recover a privileged `
-        + `credential on ${host}, so no session was opened (connecting with the launch account `
-        + `would just fail). Review the output above — e.g. an AD CS 'chase' needs the CA host as `
-        + `the target, not a non-CA DC.\x1b[0m`);
+      _exTerm.writeln(`\r\n\x1b[31m[!] no session opened on ${host}.\x1b[0m`);
+      _exTerm.writeln("\x1b[31m    " + _exploitFailHint(runOut, user) + "\x1b[0m");
     }
   });
   es.onerror = () => es.close();
+}
+
+// Did the streamed exploit output show a hard auth / access / connection failure?
+function _exploitFailed(out) {
+  return /rpc_s_access_denied|access[_ ]denied|status_access_denied|0x5 -|error_ds_dra|drsr sessionerror|cannot connect to ldap|status_logon_failure|logon failure|kdc_err|authentication failed|denied by policy module|ept_s_not_registered/i
+    .test(out || "");
+}
+
+// A targeted reason (and remedy) for why no session opened, from the run output.
+function _exploitFailHint(out, user) {
+  const o = (out || "").toLowerCase();
+  if (/rpc_s_access_denied|access[_ ]denied|status_access_denied|0x5 -|error_ds_dra|drsr sessionerror/.test(o))
+    return `the launch account "${user}" was DENIED. This playbook needs a privileged credential `
+      + `— e.g. a DCSync/NTDS dump requires Domain Admin or DC replication rights. Re-run it with a `
+      + `recovered Domain Admin credential (leave the prefilled NT hash), not a low-privileged user.`;
+  if (/cannot connect to ldap|status_logon_failure|logon failure|kdc_err|authentication failed/.test(o))
+    return `authentication failed — check the credential (password vs NT hash) and that ${user}'s secret is correct.`;
+  if (/denied by policy module|ept_s_not_registered|no certificate/.test(o))
+    return `an AD CS 'chase' must target the CA host (the host named in the CA, e.g. cyberlab-L3SDC-CA-1 → L3SDC), `
+      + `not another DC, using a template a machine account can enrol in (Machine).`;
+  return `the exploit did not recover a new credential, so connecting with the launch account would just fail. `
+    + `Review the output above for the specific error.`;
 }
 
 // A bare NT hash or LM:NT pair — the shape that means "pass-the-hash", used to
