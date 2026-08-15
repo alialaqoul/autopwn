@@ -107,41 +107,35 @@ def _is_priv(username: str) -> bool:
     return any(h in u for h in _PRIV_HINTS)
 
 
-def _cred_of(c: dict) -> dict:
-    pw = (c.get("password") or "").strip()
-    return {"username": c.get("username", ""), "secret": pw,
-            "auth": "hash" if _NTHASH_RE.match(pw) else "password",
-            "domain": c.get("domain", "")}
-
-
 def _best_cred(creds: list, hashes: list) -> Optional[dict]:
-    """Best credential to seed a session, most useful first:
-      1) a privileged account (Administrator/admin/…) — plaintext before NT hash,
-      2) any plaintext password,
-      3) any NT-hash-as-password (pass-the-hash),
-      4) the captured-hashes table (privileged first).
-    Preferring a privileged account matters: after a successful exploit the
-    recovered Administrator/DC credential should win over the low-privileged
-    account used to launch it. Auth type is set from the secret shape (a 32-hex
-    NT hash -> pass-the-hash), since a hash used as a password fails auth."""
-    cs = [c for c in (creds or []) if (c.get("password") or "").strip()]
-    priv = sorted((c for c in cs if _is_priv(c.get("username"))),
-                  key=lambda c: _NTHASH_RE.match((c["password"]).strip()) is not None)
-    if priv:
-        return _cred_of(priv[0])
-    for c in cs:                                  # any plaintext
-        if not _NTHASH_RE.match(c["password"].strip()):
-            return _cred_of(c)
-    for c in cs:                                  # any NT-hash-as-password (PtH)
-        if _NTHASH_RE.match(c["password"].strip()):
-            return _cred_of(c)
-    hs = [h for h in (hashes or [])
-          if h.get("hash") and h.get("account") and "$" not in h.get("account", "")]
-    hs.sort(key=lambda h: not _is_priv(h.get("account")))
-    if hs:
-        return {"username": hs[0]["account"], "secret": hs[0]["hash"],
-                "auth": "hash", "domain": ""}
-    return None
+    """Best credential to seed a session. Ranked so a PRIVILEGED account always
+    beats a low-privileged one — even a privileged NT hash beats a low-priv
+    plaintext (after DCSync the recovered Administrator/DA hash must win over the
+    low-priv account used to launch the exploit):
+      0 privileged plaintext  1 privileged hash  2 plaintext  3 hash.
+    Machine accounts (…$) are skipped (they can't open an interactive session).
+    Auth type follows the secret shape (a 32-hex NT hash -> pass-the-hash)."""
+    cands = []   # (rank, username, secret, auth, domain)
+    for c in (creds or []):
+        u = c.get("username", "") or ""
+        pw = (c.get("password") or "").strip()
+        if not pw or u.endswith("$"):
+            continue
+        is_hash = bool(_NTHASH_RE.match(pw))
+        rank = (0 if _is_priv(u) and not is_hash else 1 if _is_priv(u)
+                else 2 if not is_hash else 3)
+        cands.append((rank, u, pw, "hash" if is_hash else "password", c.get("domain", "")))
+    for h in (hashes or []):
+        acct = h.get("account", "") or ""
+        nt = (h.get("hash") or "").strip()
+        if not nt or not acct or acct.endswith("$"):
+            continue
+        cands.append((1 if _is_priv(acct) else 3, acct, nt, "hash", ""))
+    if not cands:
+        return None
+    cands.sort(key=lambda x: x[0])
+    _, u, s, a, d = cands[0]
+    return {"username": u, "secret": s, "auth": a, "domain": d}
 
 
 def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list,
