@@ -45,7 +45,8 @@ Thumbs.db
 *.portbak*
 .port-bak.*/
 
-# Vendored external exploit PoCs — kept local / on-box, NOT redistributed via
-# this public repo. Drop the script into autopwn/tools/ext/ on your own
-# authorized engagement host; see autopwn/tools/ext/README.md.
+# Vendored external exploit PoCs — the readable plaintext is NEVER pushed (unlicensed
+# weaponized code). Only the AES-256 ext/*.py.gpg blob is committed; decrypt it with
+# autopwn/tools/ext/vendor-crypt.sh + your out-of-repo key. See ext/README.md.
 autopwn/tools/ext/*.py
+!autopwn/tools/ext/*.py.gpg

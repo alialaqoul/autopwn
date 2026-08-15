@@ -1,0 +1,5 @@
+# Vendored PoC ciphertext is binary — never munge line endings.
+*.gpg binary
+
+# Shell scripts must stay LF so they run on the Linux engagement host.
+*.sh text eol=lf

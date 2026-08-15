@@ -1,12 +1,30 @@
 # Vendored external PoC scripts
 
-Some playbooks call a third-party proof-of-concept exploit that is **deliberately
-not shipped in this repository** — these are weaponized exploits, so distribution
-is kept intentional. The integration references the script by path; **you supply
-the script** on your own authorized engagement host.
+Some playbooks call a third-party proof-of-concept exploit. The **plaintext**
+scripts (`*.py`) are git-ignored and never pushed — they are weaponized exploits,
+and the upstream code is unlicensed (all rights reserved by its authors), so the
+public repo must not redistribute readable copies. The integration references the
+script by path; **you supply the script** on your own authorized engagement host.
 
-Scripts placed here (`*.py`) are git-ignored, so they never get pushed to the
-public repo.
+## Keeping your copy version-controlled (encrypted)
+
+To back up your (possibly modified) copy in git without publishing readable
+exploit code, an **encrypted** blob `*.py.gpg` is committed instead — same idea
+as `git-crypt`, but with `gpg` (git-crypt has no Windows package). The plaintext
+`*.py` stays ignored; only the AES-256 ciphertext is tracked.
+
+```bash
+# one-time: generate a key OUTSIDE the repo and BACK IT UP (losing it = losing the PoCs)
+mkdir -p ~/.autopwn-secrets
+python -c "import secrets; open('$HOME/.autopwn-secrets/ext-vendor.key','w').write(secrets.token_urlsafe(64))"
+
+autopwn/tools/ext/vendor-crypt.sh lock     # ext/*.py     -> ext/*.py.gpg  (commit the .gpg)
+autopwn/tools/ext/vendor-crypt.sh unlock   # ext/*.py.gpg -> ext/*.py      (after a fresh clone)
+```
+
+The key file lives outside the repo (default `~/.autopwn-secrets/ext-vendor.key`,
+override with `AUTOPWN_EXT_KEY`); it is the only thing that can decrypt the blobs.
+Re-run `lock` after editing a script, then commit the updated `*.py.gpg`.
 
 ## `certighost.py` — Certighost / CVE-2026-54121 (AD CS "chase")
 
