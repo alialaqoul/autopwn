@@ -602,32 +602,59 @@ function openSessionForFinding(s) {   // called from a finding's "Open session"
 
 // Re-run the playbook that compromised the host (intrusive), stream it into the
 // console, then open an interactive session with the freshest recovered creds.
-async function exploitAndSession(s) {
-  if (!s) return;
-  if (!s.playbook) return openSessionForFinding(s);   // detection-only — prefill only
-  // Constrain the target to hosts this playbook actually applies to (e.g. a
-  // DCSync playbook -> Domain Controllers) and let the operator choose.
+let _pendingExploit = null;   // { playbook, host } stashed from a finding
+
+// Clicking a finding's "Exploit & session": choose the target (constrained to the
+// hosts the playbook applies to), prefill the console, and arm the Exploit button.
+function exploitAndSession(s) {
+  if (!s || !s.playbook) return;
   const targets = (s.targets && s.targets.length) ? s.targets : [s.host];
   let host = targets.includes(s.host) ? s.host : targets[0];
   if (targets.length > 1) {
     const pick = prompt(`"${s.playbook}" applies to these hosts — choose the target:\n\n` +
                         targets.join("\n"), host);
-    if (pick === null) return;                          // cancelled
+    if (pick === null) return;
     host = pick.trim();
     if (!targets.includes(host)) { alert(`"${host}" is not one of the applicable hosts.`); return; }
   }
-  if (!confirm(`Run the "${s.playbook}" exploit against ${host} (intrusive), then open a `
-      + `session?\n\nThis actively exploits the target.`)) return;
   show("console");
   if (_execConnected) execDisconnect();
-  openSessionForFinding({ ...s, host });                // prefill (no connect yet)
-  _exTerm.writeln(`\r\n\x1b[33m[*] Exploiting ${host} via playbook "${s.playbook}" (intrusive)…\x1b[0m`);
+  openSessionForFinding({ ...s, host });                 // prefill host/proto + any known cred
+  _pendingExploit = { playbook: s.playbook, host };
+  $("#ex_exploit").classList.remove("d-none");           // arm the Exploit button
+  const haveCred = ($("#ex_user").value || "").trim() && ($("#ex_secret").value || "").trim();
+  if (haveCred) {
+    runPendingExploit();                                 // creds already known -> go (with disclaimer)
+  } else {
+    _exTerm.writeln(`\r\n\x1b[33m[*] "${s.playbook}" is exploitable on ${host}. Enter a starting `
+      + `domain credential above, then click \x1b[1m▸ Exploit\x1b[22m.\x1b[0m`);
+    setTimeout(() => $("#ex_user").focus(), 150);
+  }
+}
+
+// Run the stashed exploit playbook INTRUSIVELY (overriding non-intrusive mode)
+// using whatever credential is in the console form, then open the session.
+async function runPendingExploit() {
+  if (!_pendingExploit) { alert("Click “Exploit & session” on a finding first."); return; }
+  const host = ($("#ex_host").value || "").trim() || _pendingExploit.host;
+  const user = ($("#ex_user").value || "").trim();
+  const secret = $("#ex_secret").value || "";
+  const auth = $("#ex_auth").value;
+  const domain = ($("#ex_domain").value || "").trim();
+  const pb = _pendingExploit.playbook;
+  if (!user || !secret) { alert("Enter a username and password / NT hash for the exploit."); $("#ex_user").focus(); return; }
+  if (!confirm(`⚠ Run the "${pb}" exploit against ${host}?\n\n`
+      + `This is an ACTIVE, INTRUSIVE attack — it will run exploit/relay/credential steps `
+      + `against the target (overriding non-intrusive mode), then open a session. Only proceed `
+      + `on systems you are authorized to test.`)) return;
+  if (_execConnected) execDisconnect();
+  _exTerm.writeln(`\r\n\x1b[33m[*] Exploiting ${host} via playbook "${pb}" (intrusive)…\x1b[0m`);
+  const creds = auth === "hash"
+    ? { username: user, hash: secret, domain }
+    : { username: user, password: secret, domain };
   let job;
   try {
-    const creds = s.auth === "hash"
-      ? { username: s.username, hash: s.secret, domain: s.domain }
-      : { username: s.username, password: s.secret, domain: s.domain };
-    job = await api(`/api/playbooks/${encodeURIComponent(s.playbook)}/run`,
+    job = await api(`/api/playbooks/${encodeURIComponent(pb)}/run`,
       { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target: host, intrusive: true, ...creds }) });
   } catch (e) {
@@ -642,8 +669,8 @@ async function exploitAndSession(s) {
     try {   // pick up any freshly recovered credential for the chosen host
       const d = await api("/api/findings");
       const hint = (d.findings || []).map(f => f.session).find(x => x && x.host === host);
-      openSessionForFinding(hint || { ...s, host });
-    } catch { openSessionForFinding({ ...s, host }); }
+      if (hint) openSessionForFinding(hint);
+    } catch { }
     execConnect();
   });
   es.onerror = () => es.close();
@@ -1628,6 +1655,7 @@ $("#ex_auth").addEventListener("change", updateSecretLabel);
 $("#ex_connect").addEventListener("click", execConnect);
 $("#ex_disconnect").addEventListener("click", execDisconnect);
 $("#ex_clear").addEventListener("click", execClear);
+$("#ex_exploit").addEventListener("click", runPendingExploit);
 $("#listenerForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const port = new FormData(e.target).get("port");

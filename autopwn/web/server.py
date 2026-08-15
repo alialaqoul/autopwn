@@ -129,12 +129,12 @@ def _attach_session_hints(findings: list, hosts: dict, creds: list, hashes: list
 
     A hint is attached ONLY when the source playbook has runnable exploit steps,
     so detection-only findings (SMB signing, WSUS-over-HTTP, null auth, …) get NO
-    session button at all. `targets` lists the hosts that playbook actually
-    applies to, so the operator can pick the right machine (e.g. a DCSync
-    playbook -> only Domain Controllers)."""
-    cred = _best_cred(creds, hashes)
-    if not cred:
-        return
+    session button at all. It is attached even when NO credential was recovered
+    (e.g. an unauthenticated scan) — the exploit is what gains access, and the
+    operator supplies any starting credential in the console before launching.
+    `targets` lists the hosts that playbook actually applies to, so the operator
+    can pick the right machine (e.g. a DCSync playbook -> only Domain Controllers)."""
+    cred = _best_cred(creds, hashes) or {}   # may be empty on an unauth scan
     from .. import playbooks as pbmod
     by_id = {p.get("id"): p for p in (books or [])}
     for f in findings or []:
