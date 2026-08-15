@@ -99,11 +99,14 @@ def _playbook_targets(pb: dict, hosts: dict, pbmod) -> list:
     return matched
 
 
-_PRIV_HINTS = ("administrator", "admin", "cyberadmin")   # privileged account names
+_PRIV_HINTS = ("administrator", "admin", "root")   # privileged account names
+_PRIV_RIDS = ("500",)   # built-in Administrator RID (survives an account rename)
 
 
-def _is_priv(username: str) -> bool:
+def _is_priv(username: str, rid: str = "") -> bool:
     u = (username or "").lower()
+    if str(rid or "").strip() in _PRIV_RIDS:
+        return True
     return any(h in u for h in _PRIV_HINTS)
 
 
@@ -130,7 +133,8 @@ def _best_cred(creds: list, hashes: list) -> Optional[dict]:
         nt = (h.get("hash") or "").strip()
         if not nt or not acct or acct.endswith("$"):
             continue
-        cands.append((1 if _is_priv(acct) else 3, acct, nt, "hash", ""))
+        priv = _is_priv(acct, h.get("rid", ""))
+        cands.append((1 if priv else 3, acct, nt, "hash", ""))
     if not cands:
         return None
     cands.sort(key=lambda x: x[0])

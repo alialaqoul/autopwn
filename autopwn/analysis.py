@@ -32,7 +32,7 @@ _TGS_HASH = re.compile(r"\$krb5tgs\$\S+")
 _TGS_ACCT = re.compile(r"\$krb5tgs\$\d+\$\*?([^$*]+?)\$")
 _ASREP_HASH = re.compile(r"\$krb5asrep\$\S+")
 _ASREP_ACCT = re.compile(r"\$krb5asrep\$\d+\$([^@$:]+)")
-_NTLM_HASH_RE = re.compile(r"^([^\s:]+):\d+:[a-f0-9]{32}:([a-f0-9]{32}):::", re.M)
+_NTLM_HASH_RE = re.compile(r"^([^\s:]+):(\d+):[a-f0-9]{32}:([a-f0-9]{32}):::", re.M)
 _KERBRUTE_RE = re.compile(r"VALID USERNAME:\s+([^@\s]+)@")
 _LDAP_USER_RE = re.compile(r"LDAP\s+\S+\s+\d+\s+\S+\s+(\S+)\s+\d{4}-\d{2}-\d{2}")
 _RID_USER_RE = re.compile(r"\\([^\\\s]+)\s+\(SidTypeUser\)", re.I)
@@ -167,13 +167,13 @@ def extract_hashes(transcript) -> list[dict]:
     seen: set = set()
     out: list[dict] = []
 
-    def add(htype: str, account: str, h: str, source: str) -> None:
+    def add(htype: str, account: str, h: str, source: str, rid: str = "") -> None:
         key = (htype, (account or "").lower(), h[-32:])
         if key in seen:
             return
         seen.add(key)
         out.append({"type": htype, "account": account or "?",
-                    "hash": h, "source": source})
+                    "hash": h, "source": source, "rid": rid})
 
     for e in transcript or []:
         text = e.get("output") or e.get("raw_output") or e.get("summary") or ""
@@ -191,11 +191,11 @@ def extract_hashes(transcript) -> list[dict]:
             am = _ASREP_ACCT.search(h)
             add("AS-REP", am.group(1) if am else "", h, src)
         for m in _NTLM_HASH_RE.finditer(text):
-            principal, nt = m.group(1), m.group(2)
+            principal, rid, nt = m.group(1), m.group(2), m.group(3)
             if principal.endswith("$") or principal.startswith("$") or nt == _EMPTY_NT:
                 continue                      # machine account / artifact / blank
             _, _, user = principal.rpartition("\\")
-            add("NTLM", user or principal, nt, src)
+            add("NTLM", user or principal, nt, src, rid)
     return out
 
 
