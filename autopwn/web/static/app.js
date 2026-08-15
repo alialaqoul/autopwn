@@ -665,13 +665,26 @@ async function runPendingExploit() {
   es.onmessage = (ev) => { if (ev.data) _exTerm.writeln("\x1b[38;5;245m" + ev.data.replace(/\s+$/, "") + "\x1b[0m"); };
   es.addEventListener("end", async () => {
     es.close();
-    _exTerm.writeln(`\x1b[32m[+] exploit complete — opening session…\x1b[0m`);
-    try {   // pick up any freshly recovered credential for the chosen host
+    let hint = null;
+    try {
       const d = await api("/api/findings");
-      const hint = (d.findings || []).map(f => f.session).find(x => x && x.host === host);
-      if (hint) openSessionForFinding(hint);
+      hint = (d.findings || []).map(f => f.session).find(x => x && x.host === host && x.username);
     } catch { }
-    execConnect();
+    // Only open a session if the exploit ESCALATED — i.e. recovered a credential
+    // different from the low-privileged account we launched with. Otherwise the
+    // exploit failed and connecting with the launch account just errors + closes.
+    const escalated = hint && (String(hint.username).toLowerCase() !== user.toLowerCase()
+                               || (hint.secret || "") !== secret);
+    if (escalated) {
+      _exTerm.writeln(`\x1b[32m[+] exploit recovered ${hint.username} — opening session…\x1b[0m`);
+      openSessionForFinding(hint);
+      execConnect();
+    } else {
+      _exTerm.writeln(`\r\n\x1b[31m[!] the exploit finished but did not recover a privileged `
+        + `credential on ${host}, so no session was opened (connecting with the launch account `
+        + `would just fail). Review the output above — e.g. an AD CS 'chase' needs the CA host as `
+        + `the target, not a non-CA DC.\x1b[0m`);
+    }
   });
   es.onerror = () => es.close();
 }

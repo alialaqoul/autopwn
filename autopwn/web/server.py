@@ -99,25 +99,48 @@ def _playbook_targets(pb: dict, hosts: dict, pbmod) -> list:
     return matched
 
 
+_PRIV_HINTS = ("administrator", "admin", "cyberadmin")   # privileged account names
+
+
+def _is_priv(username: str) -> bool:
+    u = (username or "").lower()
+    return any(h in u for h in _PRIV_HINTS)
+
+
+def _cred_of(c: dict) -> dict:
+    pw = (c.get("password") or "").strip()
+    return {"username": c.get("username", ""), "secret": pw,
+            "auth": "hash" if _NTHASH_RE.match(pw) else "password",
+            "domain": c.get("domain", "")}
+
+
 def _best_cred(creds: list, hashes: list) -> Optional[dict]:
-    """Best credential to seed a session. Order: a real plaintext password, then a
-    'password' that is actually an NT hash (pass-the-hash — e.g. an Administrator
-    hash from DCSync), then the captured-hashes list. Getting the auth type right
-    is critical: an NT hash used as a password fails with WinRMAuthorizationError."""
-    for c in creds or []:                        # 1) a genuine plaintext password
-        pw = (c.get("password") or "").strip()
-        if pw and not _NTHASH_RE.match(pw):
-            return {"username": c.get("username", ""), "secret": pw,
-                    "auth": "password", "domain": c.get("domain", "")}
-    for c in creds or []:                        # 2) an NT-hash-shaped 'password'
-        pw = (c.get("password") or "").strip()
-        if _NTHASH_RE.match(pw):
-            return {"username": c.get("username", ""), "secret": pw,
-                    "auth": "hash", "domain": c.get("domain", "")}
-    for h in hashes or []:                        # 3) the captured-hashes table
-        if h.get("hash") and h.get("account") and "$" not in h.get("account", ""):
-            return {"username": h["account"], "secret": h["hash"],
-                    "auth": "hash", "domain": ""}
+    """Best credential to seed a session, most useful first:
+      1) a privileged account (Administrator/admin/…) — plaintext before NT hash,
+      2) any plaintext password,
+      3) any NT-hash-as-password (pass-the-hash),
+      4) the captured-hashes table (privileged first).
+    Preferring a privileged account matters: after a successful exploit the
+    recovered Administrator/DC credential should win over the low-privileged
+    account used to launch it. Auth type is set from the secret shape (a 32-hex
+    NT hash -> pass-the-hash), since a hash used as a password fails auth."""
+    cs = [c for c in (creds or []) if (c.get("password") or "").strip()]
+    priv = sorted((c for c in cs if _is_priv(c.get("username"))),
+                  key=lambda c: _NTHASH_RE.match((c["password"]).strip()) is not None)
+    if priv:
+        return _cred_of(priv[0])
+    for c in cs:                                  # any plaintext
+        if not _NTHASH_RE.match(c["password"].strip()):
+            return _cred_of(c)
+    for c in cs:                                  # any NT-hash-as-password (PtH)
+        if _NTHASH_RE.match(c["password"].strip()):
+            return _cred_of(c)
+    hs = [h for h in (hashes or [])
+          if h.get("hash") and h.get("account") and "$" not in h.get("account", "")]
+    hs.sort(key=lambda h: not _is_priv(h.get("account")))
+    if hs:
+        return {"username": hs[0]["account"], "secret": hs[0]["hash"],
+                "auth": "hash", "domain": ""}
     return None
 
 
