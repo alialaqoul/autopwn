@@ -702,13 +702,18 @@ async function runPendingExploit() {
 
 // Did the streamed exploit output show a hard auth / access / connection failure?
 function _exploitFailed(out) {
-  return /rpc_s_access_denied|access[_ ]denied|status_access_denied|0x5 -|error_ds_dra|drsr sessionerror|cannot connect to ldap|status_logon_failure|logon failure|kdc_err|authentication failed|denied by policy module|ept_s_not_registered/i
+  return /rpc_s_access_denied|access[_ ]denied|status_access_denied|0x5 -|error_ds_dra|drsr sessionerror|cannot connect to ldap|status_logon_failure|logon failure|kdc_err|authentication failed|denied by policy module|ept_s_not_registered|machine account quota|quota exceeded/i
     .test(out || "");
 }
 
 // A targeted reason (and remedy) for why no session opened, from the run output.
 function _exploitFailHint(out, user) {
   const o = (out || "").toLowerCase();
+  if (/machine account quota|quota exceeded/.test(o))
+    return `"${user}"'s machine-account quota is exhausted (ms-DS-MachineAccountQuota, default 10) `
+      + `from leftover computer accounts of earlier runs. certighost now reuses one fixed account so `
+      + `this should not recur; if it persists, an admin must remove the stale GHOST*$ / ATTACK$ `
+      + `computer accounts to free the quota.`;
   if (/rpc_s_access_denied|access[_ ]denied|status_access_denied|0x5 -|error_ds_dra|drsr sessionerror/.test(o))
     return `the launch account "${user}" was DENIED. This playbook needs a privileged credential `
       + `— e.g. a DCSync/NTDS dump requires Domain Admin or DC replication rights. Re-run it with a `
