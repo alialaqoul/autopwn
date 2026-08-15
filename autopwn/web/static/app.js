@@ -641,7 +641,6 @@ async function runPendingExploit() {
   if (!host) { alert("Select a target host above."); return; }
   const user = ($("#ex_user").value || "").trim();
   const secret = $("#ex_secret").value || "";
-  const auth = $("#ex_auth").value;
   const domain = ($("#ex_domain").value || "").trim();
   const pb = _pendingExploit.playbook;
   if (!user || !secret) { alert("Enter a username and password / NT hash for the exploit."); $("#ex_user").focus(); return; }
@@ -655,7 +654,9 @@ async function runPendingExploit() {
       + `on systems you are authorized to test.`)) return;
   if (_execConnected) execDisconnect();
   _exTerm.writeln(`\r\n\x1b[33m[*] Exploiting ${host} via playbook "${pb}" (intrusive)…\x1b[0m`);
-  const creds = auth === "hash"
+  // Route by the secret's SHAPE, not the auth dropdown (which may be stale from a
+  // recovered-hash prefill): a 32-hex / LM:NT secret is an NT hash, else password.
+  const creds = _looksLikeHash(secret)
     ? { username: user, hash: secret, domain }
     : { username: user, password: secret, domain };
   let job;
@@ -695,10 +696,23 @@ async function runPendingExploit() {
   es.onerror = () => es.close();
 }
 
+// A bare NT hash or LM:NT pair — the shape that means "pass-the-hash", used to
+// keep the auth selector honest regardless of how the field was prefilled.
+function _looksLikeHash(s) {
+  return /^([a-fA-F0-9]{32}:)?[a-fA-F0-9]{32}$/.test((s || "").trim());
+}
+
 function updateSecretLabel() {
   const hash = $("#ex_auth").value === "hash";
   $("#ex_secret_lbl").textContent = hash ? "NT hash" : "Password";
   $("#ex_secret").placeholder = hash ? "aad3b435...:<nthash> or <nthash>" : "password";
+}
+
+// When the operator types a secret, snap the auth selector to match its shape so
+// a plaintext password is never sent as an NT hash (and vice-versa).
+function syncAuthToSecret() {
+  const want = _looksLikeHash($("#ex_secret").value) ? "hash" : "password";
+  if ($("#ex_auth").value !== want) { $("#ex_auth").value = want; updateSecretLabel(); }
 }
 
 function execSetStatus(text, cls) {
@@ -1675,6 +1689,7 @@ $("#aiLogClear").addEventListener("click", async () => {
 
 // interactive terminals (xterm) — connect/disconnect + start listener
 $("#ex_auth").addEventListener("change", updateSecretLabel);
+$("#ex_secret").addEventListener("input", syncAuthToSecret);
 $("#ex_connect").addEventListener("click", execConnect);
 $("#ex_disconnect").addEventListener("click", execDisconnect);
 $("#ex_clear").addEventListener("click", execClear);

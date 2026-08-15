@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+
+_HASH_RE = re.compile(r"^([a-fA-F0-9]{32}:)?[a-fA-F0-9]{32}$")   # NT or LM:NT
 
 from rich.console import Console
 from rich.panel import Panel
@@ -962,12 +965,31 @@ def _seed_creds(args) -> None:
     assumed-breach engagement, so every credentialed tool and the agent use them
     from the first step (they flow via the normal fact autofill)."""
     from . import store
+    username = (getattr(args, "username", "") or "").strip()
+    domain = (getattr(args, "domain", "") or "").strip()
+    password = getattr(args, "password", "") or ""
+    nt_hash = (getattr(args, "nt_hash", "") or "").strip()
+    # Route the secret by its SHAPE, not the flag it arrived on: a value that is
+    # not a 32-hex / LM:NT string is a password even if passed as --hash, and a
+    # hash-shaped --password is pass-the-hash. Without this a plaintext password
+    # can land in the `hash` fact and every hash-consuming tool breaks (certighost
+    # does -H <password> -> nthash="<password>" -> LDAP auth fails).
+    if nt_hash and not _HASH_RE.match(nt_hash):
+        password = password or nt_hash; nt_hash = ""
+    if password and not nt_hash and _HASH_RE.match(password.strip()):
+        nt_hash = password.strip(); password = ""
     seeded = []
-    for attr, key in (("username", "username"), ("password", "password"),
-                      ("domain", "domain"), ("nt_hash", "hash")):
-        val = getattr(args, attr, None)
+    for key, val in (("username", username), ("password", password),
+                     ("domain", domain), ("hash", nt_hash)):
         if val:
             store.set_fact(key, val); seeded.append(key)
+    # An explicit launch credential is authoritative: drop the OTHER secret so a
+    # stale/conflicting one persisted from a previous run can't override this
+    # tool's auth (e.g. an old `hash` fact flipping a password exploit to -H).
+    if password and not nt_hash:
+        store.del_fact("hash")
+    elif nt_hash and not password:
+        store.del_fact("password")
     if seeded:
         console.print("[green]Authenticated engagement:[/] seeded "
                       + ", ".join(seeded) + " — credentialed tools enabled.")

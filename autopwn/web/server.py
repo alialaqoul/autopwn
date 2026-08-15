@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 _NTHASH_RE = re.compile(r"^[a-fA-F0-9]{32}$")   # a bare NT hash (pass-the-hash)
+_HASHARG_RE = re.compile(r"^([a-fA-F0-9]{32}:)?[a-fA-F0-9]{32}$")   # NT or LM:NT
 
 from pydantic import BaseModel
 
@@ -534,10 +535,19 @@ def create_app(config_path: str = "config.yaml"):
             # intrusive steps that a default assessment would skip.
             if (body or {}).get("intrusive"):
                 argv.append("--intrusive")
-            # Seed the finding's recovered credential so the exploit re-runs with it.
-            for flag, key in (("--username", "username"), ("--password", "password"),
-                              ("--domain", "domain"), ("--hash", "hash")):
-                v = (body or {}).get(key)
+            # Seed the launch credential so the exploit re-runs with it. Route the
+            # secret by its SHAPE, not the caller's auth selector: a 32-hex (or
+            # LM:NT) secret is an NT hash (pass-the-hash), anything else a password.
+            # This stops a plaintext password entered while the auth selector is
+            # still on "hash" (e.g. prefilled from a recovered-hash session hint)
+            # from being sent as --hash <password> — which every hash-consuming
+            # tool rejects (certighost -> nthash="<password>" -> LDAP auth fails).
+            b = body or {}
+            secret = (b.get("hash") or b.get("password") or "").strip()
+            cred = [("--username", b.get("username")), ("--domain", b.get("domain"))]
+            if secret:
+                cred.append(("--hash" if _HASHARG_RE.match(secret) else "--password", secret))
+            for flag, v in cred:
                 if v:
                     argv += [flag, str(v)]
             kind = "sequence"
