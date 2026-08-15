@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 23
+_BUILTIN_VERSION = 24
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -1203,14 +1203,14 @@ DEFAULT_PLAYBOOKS = [
                          "attributes and 4768 for certificate TGTs from non-DC hosts; "
                          "revoke suspicious certs and reset krbtgt twice if abuse is "
                          "confirmed."),
-            _step(3, "DCSync krbtgt with the DC identity", "have credential",
-                  "secretsdump -k (certighost .ccache) / -hashes <DC$ hash> — DCSync",
-                  ["certighost"], ["hash", "admin", "golden", "flag"],
-                  "certighost saved a Kerberos ccache and printed the DC's NT hash; use "
-                  "either to DCSync the domain (secretsdump -just-dc) — dumping krbtgt and "
-                  "every domain secret, Domain Admin equivalent. The krbtgt hash enables a "
-                  "Golden Ticket for domain-wide persistence (reset it twice to evict).",
-                  "final"),
+            _step(3, "DCSync the domain with the DC hash", "have credential",
+                  "secretsdump", ["certighost"], ["hash", "admin", "golden", "flag"],
+                  "certighost recovered the DC machine account's NT hash (harvested into "
+                  "the run); DCSync the domain with it (secretsdump -just-dc-ntlm, "
+                  "pass-the-hash as the DC account) — dumping krbtgt, Administrator and "
+                  "every domain secret. Administrator's hash then opens an interactive "
+                  "session; krbtgt enables a Golden Ticket (reset it twice to evict).",
+                  "final", args={"just_dc": "true"}),
         ],
     },
     {

