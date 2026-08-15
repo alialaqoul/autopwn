@@ -299,6 +299,8 @@ def create_app(config_path: str = "config.yaml"):
         c = Config.load(config_path)
         return {
             "ai_enabled": c.ai_enabled,
+            "allow_intrusive": c.allow_intrusive,
+            "scan_intensity": c.tools.scan_intensity,
             "llm": {
                 "provider": c.llm.provider, "model": c.llm.model,
                 "base_url": c.llm.base_url or "", "has_api_key": bool(c.llm.api_key),
@@ -318,6 +320,10 @@ def create_app(config_path: str = "config.yaml"):
         c = Config.load(config_path)
         if "ai_enabled" in body:
             c.ai_enabled = bool(body["ai_enabled"])
+        if "allow_intrusive" in body:
+            c.allow_intrusive = bool(body["allow_intrusive"])
+        if body.get("scan_intensity") in ("sneaky", "polite", "normal", "aggressive"):
+            c.tools.scan_intensity = body["scan_intensity"]
         llm = body.get("llm", {}) or {}
         for k in ("provider", "model", "embed_model"):
             if k in llm and llm[k] != "":

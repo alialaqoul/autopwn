@@ -450,6 +450,28 @@
               </div>
             </div>
 
+            <div class="card mb-3">
+              <div class="card-header fw-semibold">Safety &amp; scanning</div>
+              <div class="card-body">
+                <div class="form-check form-switch mb-3">
+                  <input class="form-check-input" type="checkbox" role="switch" id="s_allow_intrusive">
+                  <label class="form-check-label" for="s_allow_intrusive">
+                    <b>Allow intrusive tools</b> — when off (default), assessments run recon + safe read-only checks only; exploits, brute-force, and relay/coercion tools are blocked. Turn on to permit active exploitation.
+                  </label>
+                </div>
+                <div class="row g-2 align-items-center">
+                  <div class="col-md-4"><label class="pb-lbl" for="s_scan_intensity">Scan intensity</label>
+                    <select class="form-select form-select-sm" id="s_scan_intensity">
+                      <option value="sneaky">Sneaky — slowest, stealthiest</option>
+                      <option value="polite">Polite — gentle (default)</option>
+                      <option value="normal">Normal</option>
+                      <option value="aggressive">Aggressive — fastest</option>
+                    </select></div>
+                  <div class="col-md-8"><div class="text-secondary small mt-3">Rate-limits nmap/masscan and the native scanner so discovery doesn't overwhelm fragile targets (ICS/OT, appliances, network gear). <b>Polite</b> is safe for production.</div></div>
+                </div>
+              </div>
+            </div>
+
             <div class="card mb-3" id="modelCard">
               <div class="card-header fw-semibold">Model</div>
               <div class="card-body">

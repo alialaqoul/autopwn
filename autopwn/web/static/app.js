@@ -1404,6 +1404,8 @@ async function loadSettings() {
   let s;
   try { s = await api("/api/settings"); } catch { return; }
   $("#s_ai_enabled").checked = !!s.ai_enabled;
+  $("#s_allow_intrusive").checked = !!s.allow_intrusive;
+  $("#s_scan_intensity").value = s.scan_intensity || "polite";
   const L = s.llm || {};
   $("#s_provider").value = L.provider || "";
   $("#s_model").value = L.model || "";
@@ -1567,6 +1569,8 @@ $("#settingsForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = {
     ai_enabled: $("#s_ai_enabled").checked,
+    allow_intrusive: $("#s_allow_intrusive").checked,
+    scan_intensity: $("#s_scan_intensity").value,
     llm: {
       provider: $("#s_provider").value.trim(), model: $("#s_model").value.trim(),
       embed_model: $("#s_embed_model").value.trim(), base_url: $("#s_base_url").value.trim(),
