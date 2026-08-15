@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # Bump when the built-in playbooks change so existing installs re-seed them.
-_BUILTIN_VERSION = 22
+_BUILTIN_VERSION = 23
 
 # Controlled vocabulary the step builder offers (free text is still allowed).
 # `domain`/`signing`/`host_info` are the reconnaissance variables an early
@@ -1184,6 +1184,10 @@ DEFAULT_PLAYBOOKS = [
                   "attacker host and issue a Domain Controller certificate — then PKINIT "
                   "as that DC and recover its NT hash. Prints '[*] GGWP' on success. PoC: "
                   "gist.github.com/H0j3n/a5ef2609b5f2944ac2390a191a534c26.",
+                  # Enrol via 'Machine' (Computer) — the GHOST$ machine account can enrol
+                  # in it; a DC-only template (e.g. KerberosAuthentication, which
+                  # certipy_find harvests) gets 'Denied by Policy Module'.
+                  args={"template": "Machine"},
                   severity="Critical", cvss="9.0",
                   finding_title="Certighost — AD CS Domain Controller Impersonation (CVE-2026-54121)",
                   impact="Any authenticated domain user can coerce the AD CS CA into "
