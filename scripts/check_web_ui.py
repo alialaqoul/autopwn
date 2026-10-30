@@ -151,6 +151,15 @@ def check_browser(url: str, screenshots: Path | None) -> None:
 
     page.locator('[data-view="playbooks"]').click()
     expect(page.locator("#pbResultCount")).to_contain_text("PLAYBOOKS")
+    if screenshots:
+      # README's management-audit illustration: the mgmt-server-audit playbook detail.
+      page.locator('[data-pb-edit="mgmt-server-audit"]').click()
+      expect(page.locator("#pbEditor")).to_be_visible()
+      expect(page.locator("#pbBuilder")).not_to_be_empty()
+      page.evaluate("document.documentElement.setAttribute('data-bs-theme','dark')")
+      page.screenshot(path=str(screenshots / "mgmt-audit.png"), animations="disabled")
+      page.locator('#pbEditor .modal-footer [data-bs-dismiss]').click()
+      expect(page.locator("#pbEditor")).not_to_be_visible()
     total = page.locator(".pb-card").count()
     page.locator("#pbSearch").fill("no-such-playbook-123")
     expect(page.locator("#playbooksList")).to_contain_text("No playbooks match")

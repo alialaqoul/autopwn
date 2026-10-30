@@ -94,7 +94,7 @@ rest of the network — the product catalogue in
 product is one entry. Driven by the `mgmt-server-audit` and `net-device-audit`
 playbooks:
 
-<p align="center"><img src="assets/screens/mgmt-audit.png" alt="Management-server audit playbook — fingerprint (product_recon) → default credentials → pivot, matched live against a Trellix ePO at :8443" width="90%"></p>
+<p align="center"><img src="assets/screens/mgmt-audit.png" alt="The mgmt-server-audit playbook detail — recognised products, the ports it matches on, fact-signal conditions, report severity/CVSS, launch inputs, and its fingerprint → default-credentials → pivot steps" width="90%"></p>
 
 ---
 
