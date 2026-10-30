@@ -18,17 +18,23 @@ yourself, from a **web console** or the CLI.
 ## Web console
 
 A futuristic security operations console served by uvicorn (`autopwn web`).
-Dark instrument panels, cyan telemetry, and a responsive command center bring
-host inventory, service exposure, and engagement activity into one view.
+Instrument panels, cyan telemetry, and a responsive command center bring
+host inventory, service exposure, and engagement activity into one view. It
+ships with **dark and light themes** — toggle from the top bar; your choice is
+remembered and defaults to your operating system preference.
 Everything is vendored, so it runs fully offline on an isolated lab network. Launch an
 assessment (AI **or** deterministic no-AI mode), watch findings build in real
 time, drive playbooks/tools, open interactive sessions, and export reports.
 
-<p align="center"><img src="assets/screens/redesign-dashboard-1440.png" alt="Command center — logical host topology, metrics, and engagement status with illustrative lab data" width="90%"></p>
+<p align="center">
+  <img src="assets/screens/redesign-dashboard-1440.png" alt="Command center, dark theme — logical host topology, metrics, and engagement status with illustrative lab data" width="49%">
+  <img src="assets/screens/redesign-dashboard-light-1440.png" alt="Command center, light theme — the same view with the light theme applied" width="49%">
+</p>
 
 Use **Ctrl+K / Cmd+K** to jump between all 12 views. Search playbooks, filter
-them to matching hosts, and browse tools by category. The mobile navigation
-drawer, keyboard focus states, and reduced-motion support carry across the UI.
+them to matching hosts, and browse tools by category. The light/dark theme
+toggle, mobile navigation drawer, keyboard focus states, and reduced-motion
+support carry across the UI.
 The topology is a logical session inventory; its lines do not imply observed
 host-to-host connectivity.
 
@@ -782,7 +788,8 @@ The checks exercise all 12 views at desktop and phone widths, navigation,
 filters, editors, session switching, connection recovery, and offline assets.
 They never launch assessments or security tools. Add
 `--screenshots assets/screens` to refresh the redesign review images with
-illustrative lab data.
+illustrative lab data — both the dark and light themes are captured
+(`redesign-<view>-<width>.png` and `redesign-<view>-light-<width>.png`).
 
 ## Troubleshooting
 

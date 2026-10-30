@@ -69,7 +69,7 @@ def check_browser(url: str, screenshots: Path | None) -> None:
   }
   with sync_playwright() as p:
     browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width": 1440, "height": 1000}, reduced_motion="reduce")
+    page = browser.new_page(viewport={"width": 1440, "height": 1000}, reduced_motion="reduce", color_scheme="dark")
     errors, failed_requests, external_requests = [], [], []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("response", lambda r: failed_requests.append(f"{r.status}: {r.url}") if r.status >= 400 else None)
@@ -87,7 +87,11 @@ def check_browser(url: str, screenshots: Path | None) -> None:
         assert page.locator("section[data-panel]:visible").count() == 1
         assert not page.evaluate("document.documentElement.scrollWidth > innerWidth"), f"Overflow: {view} at {width}px"
         if screenshots and view in {"dashboard", "launch", "tools"}:
+          page.evaluate("document.documentElement.setAttribute('data-bs-theme','dark')")
           page.screenshot(path=str(screenshots / f"redesign-{view}-{width}.png"), animations="disabled")
+          page.evaluate("document.documentElement.setAttribute('data-bs-theme','light')")
+          page.screenshot(path=str(screenshots / f"redesign-{view}-light-{width}.png"), animations="disabled")
+          page.evaluate("document.documentElement.setAttribute('data-bs-theme','dark')")
       print(f"PASS: all 12 populated/empty views at {width}px", flush=True)
 
     # Drawer focus containment, dismissal, and navigation.

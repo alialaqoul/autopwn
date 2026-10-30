@@ -1777,6 +1777,24 @@ $("#refreshBtn").addEventListener("click", () => {
   refreshCurrentView();
 });
 
+/* Light / dark theme. The pre-paint script in index.html sets the initial
+   theme from localStorage (or the OS preference); here we sync the button and
+   persist the operator's explicit choice. */
+const THEME_KEY = "autopwn-theme";
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-bs-theme", theme);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", theme === "light" ? "#eceff3" : "#080d14");
+  const btn = $("#themeBtn");
+  if (btn) btn.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
+}
+$("#themeBtn").addEventListener("click", () => {
+  const next = document.documentElement.getAttribute("data-bs-theme") === "light" ? "dark" : "light";
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+  applyTheme(next);
+});
+applyTheme(document.documentElement.getAttribute("data-bs-theme") || "dark");
+
 // restore the view from the URL hash (survives a browser refresh); react to back/forward
 window.addEventListener("hashchange", () => show((location.hash || "").slice(1)));
 loadSessions();
