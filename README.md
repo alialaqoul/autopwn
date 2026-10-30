@@ -306,11 +306,14 @@ starts on every reboot, and adds a desktop shortcut:
 scripts/kali_setup.sh
 ```
 
-To push later updates from your dev machine (ships the current git `HEAD`,
-reinstalls, and restarts the service; `scope.yaml` and logs are preserved):
+Later updates — pick whichever side you're on (both preserve `scope.yaml`/logs):
 
 ```bash
+# From your dev machine — ships the current git HEAD to the box:
 scripts/redeploy_kali.sh [user@host]      # defaults to kali@192.168.132.223
+
+# On the Kali box itself (if ~/autopwn is a git clone) — pulls from GitHub:
+~/autopwn/scripts/update_kali.sh
 ```
 
 > The console binds to `0.0.0.0:8000` so it's reachable on the LAN — only do
