@@ -296,6 +296,26 @@ ollama pull llama3.1:8b              # good tool-calling; ~4.9 GB
 
 Ollama then serves an OpenAI-compatible API on `http://localhost:11434`.
 
+### 4. Deploy to a dedicated Kali box (optional)
+
+To run the console as a service on a Kali host, copy the repo over and run the
+setup script once — it installs into a venv, registers a systemd service that
+starts on every reboot, and adds a desktop shortcut:
+
+```bash
+scripts/kali_setup.sh
+```
+
+To push later updates from your dev machine (ships the current git `HEAD`,
+reinstalls, and restarts the service; `scope.yaml` and logs are preserved):
+
+```bash
+scripts/redeploy_kali.sh [user@host]      # defaults to kali@192.168.132.223
+```
+
+> The console binds to `0.0.0.0:8000` so it's reachable on the LAN — only do
+> that on a trusted lab network, since the console drives the tooling.
+
 ---
 
 ## Configuration
