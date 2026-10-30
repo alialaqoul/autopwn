@@ -13,7 +13,7 @@ APP_USER="${SUDO_USER:-$USER}"
 APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # repo root (this script lives in scripts/)
 VENV_DIR="$APP_HOME/.local/share/autopwn-venv"
-HOST="127.0.0.1"
+HOST="0.0.0.0"   # bind all interfaces: console reachable from the network
 PORT="8000"
 URL="http://$HOST:$PORT"
 
