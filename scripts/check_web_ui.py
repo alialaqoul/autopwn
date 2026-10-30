@@ -92,6 +92,10 @@ def check_browser(url: str, screenshots: Path | None) -> None:
           page.evaluate("document.documentElement.setAttribute('data-bs-theme','light')")
           page.screenshot(path=str(screenshots / f"redesign-{view}-light-{width}.png"), animations="disabled")
           page.evaluate("document.documentElement.setAttribute('data-bs-theme','dark')")
+        # Other views the README embeds by plain name, captured once at desktop width.
+        if screenshots and width == 1440 and view in {"findings", "console", "playbooks", "attack", "paths", "settings"}:
+          page.evaluate("document.documentElement.setAttribute('data-bs-theme','dark')")
+          page.screenshot(path=str(screenshots / f"{view}.png"), animations="disabled")
       print(f"PASS: all 12 populated/empty views at {width}px", flush=True)
 
     # Drawer focus containment, dismissal, and navigation.
