@@ -189,3 +189,35 @@ delegation attribute plus a machine account you create.
 Autopwn captures a username/password automatically from a NetExec success line
 ("[+] domain\\user:pass"). Once captured, the credentialed tools above become
 available and are auto-filled with the domain/creds.
+
+## AD-integrated DNS enumeration
+<!-- when: port:389, fact:username -->
+`adidns_dump` (adidnsdump) reads every DNS zone record over LDAP with any domain
+credential — including records for hosts that are offline, firewalled, or never
+scanned. Use it to widen the target list: legacy servers and forgotten dev boxes
+are usually the weakest hosts. Records land in `records.csv`.
+
+
+## Quieter spraying: Kerberos pre-auth
+<!-- when: port:88, fact:has_users -->
+`kerbrute_spray` validates ONE password against the whole user list via Kerberos
+pre-auth — no SMB/NTLM logon events (4625), only Kerberos 4768/4771, which most
+environments log far less aggressively. Prefer it over `netexec_spray` when the
+user list is large; the same lockout math applies (one attempt per account).
+
+
+## GPP cpassword (manual decrypt)
+When `netexec_module gpp_password` or SYSVOL looting yields a `cpassword=` value
+but not the plaintext, decrypt locally with `gpp_decrypt <cpassword>` — the AES
+key is published, so any cpassword is as good as cleartext.
+
+
+## Writable GPO → mass execution
+<!-- when: port:389, fact:username -->
+If BloodHound/`bloodyad get writable` shows write over a GPO (GenericWrite,
+WriteDACL, WriteOwner), `pygpoabuse -gpo-id <GUID>` adds an immediate scheduled
+task that runs as SYSTEM on EVERY computer the GPO applies to. One ACL →
+fleet-wide code execution; this is the **gpo-abuse playbook**. It modifies live
+domain policy — document the change and remove the injected task after proof.
+
+

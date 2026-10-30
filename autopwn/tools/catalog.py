@@ -110,6 +110,24 @@ def _params(props: dict, required: list[str]) -> dict:
     return {"type": "object", "properties": props, "required": required}
 
 
+def _impacket_identity(kw: dict, at_target: bool = True) -> str:
+    """impacket identity positional: [domain/]user[:pass][@target]. The password
+    is omitted when pass-the-hash is used (the hash goes to -hashes instead)."""
+    ident = (f"{_s(kw['domain'])}/" if kw.get("domain") else "") + _s(kw["username"])
+    if kw.get("password") and not kw.get("hash"):
+        ident += f":{_s(kw['password'])}"
+    return ident + (f"@{_s(kw['target'])}" if at_target else "")
+
+
+def _impacket_exec_args(k: dict) -> list[str]:
+    """argv for the impacket exec tools (psexec/wmiexec/smbexec/atexec):
+    identity positional, -hashes for pass-the-hash, then the command to run."""
+    args = [_impacket_identity(k)]
+    if k.get("hash"):
+        args += ["-hashes", f":{_s(k['hash'])}"]
+    args.append(_s(k.get("command") or "whoami"))
+    return args
+
 CATALOG: list[CommandSpec] = [
 
     # ---- Network / service discovery ------------------------------------
@@ -1090,6 +1108,421 @@ CATALOG: list[CommandSpec] = [
         parameters=_params(_HASHFILE, ["hashfile"]),
         positional=["hashfile"], active=False, install_hint="apt install hashid.",
     ),
+CommandSpec(
+        name="psexec",
+        description="Run a command on a Windows host as SYSTEM via impacket-psexec: "
+                    "uploads and starts a temporary service over SMB. Intrusive — "
+                    "writes a service binary to ADMIN$ and changes the service config. "
+                    "Needs local-admin creds or pass-the-hash.",
+        binary="psexec.py", aliases=["impacket-psexec", "psexec"],
+        category="ad-smb", intrusive=True,
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "command": {"type": "string", "description": "Command to run (default whoami)."}},
+            ["target", "username"]),
+        build_args=_impacket_exec_args, timeout=600,
+        install_hint="pipx install impacket.",
+    ),
+CommandSpec(
+        name="wmiexec",
+        description="Run a command on a Windows host via WMI (impacket-wmiexec): "
+                    "semi-interactive shell, output through temporary files. "
+                    "Intrusive — remote code execution; quieter than psexec (no "
+                    "service install). Needs local-admin creds or pass-the-hash.",
+        binary="wmiexec.py", aliases=["impacket-wmiexec", "wmiexec"],
+        category="ad-smb", intrusive=True,
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "command": {"type": "string", "description": "Command to run (default whoami)."}},
+            ["target", "username"]),
+        build_args=_impacket_exec_args, timeout=600,
+        install_hint="pipx install impacket.",
+    ),
+CommandSpec(
+        name="smbexec",
+        description="Run a command on a Windows host via a native smbexec-style "
+                    "approach (impacket-smbexec): creates a service per command "
+                    "without dropping a binary. Intrusive — remote code execution. "
+                    "Needs local-admin creds or pass-the-hash.",
+        binary="smbexec.py", aliases=["impacket-smbexec", "smbexec"],
+        category="ad-smb", intrusive=True,
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "command": {"type": "string", "description": "Command to run (default whoami)."}},
+            ["target", "username"]),
+        build_args=_impacket_exec_args, timeout=600,
+        install_hint="pipx install impacket.",
+    ),
+CommandSpec(
+        name="atexec",
+        description="Run a command on a Windows host via a scheduled task "
+                    "(impacket-atexec over MS-TSCH). Intrusive — remote code "
+                    "execution; the task output is read back over SMB. Needs "
+                    "local-admin creds or pass-the-hash.",
+        binary="atexec.py", aliases=["impacket-atexec", "atexec"],
+        category="ad-smb", intrusive=True,
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN,
+            "command": {"type": "string", "description": "Command to run (default whoami)."}},
+            ["target", "username"]),
+        build_args=_impacket_exec_args, timeout=600,
+        install_hint="pipx install impacket.",
+    ),
+CommandSpec(
+        name="ldapdomaindump",
+        description="Full authenticated LDAP dump of an AD domain to files "
+                    "(users, groups, computers, trusts, policy) for offline "
+                    "analysis. Needs valid domain credentials.",
+        binary="ldapdomaindump", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "outdir": {"type": "string", "description": "Output directory. Default ldapdump."}},
+            ["target", "domain", "username", "password"]),
+        build_args=lambda k: ["-u", f"{_s(k['domain'])}\\{_s(k['username'])}",
+                              "-p", _s(k["password"]),
+                              "-o", _s(k.get("outdir", "ldapdump")),
+                              f"ldap://{_s(k['target'])}"],
+        timeout=1200, install_hint="pipx install ldapdomaindump.",
+    ),
+CommandSpec(
+        name="getadusers",
+        description="Pull AD user attributes (incl. last logon and description "
+                    "fields, which sometimes leak passwords) for all domain users "
+                    "with impacket-GetADUsers. Needs valid domain credentials.",
+        binary="GetADUsers.py", aliases=["impacket-GetADUsers"], category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH},
+            ["target", "username", "password"]),
+        build_args=lambda k: [_impacket_identity(k, at_target=False),
+                              "-dc-ip", _s(k["target"]), "-all"],
+        install_hint="pipx install impacket.",
+    ),
+CommandSpec(
+        name="donpapi",
+        description="Remotely loot DPAPI secrets from a Windows host without "
+                    "touching LSASS: browser credentials/cookies, saved WiFi keys, "
+                    "vault and credential-manager entries. Intrusive — credential "
+                    "dumping. Needs local-admin creds or pass-the-hash.",
+        binary="donpapi", aliases=["DonPAPI"], category="credentials",
+        intrusive=True,
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN}, ["target", "username"]),
+        build_args=lambda k: ["collect", "-t", _s(k["target"]), "-u", _s(k["username"])]
+                             + (["-H", _s(k["hash"])] if k.get("hash")
+                                else ["-p", _s(k.get("password", ""))])
+                             + (["-d", _s(k["domain"])] if k.get("domain") else []),
+        timeout=1200, install_hint="pipx install donpapi.",
+    ),
+CommandSpec(
+        name="ssh_audit",
+        description="Audit an SSH server's configuration: banner, key-exchange, "
+                    "ciphers, MACs, and known weaknesses (e.g. terrapin). Read-only.",
+        binary="ssh-audit", category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "SSH port. Default 22."}},
+            ["target"]),
+        build_args=lambda k: [_s(k["target"])]
+                             + ([_s(k["port"])] if k.get("port") else []),
+        timeout=300, install_hint="pipx install ssh-audit.",
+    ),
+CommandSpec(
+        name="nbtscan",
+        description="NetBIOS name enumeration of a host or CIDR range: hostnames, "
+                    "MACs, and workgroup/domain membership on 137/udp.",
+        binary="nbtscan", category="recon",
+        parameters=_params(_TARGET, ["target"]),
+        positional=["target"], fixed=["-r"],
+        install_hint="apt install nbtscan.",
+    ),
+CommandSpec(
+        name="ike_scan",
+        description="Enumerate an IPsec VPN gateway (IKE, 500/udp): supported "
+                    "transforms, vendor ID, and with mode=aggressive a crackable "
+                    "group-PSK handshake capture.",
+        binary="ike-scan", category="recon",
+        parameters=_params({**_TARGET,
+            "mode": {"type": "string", "description": "'aggressive' to request the "
+                     "aggressive-mode PSK hash; default main mode."},
+            "group": {"type": "string", "description": "Group ID for aggressive mode "
+                      "(e.g. 'vpn' — often guessable). Optional."}},
+            ["target"]),
+        build_args=lambda k: [_s(k["target"]), "-M"]
+                             + (["-A"] if _s(k.get("mode", "")).lower()
+                                in ("aggressive", "a") else [])
+                             + (["--id", _s(k["group"])] if k.get("group") else []),
+        install_hint="apt install ike-scan.",
+    ),
+CommandSpec(
+        name="keepass2john",
+        description="Convert a KeePass database (.kdbx) into a crackable hash on "
+                    "stdout — save it to a file and crack with john or hashcat. "
+                    "Local — no target contacted.",
+        binary="keepass2john", category="credentials", requires_host=False,
+        active=False,
+        parameters=_params(
+            {"kdbx": {"type": "string", "description": "Path to the .kdbx file."}},
+            ["kdbx"]),
+        positional=["kdbx"],
+        install_hint="apt install john (keepass2john ships with it).",
+    ),
+CommandSpec(
+        name="rpcinfo",
+        description="Enumerate RPC services registered with rpcbind (111): reveals "
+                    "NFS (2049), mountd, NIS and other RPC programs with their "
+                    "ports and versions — the map for NFS/NIS attacks.",
+        binary="rpcinfo", category="recon",
+        parameters=_params(_TARGET, ["target"]),
+        positional=["target"], fixed=["-p"],
+        install_hint="apt install rpcbind.",
+    ),
+CommandSpec(
+        name="netexec_rdp",
+        description="Check RDP (3389) with NetExec: whether NLA is required, and "
+                    "with creds or pass-the-hash whether the account can log on "
+                    "('Pwn3d!' = local admin over RDP).",
+        binary="nxc", category="ad-smb",
+        parameters=_params({**_TARGET, **_AUTH_H, **_DOMAIN}, ["target"]),
+        build_args=lambda k: ["rdp", _s(k["target"])] + _nxc_auth(k),
+        install_hint="pipx install netexec.",
+    ),
+CommandSpec(
+        name="redis_check",
+        description="Check a Redis server (6379) for unauthenticated access: 'info "
+                    "server' answers without a password => the dataset is readable "
+                    "and writable (rogue module / SSH-key / cron RCE paths).",
+        binary="redis-cli", category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "Redis port. Default 6379."},
+            "command": {"type": "string", "description": "Redis command. Default 'info server'."}},
+            ["target"]),
+        build_args=lambda k: ["-h", _s(k["target"]), "-p", _s(k.get("port", "6379")),
+                              "-t", "3"]
+                             + _s(k.get("command", "info server")).split(),
+        timeout=60, install_hint="apt install redis-tools.",
+    ),
+CommandSpec(
+        name="memcached_check",
+        description="Check memcached (11211) for unauthenticated access: 'stats' "
+                    "answers => exposure confirmed; 'stats items' + cachedump read "
+                    "cached session/application data.",
+        binary="nc", aliases=["netcat"], category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "memcached port. Default 11211."},
+            "command": {"type": "string", "description": "memcached command. Default 'stats'."}},
+            ["target"]),
+        build_args=lambda k: ["-w", "3", _s(k["target"]), _s(k.get("port", "11211"))],
+        stdin=lambda k: _s(k.get("command", "stats")) + "\n",
+        timeout=30, install_hint="apt install netcat-openbsd.",
+    ),
+CommandSpec(
+        name="docker_api_check",
+        description="Check for an EXPOSED Docker daemon API (2375, unauthenticated): "
+                    "GET /version answering with JSON => full host takeover is "
+                    "possible (run a privileged container with / mounted).",
+        binary="curl", category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "Docker API port. Default 2375."}},
+            ["target"]),
+        build_args=lambda k: ["-sS", "-m", "8",
+                              f"http://{_s(k['target'])}:{_s(k.get('port', '2375'))}/version"],
+        timeout=30, install_hint="apt install curl.",
+    ),
+CommandSpec(
+        name="elastic_check",
+        description="Check Elasticsearch (9200) for unauthenticated access: lists "
+                    "cluster info and every index via /_cat/indices?v — unauth "
+                    "answers => full data exposure.",
+        binary="curl", category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "Elasticsearch port. Default 9200."}},
+            ["target"]),
+        build_args=lambda k: ["-sS", "-m", "8",
+                              f"http://{_s(k['target'])}:{_s(k.get('port', '9200'))}/_cat/indices?v"],
+        timeout=30, install_hint="apt install curl.",
+    ),
+CommandSpec(
+        name="mongodb_check",
+        description="Check MongoDB (27017) for unauthenticated access via the nmap "
+                    "mongodb-info NSE script (no mongosh install needed): lists "
+                    "databases when authentication is disabled.",
+        binary="nmap", category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "MongoDB port. Default 27017."}},
+            ["target"]),
+        build_args=lambda k: ["-Pn", "-p", _s(k.get("port", "27017")),
+                              "--script", "mongodb-info", _s(k["target"])],
+        timeout=300, install_hint="apt install nmap.",
+    ),
+CommandSpec(
+        name="nuclei_cve",
+        description="Nuclei focused on KNOWN-EXPLOITED and recent critical CVEs "
+                    "(-tags cve,kev: Citrix Bleed, MOVEit, PAN-OS, Ivanti, "
+                    "ScreenConnect, regreSSHion, SharePoint ToolShell, React2Shell, "
+                    "… as templates are updated upstream). Keep templates current "
+                    "with 'nuclei -update-templates'.",
+        binary="nuclei", category="web", host_resolver=host_from_url,
+        parameters=_params({**_URL,
+            "tags": {"type": "string", "description": "Template tags. Default 'cve,kev'."},
+            "severity": {"type": "string", "description": "Default 'medium,high,critical'."}},
+            ["url"]),
+        build_args=lambda k: ["-u", _s(k["url"]),
+                              "-tags", _s(k.get("tags", "cve,kev")),
+                              "-severity", _s(k.get("severity", "medium,high,critical")),
+                              "-silent", "-nc"],
+        timeout=1800, install_hint="Install nuclei; run nuclei -update-templates.",
+    ),
+CommandSpec(
+        name="gowitness",
+        description="Screenshot a web page as report evidence (saves a PNG). "
+                    "Useful to attach proof of an exposed console/admin panel.",
+        binary="gowitness", category="web", host_resolver=host_from_url,
+        parameters=_params(_URL, ["url"]),
+        build_args=lambda k: ["single", _s(k["url"]), "--disable-logging"],
+        timeout=120, install_hint="apt install gowitness (v2 syntax: 'single').",
+    ),
+CommandSpec(
+        name="psk_crack",
+        description="Crack an IKE aggressive-mode pre-shared-key hash (captured by "
+                    "ike_scan mode=aggressive) offline with a wordlist. Success "
+                    "= the VPN group PSK. Local — no target contacted.",
+        binary="psk-crack", aliases=["psk_crack"], category="credentials",
+        requires_host=False, active=False,
+        parameters=_params({**_HASHFILE, **_WORDLIST}, ["hashfile"]),
+        build_args=lambda k: (["-d", _s(k["wordlist"])] if k.get("wordlist") else [])
+                             + [_s(k["hashfile"])],
+        install_hint="apt install ike-scan (psk-crack ships with it).",
+    ),
+CommandSpec(
+        name="smtp_openrelay",
+        description="Check an SMTP server (25/587) for open relaying via the nmap "
+                    "smtp-open-relay NSE script — an open relay enables spoofed "
+                    "internal email.",
+        binary="nmap", category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "SMTP port. Default 25."}},
+            ["target"]),
+        build_args=lambda k: ["-Pn", "-p", _s(k.get("port", "25")),
+                              "--script", "smtp-open-relay", _s(k["target"])],
+        timeout=300, install_hint="apt install nmap.",
+    ),
+CommandSpec(
+        name="rdp_vuln_check",
+        description="Enumerate RDP security (NLA requirement, encryption level) and "
+                    "check MS12-020 via nmap NSE. Read-only.",
+        binary="nmap", category="recon",
+        parameters=_params(_TARGET, ["target"]),
+        build_args=lambda k: ["-Pn", "-p", "3389",
+                              "--script", "rdp-enum-encryption,rdp-vuln-ms12-020",
+                              _s(k["target"])],
+        timeout=300, install_hint="apt install nmap.",
+    ),
+CommandSpec(
+        name="nmap_vuln",
+        description="Run nmap's 'vuln' NSE category against a host: scripted checks "
+                    "for well-known service CVEs (SMB, RDP, HTTP, TLS). Slower and "
+                    "noisier than version detection — complements nuclei_cve on "
+                    "non-web services.",
+        binary="nmap", category="recon",
+        parameters=_params({**_TARGET,
+            "ports": {"type": "string", "description": "Ports to check, e.g. '80,443,445'. "
+                      "Default: common service ports."}},
+            ["target"]),
+        build_args=lambda k: ["-Pn", "-sV",
+                              "-p", _s(k.get("ports", "21,22,25,80,110,139,143,443,445,"
+                                      "465,587,993,995,1433,3306,3389,5432,5900,6379,"
+                                      "8080,8443,9200")),
+                              "--script", "vuln", _s(k["target"])],
+        timeout=1800, install_hint="apt install nmap.",
+    ),
+CommandSpec(
+        name="ffuf_vhost",
+        description="Discover virtual hosts on a web server by fuzzing the Host "
+                    "header — FUZZ replaces the subdomain of the given domain. "
+                    "Finds dev/staging/internal sites sharing one IP.",
+        binary="ffuf", category="web", host_resolver=host_from_url,
+        parameters=_params({**_URL, **_DOMAIN, **_WORDLIST}, ["url", "domain"]),
+        build_args=lambda k: ["-u", _s(k["url"]),
+                              "-H", f"Host: FUZZ.{_s(k['domain'])}",
+                              "-w", _s(k.get("wordlist", WL_DIR)),
+                              "-mc", "200,204,301,302,307,401,403", "-s"],
+        timeout=1200, install_hint="apt install ffuf.",
+    ),
+CommandSpec(
+        name="kerbrute_spray",
+        description="Password-spray via Kerberos pre-auth (kerbrute passwordspray): "
+                    "validates ONE password against many users without SMB logon "
+                    "events — quieter than SMB spraying, still respect lockout.",
+        binary="kerbrute", category="ad-smb", intrusive=True,
+        parameters=_params({**_TARGET, **_DOMAIN,
+            "userlist": {"type": "string", "description": "Path to a usernames file."},
+            "password": {"type": "string", "description": "The ONE password to spray."}},
+            ["target", "domain", "userlist", "password"]),
+        build_args=lambda k: ["passwordspray", "--dc", _s(k["target"]), "-d",
+                              _s(k["domain"]), _s(k["userlist"]), _s(k["password"])],
+        install_hint="Install kerbrute (ropnop).",
+    ),
+CommandSpec(
+        name="adidns_dump",
+        description="Dump ALL Active-Directory-integrated DNS records over LDAP "
+                    "(any domain credential): reveals hosts that never appear in "
+                    "port scans — legacy servers, dev boxes, stale records.",
+        binary="adidnsdump", category="ad-smb",
+        parameters=_params({**_TARGET, **_DOMAIN, **_AUTH,
+            "outdir": {"type": "string", "description": "Output dir. Default 'records'."}},
+            ["target", "domain", "username", "password"]),
+        build_args=lambda k: ["-u", f"{_s(k['domain'])}\\{_s(k['username'])}",
+                              "-p", _s(k["password"]), "--dc-ip", _s(k["target"]),
+                              "-o", _s(k.get("outdir", "records")), "--print-zones"],
+        install_hint="pipx install adidnsdump.",
+    ),
+CommandSpec(
+        name="gpp_decrypt",
+        description="Decrypt a GPP cpassword string (the AES key is public) into "
+                    "the plaintext password. Local — no target contacted.",
+        binary="gpp-decrypt", aliases=["gpp_decrypt"], category="credentials",
+        requires_host=False, active=False,
+        parameters=_params({"cpassword": {"type": "string",
+            "description": "The cpassword value from a Groups.xml / SYSVOL file."}},
+            ["cpassword"]),
+        positional=["cpassword"],
+        install_hint="apt install gpp-decrypt (Kali).",
+    ),
+CommandSpec(
+        name="wsus_check",
+        description="Confirm a WSUS update service over cleartext HTTP (8530): the "
+                    "ClientWebService answering means updates are served without "
+                    "TLS — spoofable from an on-path position.",
+        binary="curl", category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "WSUS port. Default 8530."}},
+            ["target"]),
+        build_args=lambda k: ["-sS", "-m", "8", "-o", "/dev/null", "-w",
+                              "HTTP %{http_code}\n",
+                              f"http://{_s(k['target'])}:{_s(k.get('port', '8530'))}"
+                              "/ClientWebService/client.asmx"],
+        timeout=30, install_hint="apt install curl.",
+    ),
+CommandSpec(
+        name="k8s_api_check",
+        description="Check a Kubernetes API server (6443) for anonymous access: "
+                    "GET /version answering without a client cert, or /api listing "
+                    "resources anonymously, is cluster exposure. Also probe kubelet "
+                    "(10250) with port=10250.",
+        binary="curl", category="recon",
+        parameters=_params({**_TARGET,
+            "port": {"type": "string", "description": "API port. Default 6443."},
+            "path": {"type": "string", "description": "Path. Default /version."}},
+            ["target"]),
+        build_args=lambda k: ["-sS", "-k", "-m", "8",
+                              f"https://{_s(k['target'])}:{_s(k.get('port', '6443'))}"
+                              f"{_s(k.get('path', '/version'))}"],
+        timeout=30, install_hint="apt install curl.",
+    ),
+CommandSpec(
+        name="s3_bucket_check",
+        description="Check an S3-style bucket URL for anonymous LIST/READ: a 200 "
+                    "with an XML object listing = public bucket (data exposure). "
+                    "Pass the bucket URL, e.g. https://name.s3.amazonaws.com/.",
+        binary="curl", category="recon", host_resolver=host_from_url,
+        parameters=_params(_URL, ["url"]),
+        build_args=lambda k: ["-sS", "-m", "8", "-w", "\nHTTP %{http_code}\n",
+                              _s(k["url"])],
+        timeout=30, install_hint="apt install curl.",
+    ),
+
 ]
 
 # Classify each catalogued tool into a category (used for grouped listings).

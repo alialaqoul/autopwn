@@ -76,6 +76,9 @@ def default_registry(tools_cfg: ToolsConfig | None = None,
     reg.register(SprayCredTool())
     from .relay import NtlmRelayTool
     reg.register(NtlmRelayTool())
+    from .poison import ResponderTool, Mitm6Tool
+    reg.register(ResponderTool())
+    reg.register(Mitm6Tool())
     from .privesc import WinPrivescTool
     reg.register(WinPrivescTool())
     from .loot import WinCredsTool

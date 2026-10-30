@@ -17,7 +17,7 @@ async function api(path, opts) {
 }
 
 /* ---- view switching --------------------------------------------------- */
-const TITLES = { dashboard: "Dashboard", launch: "Launch Assessment",
+const TITLES = { dashboard: "Command center", launch: "Launch Assessment",
   findings: "Findings", attack: "ATT&CK", paths: "Attack Paths", console: "Console",
   playbooks: "Playbooks", tools: "Tools", jobs: "Jobs", reports: "Reports",
   scope: "Scope & Vars", settings: "Settings" };
@@ -27,6 +27,7 @@ function show(view) {
   $$("#mainNav .ap-nav-link").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   $$("section[data-panel]").forEach(s => (s.hidden = s.dataset.panel !== view));
   $("#viewTitle").textContent = TITLES[view] || view;
+  AutopwnUI.setView(view);
   // remember the view in the URL so a refresh stays put (no history spam)
   try { history.replaceState(null, "", "#" + view); } catch { }
   const loaders = { dashboard: loadDashboard, findings: loadFindings, attack: loadAttack,
@@ -34,31 +35,39 @@ function show(view) {
     jobs: loadJobs, reports: loadReports, scope: loadScope, settings: loadSettings };
   loaders[view]?.();
 }
-$$("#mainNav .ap-nav-link").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
+$$("#mainNav .ap-nav-link").forEach(b => b.addEventListener("click", () => {
+  show(b.dataset.view);
+  $("#pageHeading").focus({ preventScroll: true });
+  window.scrollTo(0, 0);
+}));
 
 /* ---- dashboard -------------------------------------------------------- */
+let _dashboardRequest = 0;
+let _dashboardLoading = false;
 async function loadDashboard() {
+  if (_dashboardLoading) return;
+  _dashboardLoading = true;
+  const request = ++_dashboardRequest;
   let d;
-  try { d = await api("/api/summary"); } catch (e) { return; }
+  try { d = await api("/api/summary", { signal: AbortSignal.timeout(10000) }); }
+  catch (e) {
+    if (request === _dashboardRequest) { _dashboardLoading = false; AutopwnUI.setConnection(false); }
+    return;
+  }
+  if (request !== _dashboardRequest) return;
+  AutopwnUI.setConnection(true);
   if (typeof d.ai_enabled === "boolean") { _aiEnabled = d.ai_enabled; reflectAi(); }
   const rb = $("#runningBadge"), n = d.counts.running_jobs;
   rb.textContent = `${n} running`;
   rb.classList.toggle("d-none", n === 0);
 
-  const cards = [
-    ["Hosts", d.counts.hosts], ["Open ports", d.counts.open_ports],
-    ["Services", d.counts.services], ["Running jobs", d.counts.running_jobs],
-  ];
-  $("#statCards").innerHTML = cards.map(([label, val]) => `
-    <div class="col-6 col-xl-3"><div class="card stat-card text-center py-3">
-      <div class="display-6">${val}</div><div class="stat-label">${label}</div>
-    </div></div>`).join("");
+  AutopwnUI.renderSummary(d);
 
   $("#hostsTable tbody").innerHTML = d.hosts.length ? d.hosts.map(h => `
-    <tr><td class="small text-secondary">${esc(h.host)}</td><td class="small text-secondary">${esc(h.hostname)}</td>
+    <tr><td class="host-address"><span class="host-marker" aria-hidden="true"></span>${esc(h.host)}</td><td class="small text-secondary">${esc(h.hostname) || "—"}</td>
     <td>${h.open_ports.map(p => `<span class="badge text-bg-secondary badge-port">${p}</span>`).join(" ")}</td>
     <td class="small text-secondary">${esc(h.services.join(", "))}</td></tr>`).join("")
-    : `<tr><td colspan="4" class="text-center text-secondary py-3">No hosts yet — launch an assessment.</td></tr>`;
+    : `<tr><td colspan="4"><div class="empty-state"><strong>No assets discovered yet</strong>Your host inventory will populate after discovery.<br><button class="panel-link" data-go="launch">Launch your first assessment ↗</button></div></td></tr>`;
 
   $("#servicesTable tbody").innerHTML = d.services.length ? d.services.map(s => {
     const uniqHosts = [...new Set(s.hosts.map(h => h.host))];
@@ -66,7 +75,12 @@ async function loadDashboard() {
     <td>${s.ports.map(p => `<span class="badge text-bg-secondary badge-port">${p}</span>`).join(" ")}</td>
     <td class="small text-secondary">${uniqHosts.map(esc).join(", ")}</td></tr>`;
   }).join("")
-    : `<tr><td colspan="3" class="text-center text-secondary py-3">No services discovered.</td></tr>`;
+    : `<tr><td colspan="3"><div class="empty-state"><strong>No services identified</strong>Discovered services and ports will appear here.</div></td></tr>`;
+  try {
+    const jobs = await api("/api/jobs", { signal: AbortSignal.timeout(10000) });
+    if (request === _dashboardRequest) AutopwnUI.renderActivity(jobs);
+  } catch { if (request === _dashboardRequest) AutopwnUI.renderActivity(null); }
+  finally { if (request === _dashboardRequest) _dashboardLoading = false; }
 }
 
 /* ---- playbooks -------------------------------------------------------- */
@@ -85,9 +99,17 @@ function pbMatchPanel(ev) {
   return `<div class="pb-match">${rows}</div>`;
 }
 
+let _playbooks = [];
 async function loadPlaybooks() {
-  let pbs;
-  try { pbs = await api("/api/playbooks"); } catch { return; }
+  try { _playbooks = await api("/api/playbooks"); } catch { return; }
+  renderPlaybooks();
+}
+function renderPlaybooks() {
+  const query = $("#pbSearch").value.trim().toLowerCase();
+  const matchedOnly = $("#pbMatchOnly").checked;
+  const pbs = _playbooks.filter(pb => (!matchedOnly || pb.evaluation?.matched) &&
+    (!query || [pb.name, pb.id, pb.summary, ...(pb.steps || []).map(s => `${s.tool} ${s.title}`)].join(" ").toLowerCase().includes(query)));
+  $("#pbResultCount").textContent = `${pbs.length} / ${_playbooks.length} PLAYBOOKS`;
   $("#playbooksList").innerHTML = pbs.map(pb => {
     const ev = pb.evaluation || {};
     const steps = pb.steps.map(st => {
@@ -154,6 +176,7 @@ async function loadPlaybooks() {
   $$("#playbooksList [data-pb-edit]").forEach(b => b.onclick = () => pbEdit(b.dataset.pbEdit));
   $$("#playbooksList [data-pb-del]").forEach(b => b.onclick = () => pbDelete(b.dataset.pbDel));
   $$("#playbooksList [data-pb-run]").forEach(b => b.onclick = () => pbRun(b.dataset.pbRun));
+  if (!pbs.length) $("#playbooksList").innerHTML = '<div class="card empty-state">No playbooks match these filters.</div>';
 }
 
 /* ---- structured playbook builder ------------------------------------- */
@@ -485,7 +508,7 @@ let _lstES = null, _lstActive = null;
 const _termOpts = () => ({
   fontFamily: 'ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace',
   fontSize: 12.5, lineHeight: 1.15, cursorBlink: true, scrollback: 5000,
-  theme: { background: "#0b1220", foreground: "#cbd5e1", cursor: "#4ade80",
+  theme: { background: "#080f19", foreground: "#bdd9e5", cursor: "#58dfed",
            selectionBackground: "rgba(51,65,85,.6)" },
 });
 
@@ -1084,14 +1107,20 @@ const CAT_CLASS = { recon: "text-bg-info", web: "text-bg-primary",
 
 async function loadTools() {
   try { _allTools = await api("/api/tools"); } catch { return; }
+  const category = $("#toolCategory").value;
+  $("#toolCategory").innerHTML = '<option value="">All categories</option>' +
+    [...new Set(_allTools.map(t => t.category).filter(Boolean))].sort().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  $("#toolCategory").value = [...$("#toolCategory").options].some(o => o.value === category) ? category : "";
   renderTools();
 }
 
 function renderTools() {
   const q = ($("#toolSearch").value || "").toLowerCase();
+  const category = $("#toolCategory").value;
   const tools = _allTools.filter(t =>
-    !q || t.name.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q) ||
-    (t.category || "").toLowerCase().includes(q));
+    (!category || t.category === category) && (!q || t.name.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q) ||
+    (t.category || "").toLowerCase().includes(q)));
+  $("#toolResultCount").textContent = `${tools.length} / ${_allTools.length} TOOLS`;
 
   const rows = tools.map(t => {
     const cat = `<span class="badge ${CAT_CLASS[t.category] || "text-bg-secondary"}">${esc(t.category)}</span>`;
@@ -1673,6 +1702,7 @@ async function loadSessions() {
 async function selectSession(name) {
   try { await api("/api/sessions/select", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); }
   catch (e) { return alert(e.message); }
+  ++_dashboardRequest; _dashboardLoading = false;
   _allTools = []; _pbToolNames = [];   // caches are per-session
   refreshCurrentView();
 }
@@ -1683,19 +1713,23 @@ async function newSession() {
   try { await api("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }) }); }
   catch (e) { return alert(e.message); }
   await loadSessions();
+  ++_dashboardRequest; _dashboardLoading = false;
   _allTools = []; _pbToolNames = [];
   refreshCurrentView();
 }
 
 function refreshCurrentView() {
-  loadDashboard();
-  show($("#mainNav .ap-nav-link.active").dataset.view);
+  const view = $("#mainNav .ap-nav-link.active").dataset.view;
+  if (view !== "dashboard") loadDashboard();
+  show(view);
 }
 
 /* ---- boot ------------------------------------------------------------- */
 _pbModal = new bootstrap.Modal($("#pbEditor"));
 bindBuilder();
 $("#pbNewBtn").addEventListener("click", pbNew);
+$("#pbSearch").addEventListener("input", renderPlaybooks);
+$("#pbMatchOnly").addEventListener("change", renderPlaybooks);
 $("#pbResetBtn").addEventListener("click", pbReset);
 $("#pbEditorSave").addEventListener("click", pbSave);
 $("#pbApplyJson").addEventListener("click", applyJsonToDraft);
@@ -1705,6 +1739,7 @@ _toolViewModal = new bootstrap.Modal($("#toolViewer"));
 $("#toolNewBtn").addEventListener("click", toolNew);
 $("#toolEditorSave").addEventListener("click", toolSave);
 $("#toolSearch").addEventListener("input", renderTools);
+$("#toolCategory").addEventListener("change", renderTools);
 ["t_binary", "t_subcommand", "t_positional", "t_flags", "t_fixed"].forEach(id =>
   $("#" + id).addEventListener("input", _toolPreview));
 
@@ -1739,13 +1774,14 @@ updateMode();
 
 $("#refreshBtn").addEventListener("click", () => {
   loadSessions();
-  show($("#mainNav .ap-nav-link.active").dataset.view);
+  refreshCurrentView();
 });
 
 // restore the view from the URL hash (survives a browser refresh); react to back/forward
 window.addEventListener("hashchange", () => show((location.hash || "").slice(1)));
 loadSessions();
 show((location.hash || "").slice(1) || "dashboard");
+if ($("#mainNav .ap-nav-link.active").dataset.view !== "dashboard") loadDashboard();
 
 /* Seamless auto-refresh: silently reload the active view's data in place. Skips
    form-heavy views (Launch/Settings) and pauses while a modal is open, so it
@@ -1754,8 +1790,9 @@ const _AUTO = { dashboard: loadDashboard, findings: loadFindings, attack: loadAt
   paths: loadPaths, playbooks: loadPlaybooks, tools: loadTools, jobs: loadJobs,
   reports: loadReports, scope: loadScope };
 setInterval(() => {
-  if (document.hidden || document.querySelector(".modal.show")) return;
+  if (document.hidden || document.querySelector(".modal.show") || $("#commandPalette").open) return;
   const v = $("#mainNav .ap-nav-link.active")?.dataset.view;
   if (v && _AUTO[v]) _AUTO[v]();
+  if (v !== "dashboard") loadDashboard();
 }, 6000);
 setInterval(loadSessions, 15000);   // keep session host-counts fresh

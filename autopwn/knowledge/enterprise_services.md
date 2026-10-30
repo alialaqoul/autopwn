@@ -41,3 +41,20 @@ Agent listens on 8081 on managed hosts.
   version against `searchsploit` / advisories for known auth-bypass / SQLi CVEs.
 - The Agent Handler (8444) and Agent (8081) speak a proprietary protocol, not
   plain HTTP — web tools will fail against them; treat them as ePO components.
+
+## Microsoft Exchange (OWA / EWS / Autodiscover)
+Outlook Web Access on 443 is a high-value perimeter target — see the
+**exchange-attack playbook**.
+- Identify: `/owa/` redirect, `X-OWA-Version` headers, `/Autodiscover/` and
+  `/ews/` endpoints; the build number pins the exact patch level.
+- Known exploited classes to check with `nuclei_cve`: ProxyLogon
+  (CVE-2021-26855 chain), ProxyShell (CVE-2021-34473/34523/31207), ProxyNotShell
+  (CVE-2022-41040/41082), OWASSRF (CVE-2022-41080). Unpatched instances are
+  routinely webshelled — treat confirmation as incident response, not just a
+  finding.
+- OWA is also a password-spray surface (`https-post-form` on
+  `/owa/auth.owa`, form string `username=^USER^&password=^PASS^`): a mailbox
+  yields internal email access and often VPN password reuse. Keep attempts tiny;
+  Exchange logs and lockouts apply.
+
+

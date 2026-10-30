@@ -17,12 +17,22 @@ yourself, from a **web console** or the CLI.
 
 ## Web console
 
-A Bootstrap single-page console served by uvicorn (`autopwn web`). Everything is
-vendored, so it runs fully offline on an isolated lab network. Launch an
+A futuristic security operations console served by uvicorn (`autopwn web`).
+Dark instrument panels, cyan telemetry, and a responsive command center bring
+host inventory, service exposure, and engagement activity into one view.
+Everything is vendored, so it runs fully offline on an isolated lab network. Launch an
 assessment (AI **or** deterministic no-AI mode), watch findings build in real
 time, drive playbooks/tools, open interactive sessions, and export reports.
 
-<p align="center"><img src="assets/screens/dashboard.png" alt="Dashboard — host inventory and service matrix" width="90%"></p>
+<p align="center"><img src="assets/screens/redesign-dashboard-1440.png" alt="Command center — logical host topology, metrics, and engagement status with illustrative lab data" width="90%"></p>
+
+Use **Ctrl+K / Cmd+K** to jump between all 12 views. Search playbooks, filter
+them to matching hosts, and browse tools by category. The mobile navigation
+drawer, keyboard focus states, and reduced-motion support carry across the UI.
+The topology is a logical session inventory; its lines do not imply observed
+host-to-host connectivity.
+
+<p align="center"><img src="assets/screens/redesign-launch-1440.png" alt="Assessment setup — execution mode, target specification, and operation sequence" width="90%"></p>
 
 **Findings** — recovered credentials (cracked plaintext *or* NT hash for
 pass-the-hash), **captured hashes** (Kerberoast / AS-REP / NTLM), engagement
@@ -46,7 +56,7 @@ finding (with CVSS/impact/recommendation) when it actually fires:
 <p align="center"><img src="assets/screens/playbooks.png" alt="Playbooks — editable attack paths and findings" width="90%"></p>
 
 <p align="center">
-  <img src="assets/screens/gui-tools.png" alt="Tools library — every action and how it runs" width="49%">
+  <img src="assets/screens/redesign-tools-1440.png" alt="Tool arsenal — searchable capabilities and category filters" width="49%">
   <img src="assets/screens/settings.png" alt="Settings — AI model config, connection test, and AI call log" width="49%">
 </p>
 
@@ -95,7 +105,7 @@ provided "as is", without warranty (see [LICENSE](LICENSE)).
 
 ## Features
 
-- **Web console** (`autopwn web`) — an offline Bootstrap SPA over the engine:
+- **Web console** (`autopwn web`) — an offline operations dashboard over the engine:
   dashboard, launch, findings, an interactive **C2 Console**, editable
   playbooks/tools, jobs with live logs, reports, scope/vars, and settings.
 - **AI is optional — your choice** — a master switch (and a per-launch **mode**
@@ -756,6 +766,23 @@ loot) between steps — the thing scalar variables can't do. The loop repeats un
 it produces a grounded findings report.
 
 ---
+
+## UI development checks
+
+The console uses static HTML, CSS, and vanilla JavaScript; no frontend build is
+required. Run its browser regression checks against isolated temporary sessions:
+
+```bash
+pip install -e '.[web]' playwright
+python -m playwright install chromium
+python scripts/check_web_ui.py
+```
+
+The checks exercise all 12 views at desktop and phone widths, navigation,
+filters, editors, session switching, connection recovery, and offline assets.
+They never launch assessments or security tools. Add
+`--screenshots assets/screens` to refresh the redesign review images with
+illustrative lab data.
 
 ## Troubleshooting
 

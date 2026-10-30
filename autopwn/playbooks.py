@@ -363,6 +363,41 @@ DEFAULT_PLAYBOOKS = [
         ],
     },
     {
+        "id": "llmnr-poison",
+        "name": "LLMNR/NBT-NS poisoning → crack → spray",
+        "summary": "Poison LLMNR/NBT-NS name resolution on a Windows subnet to "
+                   "capture NetNTLMv2 hashes, crack them offline, and spray the "
+                   "recovered passwords across the domain.",
+        "match": {"any_ports": [445], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Poison LLMNR/NBT-NS and capture hashes", "start",
+                  "responder_capture", [], ["hash"],
+                  "Autopwn's built-in responder_capture tool starts Responder on "
+                  "the local interface for a bounded window and captures NetNTLMv2 "
+                  "hashes from broadcast name-resolution traffic. Run as root, early "
+                  "in the engagement, on a subnet with Windows hosts.",
+                  args={"duration": 120},
+                  severity="High", cvss="8.1",
+                  finding_title="LLMNR/NBT-NS Poisoning — NetNTLMv2 Hashes Captured",
+                  impact="LLMNR/NBT-NS broadcast name resolution is enabled, so an "
+                         "attacker on the subnet can poison lookups and capture "
+                         "NetNTLMv2 password hashes, which crack offline into domain "
+                         "credentials.",
+                  recommendation="Disable LLMNR and NBT-NS via GPO, require SMB "
+                         "signing, enforce strong passwords (NetNTLMv2 resists "
+                         "cracking), and segment/monitor broadcast traffic."),
+            _step(2, "Crack the captured hashes", "have hashes",
+                  "crack_hashes", ["hash"], ["credential"],
+                  "Crack the captured NetNTLMv2 hashes offline with john + rockyou."),
+            _step(3, "Spray cracked passwords (max 1–2 tries)", "have credential",
+                  "spray_cracked", ["credential", "userlist"], ["credential", "admin"],
+                  "Spray each cracked password across the domain user list to find "
+                  "reuse. Never spray more than 1–2 passwords per account — lockout "
+                  "risk.", "final"),
+        ],
+    },
+    {
         "id": "web-app",
         "name": "Web application assessment",
         "summary": "Fingerprint, enumerate content, test the common classes; pivot "
@@ -1330,6 +1365,805 @@ DEFAULT_PLAYBOOKS = [
              "and Strict-Transport-Security.",
              any_ports=[80, 8080, 8000], evidence_tools=["http_probe"],
              detector="missing_http_headers"),
+{
+        "id": "web-injection",
+        "name": "Web injection testing (SQLi / XSS / command injection)",
+        "summary": "Discover hidden parameters, then run automated SQL-injection, "
+                   "XSS and OS-command-injection testing; crack any dumped password "
+                   "hashes and pivot recovered credentials into the network.",
+        "match": {"any_ports": [80, 443, 8080, 8443, 8000], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Discover hidden request parameters", "start", "arjun",
+                  [], ["api_endpoints"],
+                  "arjun finds hidden GET/POST parameters on the URL — the inputs the "
+                  "injection steps below actually test."),
+            _step(2, "SQL injection (sqlmap)", "start", "sqlmap",
+                  ["api_endpoints"], ["credential"],
+                  "sqlmap --batch on the parameterised URL (add --data for POST): "
+                  "confirms injectable parameters and can enumerate/dump the database "
+                  "(--dbs, --dump) — dumped user hashes feed the cracking step.",
+                  severity="High", cvss="8.6",
+                  finding_title="SQL Injection in the Web Application",
+                  impact="A parameter is SQL-injectable: an attacker can read or modify "
+                         "the database (user credentials, business data) and, on stacked-"
+                         "query configurations, execute OS commands (xp_cmdshell/--os-shell).",
+                  recommendation="Use parameterised queries/prepared statements everywhere, "
+                         "apply least-privilege DB accounts, disable xp_cmdshell, and add a "
+                         "WAF rule set as defence in depth."),
+            _step(3, "Cross-site scripting (dalfox)", "start", "dalfox",
+                  ["api_endpoints"], ["exposure"],
+                  "dalfox verifies reflected/DOM XSS on the discovered parameters with "
+                  "a working proof-of-concept payload.",
+                  severity="Medium", cvss="6.1",
+                  finding_title="Reflected Cross-Site Scripting (XSS)",
+                  impact="Reflected XSS lets an attacker run JavaScript in a victim's "
+                         "session — session theft, credential harvesting and UI redress "
+                         "against users of the application.",
+                  recommendation="Context-encode all output, validate input, deploy a "
+                         "Content-Security-Policy, and set HttpOnly/SameSite on cookies."),
+            _step(4, "OS command injection (commix)", "start", "commix",
+                  ["api_endpoints"], ["admin"],
+                  "commix tests the parameters for OS command injection and can "
+                  "establish a shell — the direct RCE class on a web app.",
+                  severity="Critical", cvss="9.8",
+                  finding_title="OS Command Injection in the Web Application",
+                  impact="A parameter executes arbitrary operating-system commands with "
+                         "the web service's privileges — full server compromise and a "
+                         "foothold for lateral movement.",
+                  recommendation="Never pass user input to shell commands; use safe APIs, "
+                         "strict allow-list validation, and run the service as a low-"
+                         "privileged, sandboxed account."),
+            _step(5, "Crack any dumped password hashes", "have hashes", "crack_hashes",
+                  ["hash"], ["credential"],
+                  "Crack hashes recovered from the database dump offline, then pivot "
+                  "them into netexec_spray across the estate.", "final"),
+        ],
+    },
+{
+        "id": "wordpress-attack",
+        "name": "WordPress site compromise",
+        "summary": "Fingerprint the WordPress install, enumerate vulnerable "
+                   "plugins/themes and users, check known CVEs, and test the login "
+                   "surface — the most common CMS attack path.",
+        "match": {"any_ports": [80, 443, 8080, 8443], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Enumerate plugins / themes / users", "start", "wpscan",
+                  [], ["userlist", "cve_hit"],
+                  "wpscan -e vp,u: vulnerable plugins (with CVE references) and the "
+                  "user list (feeds the login test).",
+                  args={"enumerate": "vp,u"},
+                  severity="High", cvss="7.5",
+                  finding_title="Vulnerable WordPress Plugins / Themes",
+                  impact="A vulnerable plugin or theme is remotely exploitable "
+                         "(unauthenticated RCE / SQLi / file upload in known CVEs), "
+                         "giving a foothold on the web server.",
+                  recommendation="Update WordPress core, plugins and themes; remove "
+                         "unused plugins; put the site behind a WAF; and block user "
+                         "enumeration (author archives / REST API)."),
+            _step(2, "Known exploited CVEs against the site", "start", "nuclei_cve",
+                  [], ["cve_hit"],
+                  "nuclei_cve (tags cve,kev) matches the site against current "
+                  "known-exploited WordPress/plugin CVE templates."),
+            _step(3, "Test the login surface", "have userlist",
+                  "hydra (service http-post-form against /wp-login.php — set the form "
+                  "string 'log=^USER^&pwd=^PASS^')",
+                  ["userlist"], ["credential"],
+                  "Brute-force wp-login with the enumerated users and a small common "
+                  "password list. Careful: online brute force is noisy and may lock "
+                  "accounts — confirm the policy first.", "final"),
+        ],
+    },
+{
+        "id": "cve-web-check",
+        "name": "Known-exploited web CVE sweep (KEV + recent criticals)",
+        "summary": "Match every discovered web URL against Nuclei's CVE/KEV template "
+                   "set — the actively exploited edge-device and application flaws "
+                   "(Citrix Bleed, MOVEit, PAN-OS, Ivanti, ScreenConnect, ToolShell, "
+                   "React2Shell, …) — then capture screenshot evidence and TLS issues.",
+        "match": {"any_ports": [80, 443, 8080, 8443, 8000], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "CVE / KEV template sweep", "start", "nuclei_cve",
+                  [], ["cve_hit"],
+                  "nuclei_cve -tags cve,kev: templates track the CISA Known Exploited "
+                  "Vulnerabilities catalogue and recent critical disclosures; run "
+                  "'nuclei -update-templates' regularly so the set stays current.",
+                  severity="Critical", cvss="9.8",
+                  finding_title="Known Exploited Vulnerability (CVE / CISA KEV) Present",
+                  impact="The service matches a template for a vulnerability that is "
+                         "actively exploited in the wild (CISA KEV) — internet-facing "
+                         "instances are typically compromised within days of disclosure.",
+                  recommendation="Patch or mitigate per the vendor advisory immediately, "
+                         "hunt for signs of prior compromise (webshells, unknown accounts, "
+                         "log gaps), and restrict management interfaces to trusted networks."),
+            _step(2, "Screenshot the exposed interface", "start", "gowitness",
+                  [], ["screenshot"],
+                  "gowitness captures a PNG of the page for the report — evidence of "
+                  "what is actually exposed (login portal, admin console, debug page)."),
+            _step(3, "TLS configuration issues", "start", "testssl",
+                  [], ["exposure"],
+                  "testssl flags weak ciphers/protocols, expired certificates and TLS "
+                  "vulnerabilities on HTTPS services.", "final",
+                  severity="Low", cvss="3.7",
+                  finding_title="Weak TLS Configuration",
+                  impact="Weak TLS (obsolete protocols/ciphers, expired certificates) "
+                         "enables downgrade and man-in-the-middle attacks against "
+                         "credentials and session data in transit.",
+                  recommendation="Disable TLS < 1.2 and weak cipher suites, renew and "
+                         "properly scope certificates, and enable HSTS."),
+        ],
+    },
+{
+        "id": "linux-host",
+        "name": "Linux host attack path (SSH → foothold → root)",
+        "summary": "Audit the SSH surface, test credentials without lockout risk, then "
+                   "escalate on the host: sudo/SUID/cron/kernel misconfigurations to root.",
+        "match": {"any_ports": [22], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "SSH configuration audit", "start", "ssh_audit",
+                  [], ["exposure"],
+                  "ssh-audit reads the key-exchange, ciphers, MACs and auth policy: weak "
+                  "algorithms, password auth enabled, and known CVEs (Terrapin, "
+                  "regreSSHion class).",
+                  severity="Low", cvss="3.7",
+                  finding_title="Weak SSH Configuration",
+                  impact="Weak SSH algorithms or password authentication increase "
+                         "exposure to downgrade/man-in-the-middle attacks and online "
+                         "credential guessing.",
+                  recommendation="Disable weak KEX/ciphers/MACs, prefer key-only auth, "
+                         "restrict users, and keep OpenSSH patched."),
+            _step(2, "Credential testing over SSH", "start", "hydra",
+                  ["userlist"], ["credential"],
+                  "hydra ssh with a SMALL focused list (a handful of common/known "
+                  "passwords, not a full brute force) — online guessing is noisy; check "
+                  "lockout policy first. Intrusive-gated.",
+                  args={"service": "ssh"},
+                  severity="High", cvss="7.5",
+                  finding_title="Weak SSH Credentials",
+                  impact="A guessed or default SSH credential grants remote shell access "
+                         "to the host — the starting point for privilege escalation to root.",
+                  recommendation="Enforce key-only authentication, strong passphrases, "
+                         "fail2ban/rate limiting, and remove default accounts."),
+            _step(3, "On-host enumeration", "have credential",
+                  "linpeas (upload + run via the SSH shell)", ["credential"], [],
+                  "With a shell, run linpeas: SUID/SGID binaries (GTFOBins), sudo -l, "
+                  "cron jobs, writable paths, capabilities, NFS no_root_squash, kernel "
+                  "version vs known exploits (searchsploit)."),
+            _step(4, "Escalate to root", "have credential",
+                  "sudo / SUID / cron / kernel exploit (per linpeas output)",
+                  ["credential"], ["admin", "flag"],
+                  "Abuse the misconfiguration linpeas flagged: sudo rule, SUID binary, "
+                  "writable cron/script, or a local kernel exploit for root.", "final"),
+        ],
+    },
+{
+        "id": "net-services",
+        "name": "Exposed network services (SNMP / NFS / Redis / Docker / Elastic)",
+        "summary": "Test the services that are frequently unauthenticated on internal "
+                   "estates: SNMP communities, NFS exports, Redis, memcached, "
+                   "Elasticsearch and the Docker API — each a direct data or RCE path.",
+        "match": {"any_ports": [161, 111, 2049, 6379, 9200, 11211, 2375], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "SNMP community strings", "start", "onesixtyone",
+                  [], ["exposure"],
+                  "onesixtyone sweeps common community strings; 'public'/'private' "
+                  "answering is the enabling misconfiguration."),
+            _step(2, "SNMP data harvest", "start", "snmp_walk",
+                  [], ["exposure", "credential"],
+                  "snmpwalk with the discovered community reads device config, running "
+                  "processes, users and sometimes credentials in plain text.",
+                  severity="Medium", cvss="5.3",
+                  finding_title="SNMP Readable with a Weak Community String",
+                  impact="SNMP exposes device configuration, process/user lists and "
+                         "occasionally credentials, and with a write community allows "
+                         "device reconfiguration.",
+                  recommendation="Use SNMPv3 (auth+privacy), change default communities, "
+                         "restrict SNMP to monitoring hosts by ACL/firewall."),
+            _step(3, "NFS exports", "start", "nfs_shares",
+                  [], ["shares"],
+                  "showmount -e lists exported filesystems; mountable exports leak "
+                  "files (and with no_root_squash allow writing root-owned binaries).",
+                  severity="Medium", cvss="6.5",
+                  finding_title="NFS Export Accessible",
+                  impact="A world- or network-readable NFS export exposes files "
+                         "(configs, keys, backups); writable exports with no_root_squash "
+                         "allow code execution as root on the server.",
+                  recommendation="Restrict exports to specific hosts, enable root_squash, "
+                         "and require Kerberos/ NFSv4 ACLs."),
+            _step(4, "Redis unauthenticated access", "start", "redis_check",
+                  [], ["exposure", "credential"],
+                  "redis-cli info server answers without a password: the dataset is "
+                  "readable/writable — session data, cached secrets, and RCE via rogue "
+                  "module / SSH key / cron file writes.",
+                  severity="High", cvss="7.5",
+                  finding_title="Redis Exposed Without Authentication",
+                  impact="An unauthenticated Redis instance leaks cached data and can be "
+                         "turned into remote code execution on the host (module load, "
+                         "authorized_keys/cron writes, master-replica abuse).",
+                  recommendation="Require a strong requirepass/ACLs, bind to localhost or "
+                         "protected VLANs, disable CONFIG/MODULE/DEBUG commands, and never "
+                         "expose Redis to untrusted networks."),
+            _step(5, "Elasticsearch unauthenticated access", "start", "elastic_check",
+                  [], ["exposure"],
+                  "curl /_cat/indices?v answers with the full index list without "
+                  "authentication — every index is readable.",
+                  severity="High", cvss="7.5",
+                  finding_title="Elasticsearch Exposed Without Authentication",
+                  impact="An open Elasticsearch cluster exposes all indexed data "
+                         "(logs, user records, documents) and allows data modification "
+                         "or deletion.",
+                  recommendation="Enable X-Pack security (authentication + TLS), bind to "
+                         "internal interfaces, and place behind an authenticated proxy."),
+            _step(6, "Docker API exposed", "start", "docker_api_check",
+                  [], ["exposure", "admin"],
+                  "curl /version answers on 2375: the unauthenticated Docker API is "
+                  "root-equivalent — run a privileged container mounting / to own the host.",
+                  severity="Critical", cvss="9.8",
+                  finding_title="Docker Daemon API Exposed (Unauthenticated)",
+                  impact="Anyone who can reach the Docker API can start a privileged "
+                         "container with the host filesystem mounted — immediate root on "
+                         "the host and every container on it.",
+                  recommendation="Never expose tcp/2375 unauthenticated; require TLS client "
+                         "certificates (2376) or SSH-based access, and firewall the socket."),
+            _step(7, "memcached unauthenticated access", "start", "memcached_check",
+                  [], ["exposure"],
+                  "nc stats answers: cached session/application data is readable; "
+                  "also confirm it is not usable for UDP amplification.",
+                  "final",
+                  severity="Medium", cvss="5.3",
+                  finding_title="memcached Exposed Without Authentication",
+                  impact="Cached data (sessions, tokens, objects) is readable by anyone "
+                         "on the network; exposed UDP memcached is abused for DDoS "
+                         "amplification.",
+                  recommendation="Bind memcached to localhost/internal interfaces, require "
+                         "SASL auth where supported, and disable UDP (-U 0)."),
+        ],
+    },
+{
+        "id": "rdp-attack",
+        "name": "RDP exposure → credential access",
+        "summary": "Confirm RDP and its NLA posture, validate credentials (incl. "
+                   "pass-the-hash), and test for weak credentials — RDP is the most "
+                   "common ransomware entry vector.",
+        "match": {"any_ports": [3389], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "RDP access and NLA check", "start", "netexec_rdp",
+                  [], ["rdp_access", "admin"],
+                  "nxc rdp: confirms the service and NLA requirement; with a credential "
+                  "or NT hash it validates logon and local admin ('Pwn3d!')."),
+            _step(2, "Weak credential test", "start", "hydra",
+                  ["userlist"], ["credential"],
+                  "hydra rdp with a SMALL common-password list — the classic ransomware "
+                  "initial-access path. Intrusive-gated; check lockout policy first.",
+                  args={"service": "rdp"},
+                  severity="High", cvss="7.5",
+                  finding_title="Weak RDP Credentials",
+                  impact="A guessed RDP credential grants interactive remote access — "
+                         "the most common ransomware entry vector; with local admin it "
+                         "is full host compromise.",
+                  recommendation="Disable RDP where unused, restrict to VPN/jump hosts, "
+                         "require NLA + MFA (RD Gateway), enforce lockout, and alert on "
+                         "failed logons."),
+            _step(3, "Confirm admin access", "have credential", "netexec_rdp",
+                  ["credential"], ["admin", "flag"],
+                  "Re-authenticate with the recovered credential and look for 'Pwn3d!' — "
+                  "local admin over RDP. Then pivot: secretsdump / DPAPI loot on the host.",
+                  "final"),
+        ],
+    },
+{
+        "id": "gpo-abuse",
+        "name": "Writable GPO → code execution on applied computers",
+        "summary": "When your account can write a Group Policy Object, add an "
+                   "immediate scheduled task — it runs as SYSTEM on every computer "
+                   "the GPO applies to. The mass-execution path from one ACL.",
+        "match": {"any_ports": [389, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "Collect the attack graph", "have credential", "bloodhound_python",
+                  ["credential"], [],
+                  "BloodHound collection exposes GenericWrite/WriteDACL/WriteOwner edges "
+                  "from your account onto GPOs (and which OUs/computers they apply to)."),
+            _step(2, "List writable objects (find GPOs)", "have credential", "bloodyad",
+                  ["credential"], ["acl_write"],
+                  "bloodyAD get writable — identify GPOs you can modify; set the target "
+                  "GPO's GUID as the gpo_id variable for the next step."),
+            _step(3, "Abuse the GPO (immediate task)", "have credential", "pygpoabuse",
+                  ["credential", "acl_write"], ["admin"],
+                  "pygpoabuse adds an immediate scheduled task to the GPO — it executes "
+                  "as SYSTEM on every computer in scope of the policy. Intrusive: it "
+                  "modifies domain policy (clean up afterwards).",
+                  severity="Critical", cvss="9.0",
+                  finding_title="Writable Group Policy Object (Mass Code Execution Path)",
+                  impact="Write access to a GPO allows pushing commands that run as "
+                         "SYSTEM on every computer the policy applies to — one ACL "
+                         "becomes fleet-wide compromise.",
+                  recommendation="Restrict GPO modification to tier-0 admins, alert on "
+                         "GPO changes (Event 5136/5137), and remove standing write ACEs "
+                         "on GPOs."),
+            _step(4, "Confirm execution", "have credential", "netexec_smb",
+                  ["credential"], ["admin", "flag"],
+                  "Authenticate to a computer the GPO applies to and verify (whoami "
+                  "/groups; the task's output). Remove the injected task when done.",
+                  "final", args={"command": "whoami"}),
+        ],
+    },
+{
+        "id": "exchange-attack",
+        "name": "Exchange / OWA attack path",
+        "summary": "Fingerprint the Exchange surface (OWA/EWS/Autodiscover), check it "
+                   "against the heavily exploited Exchange CVE set, and test the OWA "
+                   "login with recovered users.",
+        "match": {"any_ports": [443], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Fingerprint OWA / EWS / Autodiscover", "start", "http_probe",
+                  [], ["host_info"],
+                  "http_probe the web root, /owa/, /ews/ and /Autodiscover/: Exchange "
+                  "build numbers in headers and redirects pin the exact patch level. "
+                  "(Uses the url variable — usually https://<host>/.)"),
+            _step(2, "Exchange CVE sweep", "start", "nuclei_cve",
+                  [], ["cve_hit"],
+                  "nuclei_cve matches ProxyLogon / ProxyShell / ProxyNotShell / OWASSRF "
+                  "and other Exchange templates against the URL.",
+                  severity="Critical", cvss="9.8",
+                  finding_title="Exchange Server Vulnerable to a Known Exploit",
+                  impact="An unpatched Exchange surface (ProxyLogon/ProxyShell class) "
+                         "gives unauthenticated RCE as SYSTEM plus full mailbox access — "
+                         "historically one of the most exploited enterprise flaws.",
+                  recommendation="Apply the current Exchange CU/SU, enable AMSI, restrict "
+                         "OWA/EWS to trusted networks or VPN, and hunt for webshells."),
+            _step(3, "Version → exploit lookup", "start",
+                  "searchsploit (query = the Exchange build from step 1)",
+                  ["host_info"], ["cve_hit"],
+                  "searchsploit the exact Exchange/CU build for exploits that have no "
+                  "nuclei template."),
+            _step(4, "OWA credential testing", "have userlist",
+                  "hydra https-post-form against /owa/auth.owa (form string "
+                  "'username=^USER^&password=^PASS^')",
+                  ["userlist"], ["credential"],
+                  "With the domain user list, test a SMALL set of common passwords on "
+                  "the OWA form — a mailbox gives internal email access and frequently "
+                  "VPN password reuse. Careful with lockout.", "final"),
+        ],
+    },
+{
+        "id": "container-attack",
+        "name": "Exposed Docker API → host root (container escape)",
+        "summary": "An unauthenticated Docker daemon API is root on the host: start a "
+                   "privileged container with the host filesystem mounted, then loot "
+                   "credentials and pivot.",
+        "match": {"any_ports": [2375], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Confirm the exposed Docker API", "start", "docker_api_check",
+                  [], ["exposure"],
+                  "docker_api_check GET /version: a JSON answer = the daemon API is "
+                  "unauthenticated.",
+                  severity="Critical", cvss="9.8",
+                  finding_title="Docker Daemon API Exposed (Unauthenticated)",
+                  impact="The Docker API without TLS/auth is root-equivalent: run a "
+                         "privileged container mounting / to read and write the host "
+                         "and control every container on it.",
+                  recommendation="Disable tcp/2375 or require TLS client certificates "
+                         "(2376); bind the daemon to the unix socket; firewall "
+                         "management interfaces."),
+            _step(2, "Privileged container → host filesystem", "start",
+                  "docker -H tcp://<target> run -v /:/host --privileged -it alpine chroot /host",
+                  ["exposure"], ["admin"],
+                  "From your machine with a docker client: mount / into a privileged "
+                  "container and chroot — you are root on the host. Read /etc/shadow, "
+                  "SSH keys, and cloud instance credentials."),
+            _step(3, "Crack and pivot", "have hashes", "crack_hashes",
+                  ["hash"], ["credential", "flag"],
+                  "Crack /etc/shadow with john and pivot recovered credentials to SSH "
+                  "and the domain (netexec_spray).", "final"),
+        ],
+    },
+{
+        "id": "vpn-gateway",
+        "name": "IPsec VPN gateway (IKE aggressive-mode PSK)",
+        "summary": "Enumerate the IKE gateway; if it answers aggressive mode, capture "
+                   "the group PSK hash and crack it offline — the PSK plus a username "
+                   "is VPN access.",
+        "match": {"any_ports": [500], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Enumerate the IKE gateway", "start", "ike_scan",
+                  [], ["host_info"],
+                  "ike-scan -M: supported transforms, vendor ID, and whether "
+                  "aggressive mode is offered."),
+            _step(2, "Capture the aggressive-mode PSK hash", "start", "ike_scan",
+                  [], ["hash"],
+                  "ike_scan with mode=aggressive (set group=<vpn-group-id> when the "
+                  "gateway expects one — often 'vpn' or the FQDN): the gateway answers "
+                  "with the crackable PSK hash.",
+                  args={"mode": "aggressive"},
+                  severity="Medium", cvss="5.9",
+                  finding_title="IPsec IKE Aggressive Mode with Pre-Shared Key",
+                  impact="Aggressive mode exposes a crackable PSK hash; the cracked "
+                         "group PSK plus any username grants VPN access, and group PSKs "
+                         "are frequently weak and reused across sites.",
+                  recommendation="Disable aggressive mode (main mode only), prefer "
+                         "certificate authentication, and enforce strong unique PSKs."),
+            _step(3, "Crack the PSK offline", "start",
+                  "psk_crack (save the hash from step 2 to a file; hashcat -m 5300/5400 works too)",
+                  ["hash"], ["credential"],
+                  "Crack the captured PSK hash offline with psk-crack + rockyou — "
+                  "success yields the group pre-shared key.", "final"),
+        ],
+    },
+{
+        "id": "wsus-attack",
+        "name": "WSUS over HTTP → update spoofing",
+        "summary": "Confirm a WSUS server distributing updates over cleartext HTTP, "
+                   "then — from an on-path position, or with admin on the WSUS host — "
+                   "inject a signed update that runs as SYSTEM on managed clients.",
+        "match": {"any_ports": [8530], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Confirm WSUS over HTTP", "start", "wsus_check",
+                  [], ["exposure"],
+                  "wsus_check: the ClientWebService answering on :8530 confirms "
+                  "cleartext update distribution.",
+                  severity="High", cvss="8.1",
+                  finding_title="WSUS Served Over HTTP",
+                  impact="If clients are not forced to use SSL, an on-path attacker can "
+                         "serve a malicious signed update that executes as SYSTEM on "
+                         "every managed endpoint.",
+                  recommendation="Require WSUS over HTTPS (8531) and enforce client-side "
+                         "SSL via GPO; restrict the WSUS host to management networks."),
+            _step(2, "On-path update injection", "start",
+                  "PyWSUS / WSUSpendu from a MITM position (or SharpWSUS with admin on the WSUS host)",
+                  ["exposure"], ["admin"],
+                  "With network position (or WSUS admin), push an update wrapping a "
+                  "Microsoft-signed binary (e.g. PsExec) with attacker arguments — it "
+                  "runs as SYSTEM on the targeted clients.", "final"),
+        ],
+    },
+{
+        "id": "api-security",
+        "name": "API attack surface: discovery → parameters → JWT → API CVEs",
+        "summary": "Map the API surface (endpoints, hidden parameters, tokens), then "
+                   "test for broken authorisation, JWT weaknesses and known API "
+                   "exploits — modern apps expose more via API than via UI.",
+        "match": {"any_ports": [80, 443, 3000, 5000, 8000, 8080, 8443, 8888],
+                  "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Crawl for API endpoints", "start", "katana",
+                  [], ["host_info"],
+                  "katana (uses the url variable) crawls the app and its JavaScript "
+                  "for /api, /v1..vN, /graphql, /swagger and /openapi.json routes — "
+                  "the endpoint map every later step works from.",
+                  severity="Medium", cvss="5.3",
+                  finding_title="Unauthenticated API Endpoints Discovered",
+                  impact="Reachable API routes — especially undocumented ones found in "
+                         "JavaScript — frequently miss the authorisation checks applied "
+                         "to the documented UI (BOLA/IDOR class).",
+                  recommendation="Require authentication on every API route, publish a "
+                         "complete OpenAPI spec so nothing stays undocumented, and "
+                         "restrict /swagger and GraphQL introspection to developers."),
+            _step(2, "Hidden parameter mining", "start", "arjun",
+                  ["host_info"], ["host_info"],
+                  "arjun (uses the url variable) brute-forces hidden query/body "
+                  "parameters on the discovered routes — debug, admin, id and "
+                  "internal parameters open IDOR and injection testing."),
+            _step(3, "JWT analysis & attack", "start",
+                  "jwt_tool <captured-jwt> (alg confusion, none alg, weak HMAC secret, kid injection)",
+                  ["host_info"], ["credential"],
+                  "Capture a JWT from login traffic, then offline: jwt_tool -T tampers "
+                  "claims, -X a tries alg:none, -C -d rockyou.txt brute-forces weak "
+                  "HMAC secrets — a forged token is usually an admin session. Check "
+                  "kid/jku header injection too."),
+            _step(4, "Known-exploit sweep", "start", "nuclei_cve",
+                  [], ["cve_hit"],
+                  "nuclei_cve with tags cve,kev,api matches known API-framework and "
+                  "gateway exploits against the URL.",
+                  args={"tags": "cve,kev,api"},
+                  severity="Critical", cvss="9.8",
+                  finding_title="API Vulnerable to a Known Exploit",
+                  impact="A known, often KEV-listed, exploit against the API stack "
+                         "gives unauthenticated code execution or full data access "
+                         "with a public proof of concept.",
+                  recommendation="Patch the affected component, put the API behind a "
+                         "positive-schema gateway/WAF, and alert on exploitation "
+                         "patterns."),
+        ],
+    },
+{
+        "id": "hash-cracking",
+        "name": "Captured hashes → identify → offline crack → reuse",
+        "summary": "Any captured hash (NTLM, Kerberoast, AS-REP, VPN PSK, shadow) is "
+                   "identified, cracked offline, and the recovered password sprayed "
+                   "back at every reachable service.",
+        "match": {"any_ports": [], "signals": ["nthash"]},
+        "run": {},
+        "steps": [
+            _step(1, "Identify the hash type", "have hashes", "hashid",
+                  ["hash"], ["host_info"],
+                  "hashid on the captured hash file pins the algorithm (NTLM 1000, "
+                  "AS-REP 18200, Kerberoast 13100, bcrypt, sha512crypt…) so the right "
+                  "cracking mode is used."),
+            _step(2, "Offline cracking", "have hashes", "crack_hashes",
+                  ["hash"], ["credential"],
+                  "crack_hashes runs john/hashcat with wordlist + rules against the "
+                  "hash file — fully offline, zero lockout risk.",
+                  severity="Medium", cvss="5.9",
+                  finding_title="Passwords Recovered by Offline Hash Cracking",
+                  impact="Captured hashes crack offline at the attacker's leisure; "
+                         "recovered passwords are routinely reused across accounts, "
+                         "VPN and SaaS — one weak password becomes lateral movement.",
+                  recommendation="Enforce 14+ character passphrases, block "
+                         "breached-password lists (Entra password protection / "
+                         "haveibeenpwned), and use AES-only Kerberos encryption."),
+            _step(3, "Targeted hashcat modes", "have hashes",
+                  "hashcat -m 1000 (NTLM) / -m 18200 (AS-REP) / -m 13100 (Kerberoast) / -m 22000 (WPA) + rules",
+                  ["hash"], ["credential"],
+                  "For anything crack_hashes misses: pick the -m mode from step 1, "
+                  "add OneRuleToRuleThemAll, then a mask attack for policy-shaped "
+                  "passwords (SeasonYear! — e.g. Winter2026!)."),
+            _step(4, "Spray recovered credentials", "have credential", "spray_cracked",
+                  ["credential"], ["admin", "flag"],
+                  "spray_cracked tests every recovered credential against SMB/WinRM "
+                  "across the scope — password reuse turns one cracked hash into "
+                  "lateral movement.", "final"),
+        ],
+    },
+{
+        "id": "virtualization-attack",
+        "name": "vCenter / ESXi → hypervisor compromise → every guest VM",
+        "summary": "Fingerprint the virtualization layer, hit vCenter/ESXi with their "
+                   "known RCEs, then use hypervisor access to loot every guest — "
+                   "including virtualised domain controllers.",
+        "match": {"any_ports": [443, 902, 9443], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Fingerprint vCenter / ESXi", "start", "http_probe",
+                  [], ["host_info"],
+                  "http_probe the web root (uses the url variable): a vSphere "
+                  "Client / IDENTITY_SERVICES redirect pins vCenter; ESXi answers on "
+                  "443/902 with its own banner. Build numbers map to patch level."),
+            _step(2, "Known-exploit sweep", "start", "nuclei_cve",
+                  [], ["cve_hit"],
+                  "nuclei_cve with tags cve,kev,vmware matches the vCenter/ESXi "
+                  "heavy hitters: CVE-2021-21972 (unauth RCE), CVE-2024-37085 (ESXi "
+                  "AD-join auth bypass), CVE-2023-34048 and successors.",
+                  args={"tags": "cve,kev,vmware"},
+                  severity="Critical", cvss="9.8",
+                  finding_title="Virtualization Layer Vulnerable to a Known Exploit",
+                  impact="vCenter RCE is SYSTEM on the management plane; ESXi "
+                         "exploitation is control of every guest VM — including "
+                         "domain controllers virtualised on the host. Full domain "
+                         "compromise from one server.",
+                  recommendation="Patch vCenter/ESXi to current, isolate management "
+                         "interfaces to a jump-host VLAN, and audit the 'ESX Admins' "
+                         "AD group (CVE-2024-37085 abuse)."),
+            _step(3, "vCenter → domain dominance", "have credential",
+                  "vpxd/SSO loot → datacenter enumeration → snapshot or console the DC VMs",
+                  ["credential"], ["admin"],
+                  "With any vCenter credential: enumerate datacenters, then snapshot "
+                  "or open a remote console on the domain-controller VMs — offline "
+                  "NTDS extraction from a snapshot never touches the live DC. Check "
+                  "whether the AD group 'ESX Admins' exists: membership is ESXi root "
+                  "on AD-joined hosts (CVE-2024-37085).", "final"),
+        ],
+    },
+{
+        "id": "backup-attack",
+        "name": "Veeam backup server → stored credentials → domain",
+        "summary": "Backup infrastructure stores credentials for everything it "
+                   "protects. Identify Veeam, exploit its known RCEs, and recover the "
+                   "stored job credentials — routinely vCenter and domain admin.",
+        "match": {"any_ports": [443, 445, 1433, 9401, 9443], "signals": []},
+        "run": {},
+        "steps": [
+            _step(1, "Identify the backup server", "start", "http_probe",
+                  [], ["host_info"],
+                  "http_probe (uses the url variable): Veeam Backup Enterprise "
+                  "Manager answers on 9443, the backup service on 9401; hostnames "
+                  "and SMB shares usually give it away too."),
+            _step(2, "Known-exploit sweep", "start", "nuclei_cve",
+                  [], ["cve_hit"],
+                  "nuclei_cve with tags cve,kev,veeam matches the Veeam CVE set: "
+                  "CVE-2023-27532 (unauth credential disclosure), CVE-2024-40711 and "
+                  "successors (RCE as SYSTEM via the backup service).",
+                  args={"tags": "cve,kev,veeam"},
+                  severity="Critical", cvss="9.8",
+                  finding_title="Backup Server Vulnerable to a Known Exploit",
+                  impact="Exploiting the backup server yields every credential stored "
+                         "for backup jobs — typically vCenter, SQL and domain "
+                         "administrator — plus access to all backup data (ransomware "
+                         "crews target it first for exactly this reason).",
+                  recommendation="Patch Veeam to the current build, isolate backup "
+                         "management ports on a dedicated VLAN, and use "
+                         "least-privilege gMSA accounts for backup jobs."),
+            _step(3, "Recover stored job credentials", "have credential", "netexec_module",
+                  ["credential"], ["credential"],
+                  "netexec mssql -M veeam (protocol=mssql, module=veeam): Veeam keeps "
+                  "its credential store in a local MSSQL instance — the module "
+                  "extracts and decrypts every stored job credential.",
+                  args={"protocol": "mssql", "module": "veeam"},
+                  severity="High", cvss="8.1",
+                  finding_title="Backup Credential Store Exposed",
+                  impact="Credentials recovered from the backup database are commonly "
+                         "domain administrator or vCenter root — one MSSQL query "
+                         "becomes full domain compromise.",
+                  recommendation="Rotate every credential stored in the backup server, "
+                         "restrict the Veeam MSSQL instance to localhost, and audit "
+                         "logons to the backup database."),
+            _step(4, "Decrypt offline", "start",
+                  "veeam-decrypt / Veeam-Get-Creds against an exported configuration database",
+                  ["credential"], ["admin"],
+                  "With a copy of the Veeam configuration database (or a backup of "
+                  "it), decrypt the stored credentials offline with the published "
+                  "DPAPI-based tooling.", "final"),
+        ],
+    },
+{
+        "id": "ad-persistence",
+        "name": "Post-dominance persistence: golden & silver tickets",
+        "summary": "After domain dominance, forge Kerberos tickets from the krbtgt "
+                   "and service hashes — access that survives user password resets "
+                   "until krbtgt is rotated twice.",
+        "match": {"any_ports": [88, 445], "signals": ["username"]},
+        "run": {},
+        "steps": [
+            _step(1, "DCSync for the krbtgt hash", "have credential", "secretsdump",
+                  ["credential"], ["hash", "flag"],
+                  "secretsdump -just-dc against the DC with a DA-equivalent account "
+                  "replicates every domain hash — the krbtgt hash is the golden-"
+                  "ticket key.",
+                  severity="Critical", cvss="9.8",
+                  finding_title="Domain Credential Replication (DCSync / NTDS Dump)",
+                  impact="Replication rights expose every domain credential "
+                         "including krbtgt — the material for golden tickets that "
+                         "persist after individual password resets.",
+                  recommendation="Restrict DS-Replication-Get-Changes to DC computer "
+                         "accounts, alert on replication from non-DCs (event 4662), "
+                         "and rotate krbtgt twice after any suspected compromise."),
+            _step(2, "Harvest the domain SID", "have credential", "lookupsid",
+                  ["credential"], ["userlist", "domain"],
+                  "lookupsid resolves the domain SID (and the full RID/user list) — "
+                  "the SID is a required ingredient for forged tickets."),
+            _step(3, "Forge a golden ticket", "have hashes",
+                  "ticketer -nthash <krbtgt> -domain-sid <sid> -domain <fqdn> Administrator",
+                  ["hash", "domain"], ["ticket", "admin"],
+                  "ticketer (impacket) forges a TGT for any user from the krbtgt "
+                  "hash + domain SID — valid for years and invisible to user "
+                  "password resets. Export as KRB5CCNAME and use any impacket -k "
+                  "tool. Consider a diamond ticket (genuine TGT re-encrypted) where "
+                  "defenders watch for forged-TGT anomalies."),
+            _step(4, "Silver tickets for services", "have hashes",
+                  "ticketer -nthash <service-account-hash> -spn cifs/<host.fqdn> <user> (no DC contact)",
+                  ["hash"], ["ticket"],
+                  "A service/machine account hash forges a silver ticket for that "
+                  "service with NO domain-controller traffic — near-invisible. "
+                  "Detection: monitor for service tickets with abnormal lifetimes "
+                  "and PAC anomalies; rotate service accounts and reset krbtgt "
+                  "twice to evict forgers.", "final"),
+        ],
+    },
+_finding("redis-exposed", "Redis Exposed Without Authentication", "High", "7.5",
+             "A Redis instance is reachable on the network (6379) and answers "
+             "without authentication.",
+             "The dataset (cached secrets, sessions) is readable and writable; "
+             "unauthenticated Redis is a known RCE path (module load, SSH key / "
+             "cron writes, master-replica abuse).",
+             "Require authentication (requirepass / ACLs), bind to protected "
+             "interfaces, disable CONFIG/MODULE/DEBUG commands.",
+             any_ports=[6379], evidence_tools=["redis_check"]),
+_finding("docker-api-exposed", "Docker Daemon API Exposed (Unauthenticated)",
+             "Critical", "9.8",
+             "The Docker daemon API is reachable over plain HTTP (2375) and "
+             "answers /version without authentication.",
+             "The unauthenticated Docker API is root-equivalent: an attacker can "
+             "start a privileged container mounting the host filesystem — full "
+             "compromise of the host and all its containers.",
+             "Never expose tcp/2375; require TLS client-certificate auth (2376) or "
+             "SSH access, and firewall the management socket.",
+             any_ports=[2375], evidence_tools=["docker_api_check"]),
+_finding("elasticsearch-exposed", "Elasticsearch Exposed Without Authentication",
+             "High", "7.5",
+             "An Elasticsearch cluster is reachable (9200) and lists its indices "
+             "without authentication.",
+             "All indexed data (logs, user records, documents) is exposed, and "
+             "indices can be modified or deleted.",
+             "Enable X-Pack security (authentication + TLS), bind to internal "
+             "interfaces, and place behind an authenticated proxy.",
+             any_ports=[9200], evidence_tools=["elastic_check"]),
+_finding("mongodb-exposed", "MongoDB Exposed Without Authentication",
+             "High", "7.5",
+             "A MongoDB instance is reachable (27017); if authentication is "
+             "disabled, databases are listable and readable by anyone.",
+             "Unauthenticated MongoDB instances are routinely found by mass "
+             "scanners and held to ransom; full data exposure and deletion risk.",
+             "Enable access control (security.authorization), bind to localhost/"
+             "protected VLANs, and rotate any exposed data credentials.",
+             any_ports=[27017], evidence_tools=["mongodb_check"]),
+_finding("memcached-exposed", "memcached Exposed Without Authentication",
+             "Medium", "5.3",
+             "A memcached service is reachable (11211) and answers 'stats' "
+             "without authentication.",
+             "Cached application data (sessions, tokens, objects) is readable; "
+             "UDP-exposed memcached is abused for DDoS amplification.",
+             "Bind to localhost/internal interfaces, require SASL auth where "
+             "supported, and disable UDP (-U 0).",
+             any_ports=[11211], evidence_tools=["memcached_check"]),
+_finding("nfs-exports", "NFS Export Accessible", "Medium", "6.5",
+             "The host exports NFS filesystems (2049) that are listable from the "
+             "network (showmount).",
+             "Readable exports leak configuration, keys and backups; writable "
+             "exports with no_root_squash allow code execution as root.",
+             "Restrict exports to specific hosts, enable root_squash, and require "
+             "NFSv4/Kerberos authentication.",
+             any_ports=[2049], evidence_tools=["nfs_shares", "rpcinfo"]),
+_finding("snmp-public", "SNMP Readable with a Weak Community String",
+             "Medium", "5.3",
+             "SNMP (161/udp) answers a default/weak community string such as "
+             "'public'.",
+             "Device configuration, processes, users and sometimes credentials are "
+             "readable; a write community allows device reconfiguration.",
+             "Use SNMPv3 with auth+privacy, change default communities, and "
+             "ACL-restrict SNMP to monitoring hosts.",
+             any_ports=[161], evidence_tools=["snmp_walk", "onesixtyone"]),
+_finding("telnet-cleartext", "Telnet Service Exposed (Cleartext)", "Medium", "6.5",
+             "A Telnet service is reachable (23). Telnet transmits credentials and "
+             "session data in cleartext.",
+             "On-path attackers can sniff credentials and hijack sessions; Telnet "
+             "services are also frequently protected only by weak/default logins.",
+             "Replace Telnet with SSH; if Telnet is unavoidable, restrict it to a "
+             "dedicated management network.",
+             any_ports=[23]),
+_finding("vnc-exposed", "VNC Remote Desktop Exposed", "Medium", "6.5",
+             "A VNC server is reachable (5900+). VNC is often protected by a short "
+             "password only, and some builds offer no authentication at all.",
+             "VNC gives interactive GUI access to the host; weak or absent VNC "
+             "passwords are a common intrusion path.",
+             "Restrict VNC to SSH-tunnelled/localhost access, require strong "
+             "passwords + encryption, and prefer managed remote-access solutions.",
+             any_ports=[5900, 5901]),
+_finding("ike-aggressive-psk", "IPsec IKE Aggressive Mode (Crackable PSK)",
+             "Medium", "5.9",
+             "The VPN gateway (500/udp) answers IKE aggressive mode, exposing a "
+             "crackable group pre-shared-key hash to anyone who asks.",
+             "A cracked group PSK plus any valid username grants VPN access; group "
+             "PSKs are often weak and reused across sites.",
+             "Disable aggressive mode (main mode only), prefer certificate "
+             "authentication, and enforce strong unique PSKs.",
+             any_ports=[500], evidence_tools=["ike_scan", "psk_crack"]),
+_finding("smtp-open-relay", "SMTP Open Relay", "Medium", "5.3",
+             "The mail server (25/587) relays mail for arbitrary senders and "
+             "domains.",
+             "An open relay enables spoofed internal email (phishing that appears "
+             "to come from a trusted domain) and abuse of the server for outbound "
+             "spam.",
+             "Disable open relaying, require authentication for submission, and "
+             "restrict relaying to known hosts/networks.",
+             any_ports=[25, 587], evidence_tools=["smtp_openrelay"]),
+_finding("ldap-anon-bind", "LDAP Anonymous Bind Enabled", "Medium", "5.3",
+             "The directory (389/636/3268) answers anonymous LDAP binds, exposing "
+             "the directory tree without credentials.",
+             "An anonymous bind lets an unauthenticated attacker enumerate users, "
+             "groups, computers and often descriptions containing passwords — the "
+             "reconnaissance foundation for spraying and Kerberoasting.",
+             "Disable anonymous binds (dsHeuristics on AD, disallow bind_anon on "
+             "OpenLDAP) and monitor for unauthenticated LDAP queries.",
+             any_ports=[389, 636, 3268], evidence_tools=["ldapsearch_anon"]),
+_finding("dns-zone-transfer", "DNS Zone Transfer (AXFR) Allowed", "Medium", "5.3",
+             "The DNS server (53) answers zone-transfer requests from arbitrary "
+             "clients.",
+             "AXFR hands an attacker the complete zone: every hostname, IP and "
+             "service record — a full network map for targeting, including internal "
+             "hosts never meant to be public.",
+             "Restrict zone transfers to authorised secondary servers "
+             "(allow-transfer / TSIG) and log AXFR attempts.",
+             any_ports=[53], evidence_tools=["dns_recon"]),
 ]
 
 
