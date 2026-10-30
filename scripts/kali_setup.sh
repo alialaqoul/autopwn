@@ -23,9 +23,22 @@ echo "[*] virtualenv     : $VENV_DIR"
 echo "[*] console URL    : $URL"
 
 # --- 1. system deps -----------------------------------------------------------
-echo "[*] Installing python venv support..."
-sudo apt-get update -y
-sudo apt-get install -y python3-venv python3-pip
+# Fully non-interactive: needrestart/debconf must never open a prompt, or an
+# unattended apt run hangs forever.
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+APT='sudo -E apt-get -y -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef'
+
+if dpkg -s python3-venv python3-pip >/dev/null 2>&1; then
+  echo "[*] python3-venv/pip already present — skipping apt."
+else
+  echo "[*] Recovering any interrupted dpkg state..."
+  sudo dpkg --configure -a || true
+  $APT -f install || true
+  echo "[*] Installing python venv support..."
+  $APT update || true          # don't abort if a mirror is unreachable
+  $APT install python3-venv python3-pip
+fi
 
 # --- 2. venv + package --------------------------------------------------------
 echo "[*] Creating virtualenv and installing autopwn[web]..."
